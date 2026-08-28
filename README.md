@@ -87,6 +87,10 @@ python main.py daemon --strategy momentum --pool 个股动量
 
 # 查看持仓与订单
 python main.py status
+
+# Web Dashboard（交互式回测 + 持仓查看）
+python server.py
+# 打开 http://127.0.0.1:8000/
 ```
 
 ## 四、推荐标的池（`config.py`）

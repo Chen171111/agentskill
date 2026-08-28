@@ -1,3 +1,5 @@
 akshare>=1.14.0
 pandas>=1.5.0
 numpy>=1.23.0
+fastapi>=0.100.0
+uvicorn>=0.23.0

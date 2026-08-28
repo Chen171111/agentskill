@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agentskill 自动化量化交易</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+:root{--primary:#2b3a67;--red:#d1381f;--green:#1ea672;--bg:#f5f7fb;}
+*{box-sizing:border-box}
+body{font-family:Segoe UI,PingFang SC,Microsoft YaHei,sans-serif;margin:0;background:var(--bg);color:#333}
+header{background:linear-gradient(135deg,#2b3a67,#3b4f8f);color:#fff;padding:18px 28px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
+header h1{margin:0;font-size:20px} header .sub{font-size:12px;opacity:.85;margin-top:2px}
+header .ver{font-size:12px;background:rgba(255,255,255,.15);padding:4px 10px;border-radius:20px}
+.wrap{max-width:1280px;margin:0 auto;padding:18px}
+.panel{background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.controls{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:12px;color:#666}
+.field input,.field select{height:34px;padding:0 10px;border:1px solid #d4d8e0;border-radius:8px;width:180px;font-size:13px}
+.field.wide input{width:280px}
+.btn{height:34px;padding:0 18px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;font-size:14px}
+.btn[disabled]{opacity:.6;cursor:not-allowed}
+.msg{font-size:12px;color:var(--red);margin-top:8px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:14px}
+.card{background:#fff;border-radius:10px;padding:12px 14px;box-shadow:0 1px 4px rgba(0,0,0,.06);border-left:3px solid var(--primary)}
+.card .k{font-size:11px;color:#888}.card .v{font-size:20px;font-weight:600}
+.v.up{color:var(--green)}.v.dn{color:var(--red)}
+.cgrid{display:grid;grid-template-columns:1.6fr 1fr;gap:14px;margin-top:14px}
+.chart{background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.chart h3{margin:4px 8px;font-size:14px;color:#444}.chart .box{height:320px}
+@media(max-width:900px){.cgrid{grid-template-columns:1fr}}
+.loading{opacity:.5;pointer-events:none}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:14px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #eef0f4}
+th{color:#888;font-weight:500}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>agentskill 自动化量化交易</h1><div class="sub">数据 / 因子 / 多策略 / 风控 / 回测 / 绩效 Dashboard</div></div>
+  <div class="ver">v0.1</div>
+</header>
+<div class="wrap">
+  <div class="panel">
+    <div class="controls">
+      <div class="field"><label>推荐池(选择后自动填充)</label><select id="pool"><option value="">自定义代码</option></select></div>
+      <div class="field wide"><label>标的代码（逗号分隔）</label><input id="codes" value="000300.SH,000905.SH,399006.SZ,000688.SH"></div>
+      <div class="field"><label>策略</label><select id="strategy"></select></div>
+      <div class="field"><label>大盘择时</label>
+        <select id="timing"><option value="">无</option><option value="ma20">MA20</option>
+        <option value="abs_mom">绝对动量</option><option value="rsrs">RSRS</option></select></div>
+      <div class="field"><label>起始</label><input id="start" value="20190101"></div>
+      <div class="field"><label>结束</label><input id="end" value="20251231"></div>
+      <div class="field"><label>TopK</label><input id="topk" type="number" value="5" style="width:80px"></div>
+      <div class="field"><label>调仓周期</label><input id="rebalance" type="number" value="5" style="width:80px"></div>
+      <button class="btn" id="run">运行回测</button>
+    </div>
+    <div class="msg" id="msg"></div>
+    <div class="cards" id="cards"></div>
+  </div>
+
+  <div class="cgrid">
+    <div class="chart"><h3>净值曲线（策略 vs 基准）</h3><div class="box" id="navChart"></div></div>
+    <div class="chart"><h3>回撤曲线</h3><div class="box" id="ddChart"></div></div>
+  </div>
+
+  <div class="panel" style="margin-top:14px">
+    <h3 style="margin:4px 8px">当前持仓 / 最近订单</h3>
+    <div id="statusBox"><span style="color:#999">点击下方按钮加载</span></div>
+    <button class="btn" id="loadStatus" style="margin-top:8px">加载持仓状态</button>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let navChart=echarts.init($('navChart'));
+let ddChart=echarts.init($('ddChart'));
+
+async function loadStrategies(){
+  const r=await fetch('/api/strategies').then(x=>x.json());
+  const sel=$('strategy');sel.innerHTML='';
+  (r.strategies||[]).forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;sel.appendChild(o);});
+  sel.value='momentum';
+}
+async function loadPools(){
+  const r=await fetch('/api/pools').then(x=>x.json());
+  const sel=$('pool');sel.innerHTML='<option value="">自定义代码</option>';
+  (r.pools||[]).forEach(p=>{const o=document.createElement('option');o.value=p.name;o.textContent=p.name;sel.appendChild(o);});
+}
+$('pool').onchange=function(){
+  if(this.value==='个股动量'){loadPools().then(()=>{}); return;} // 动态池无需填充 codes
+  fetch('/api/pools').then(x=>x.json()).then(r=>{
+    const p=(r.pools||[]).find(x=>x.name===this.value);
+    if(p) $('codes').value=(p.codes||[]).join(',');
+  });
+};
+
+function renderCards(m){
+  const items=[
+    ['累计收益',m['累计收益'],m['累计收益']>=0],
+    ['年化收益',m['年化收益'],m['年化收益']>=0],
+    ['最大回撤',m['最大回撤'],false],
+    ['夏普比率',m['夏普比率'],m['夏普比率']>=0],
+    ['年化波动',m['年化波动'],false],
+    ['胜率',m['胜率'],true],
+  ];
+  if('基准年化收益' in m){items.push(['基准年化',m['基准年化收益'],m['基准年化收益']>=0]);}
+  if('超额收益' in m){items.push(['超额收益',m['超额收益'],m['超额收益']>=0]);}
+  $('cards').innerHTML=items.map(([k,v,up])=>{
+    const cls=(k==='最大回撤'||k==='年化波动')?'dn':(up?'up':'dn');
+    return `<div class="card"><div class="k">${k}</div><div class="v ${cls}">${v.toFixed(2)}${k==='胜率'?'%':''}</div></div>`;
+  }).join('');
+}
+
+function renderNav(dates,equity,benchmark){
+  navChart.setOption({
+    tooltip:{trigger:'axis'},
+    legend:{data:['策略','基准']},
+    grid:{left:50,right:20,top:30,bottom:40},
+    xAxis:{type:'category',data:dates},
+    yAxis:{type:'value',name:'净值'},
+    series:[
+      {name:'策略',type:'line',data:equity,showSymbol:false,lineStyle:{width:1.5}},
+      ...(benchmark?[{name:'基准',type:'line',data:benchmark,showSymbol:false,lineStyle:{width:1.2,type:'dashed'}}]:[]),
+    ]
+  },true);
+}
+function renderDD(dates,equity){
+  const dd=equity.map((v,i)=>Math.min(0,(v/Math.max(...equity.slice(0,i+1))-1)*100));
+  ddChart.setOption({
+    tooltip:{trigger:'axis'},
+    grid:{left:50,right:20,top:30,bottom:40},
+    xAxis:{type:'category',data:dates},
+    yAxis:{type:'value',name:'回撤%'},
+    series:[{name:'回撤',type:'line',data:dd,showSymbol:false,
+      areaStyle:{color:'rgba(209,56,31,.15)'},lineStyle:{color:'#d1381f',width:1.2}}]
+  },true);
+}
+
+async function runBacktest(){
+  $('msg').textContent='回测中...';
+  $('run').disabled=true;
+  try{
+    const q=new URLSearchParams({
+      codes:$('codes').value,pool:$('pool').value,strategy:$('strategy').value,
+      start:$('start').value,end:$('end').value,topk:$('topk').value,
+      rebalance:$('rebalance').value,timing:$('timing').value,
+    });
+    const r=await fetch('/api/backtest?'+q.toString()).then(x=>x.json());
+    if(r.error){$('msg').textContent=r.error;return;}
+    $('msg').textContent='';
+    renderCards(r.metrics);
+    renderNav(r.dates,r.equity,r.benchmark);
+    renderDD(r.dates,r.equity);
+  }catch(e){$('msg').textContent='请求失败: '+e;}
+  finally{$('run').disabled=false;}
+}
+
+async function loadStatus(){
+  const r=await fetch('/api/status').then(x=>x.json());
+  const pos=r.positions||[], orders=r.orders||[];
+  let html='<table><tr><th>代码</th><th>数量</th><th>成本</th><th>峰值</th></tr>';
+  if(!pos.length) html+='<tr><td colspan="4" style="color:#999">空仓</td></tr>';
+  html+=pos.map(p=>`<tr><td>${p.code}</td><td>${p.qty}</td><td>${p.cost.toFixed(4)}</td><td>${p.peak.toFixed(4)}</td></tr>`).join('');
+  $('statusBox').innerHTML=html+'</table>';
+
+  let oh='<table><tr><th>时间</th><th>方向</th><th>代码</th><th>价格</th><th>数量</th><th>状态</th></tr>';
+  if(!orders.length) oh+='<tr><td colspan="6" style="color:#999">无订单</td></tr>';
+  oh+=orders.map(o=>`<tr><td>${o.ts}</td><td>${o.side}</td><td>${o.code}</td><td>${(o.filled_price||o.price).toFixed(2)}</td><td>${o.filled_qty||o.qty}</td><td>${o.status}</td></tr>`).join('');
+  $('statusBox').innerHTML+=oh+'</table>';
+}
+
+$('run').onclick=runBacktest;
+$('loadStatus').onclick=loadStatus;
+loadStrategies();
+loadPools();
+setTimeout(runBacktest,800);
+</script>
+</body>
+</html>
