@@ -44,6 +44,10 @@ class Order:
 class Broker(abc.ABC):
     """券商抽象基类。"""
 
+    def update_quotes(self, prices: dict):
+        """更新报价（供撮合类券商使用）。默认无操作，实盘/真实券商无需实现。"""
+        pass
+
     @abc.abstractmethod
     def submit(self, order: Order) -> Order:
         """提交订单并返回成交后的订单。"""
