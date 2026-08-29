@@ -39,7 +39,7 @@ RISK = {
 }
 
 SCHEDULE = {
-    "run_time": "15:05",
+    "run_time": "14:50",   # 尾盘下单，当日可成交（A股 15:00 收盘）
     "timezone": "Asia/Shanghai",
 }
 
