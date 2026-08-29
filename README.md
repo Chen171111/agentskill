@@ -79,6 +79,9 @@ python main.py backtest --strategy momentum --codes 000300.SH,000905.SH,399006.S
 # 历史回测（个股动量池 + 大盘择时）
 python main.py backtest --strategy momentum --pool 个股动量 --start 20190101 --end 20251231 --timing ma20
 
+# 历史回测（回撤熔断 + 波动率目标仓位，显著降低回撤）
+python main.py backtest --strategy momentum --codes 000300.SH,000905.SH,399006.SZ --dd-circuit --vol-target 0.15
+
 # 模拟盘单次运行（个股池，真实下单撮合）
 python main.py run --strategy momentum --pool 个股动量 --topk 3 --rebalance 5
 
@@ -93,7 +96,24 @@ python server.py
 # 打开 http://127.0.0.1:8000/
 ```
 
-## 四、推荐标的池（`config.py`）
+## 四、回撤控制（学习自 GitHub 热门项目 / 聚宽 / 幻方量化）
+
+回撤控制是量化交易的"生命线"。参考业界主流做法，agentskill 内置了三层风控：
+
+| 层级 | 机制 | 来源 | 效果 |
+|---|---|---|---|
+| 大盘择时 | MA20 / 绝对动量 / RSRS | 聚宽社区、AQR | 熊市降仓防御 |
+| **回撤熔断** | 组合回撤分档降仓（>5%降75%、>10%降50%、>15%降25%、>20%清仓） | GitHub `vzeman/trading-autoresearch` | 实测最大回撤 -45%→-21% |
+| **波动率目标仓位** | 组合实际波动超目标时等比降仓 | AI-Capital、幻方/九坤风控体系 | 稳定组合波动 |
+
+**核心思想借鉴**：
+- 期货/券商的"海龟法则"现代版：波动率头寸管理（volatility position sizing），波动越大仓位越小。
+- 私募中性策略（幻方/九坤/明汯）回撤<5% 的关键：满仓分散 + 严格止损线 + 风格中性。
+- 聚宽社区经典：沪深300 均线趋势过滤（均线向上满仓、向下半仓）+ "1月/4月不操作"季节效应。
+
+**注意**：回撤熔断/波动率目标用的是**组合净值历史**（`_nav_history`），基于"先验回撤"决定当前仓位，会牺牲部分收益换取更平滑的净值曲线，需根据风险偏好权衡。
+
+## 五、推荐标的池（`config.py`）
 
 | 池名 | 说明 |
 |---|---|
@@ -102,7 +122,7 @@ python server.py
 | default | 温和宽基组合 |
 | 个股动量 | 沪深300 成分股抽样 20 只（动态生成） |
 
-## 五、接入实盘
+## 六、接入实盘
 
 `trader/broker.py` 中 `Broker` 是抽象基类，`PaperBroker` 是模拟实现。接入实盘只需：
 
@@ -126,7 +146,7 @@ class LiveBroker(Broker):
 
 然后在 `DailyRunner` 中将 `ExecutionEngine()` 换成 `ExecutionEngine(LiveBroker())` 即可。
 
-## 六、项目结构
+## 七、项目结构
 
 ```
 agentskill/
@@ -149,7 +169,7 @@ agentskill/
 └── state/               # 交易状态库 trading.db
 ```
 
-## 七、注意事项
+## 八、注意事项
 
 - 回测与模拟盘均计入手续费（万3）、滑点（0.05%）、卖出印花税（0.1%）。
 - 指数不可直接交易，模拟盘请使用 `个股动量` 池或指定个股代码。

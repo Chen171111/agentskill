@@ -1,10 +1,13 @@
-"""回测引擎：逐日推进，调用策略产出目标权重并再平衡（含大盘择时）。"""
+"""回测引擎：逐日推进，调用策略产出目标权重并再平衡（含大盘择时 + 组合层风控）。"""
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 
+import config
 from .account import BacktestAccount
+
+_TRADING_DAYS = getattr(config, "TRADING_DAYS_PER_YEAR", 244)
 
 
 class BacktestResult:
@@ -18,7 +21,8 @@ class BacktestResult:
 class BacktestEngine:
     def __init__(self, panel, factors, strategy, init_cash=None, benchmark=None,
                  timing=None, timing_window=20, timing_scale_off=0.3,
-                 benchmark_high=None, benchmark_low=None):
+                 benchmark_high=None, benchmark_low=None,
+                 dd_circuit=False, vol_target=None):
         self.panel = panel
         self.factors = factors
         self.strategy = strategy
@@ -27,6 +31,10 @@ class BacktestEngine:
         self.timing = timing
         self.timing_window = timing_window
         self.timing_scale_off = timing_scale_off
+        # 组合层风控
+        self.dd_circuit = bool(dd_circuit)          # 回撤熔断开关
+        self.vol_target = float(vol_target) if vol_target else None  # 目标年化波动率
+        self._nav_history = []                      # 组合净值历史（用于组合层风控）
         self._timing_ma = None
         self._timing_mom = None
         self._timing_rsrs = None
@@ -75,6 +83,35 @@ class BacktestEngine:
             return 1.0 if c > 0 else self.timing_scale_off
         return 1.0
 
+    def _portfolio_risk_scale(self) -> float:
+        """组合层风控：回撤熔断 + 波动率目标仓位，返回 0~1 的仓位系数。"""
+        scale = 1.0
+        nav = self._nav_history
+        if len(nav) < 2:
+            return scale
+
+        # 1) 回撤熔断（分档降仓）
+        if self.dd_circuit:
+            peak = max(nav)
+            dd = nav[-1] / peak - 1.0
+            if dd <= -0.20:
+                scale = 0.0
+            elif dd <= -0.15:
+                scale = 0.25
+            elif dd <= -0.10:
+                scale = 0.50
+            elif dd <= -0.05:
+                scale = 0.75
+
+        # 2) 波动率目标仓位（组合实际波动 > 目标 → 等比降仓）
+        if self.vol_target and len(nav) >= 20:
+            rets = pd.Series(nav).pct_change().dropna().tail(20)
+            realized = rets.std() * np.sqrt(_TRADING_DAYS)
+            if realized > 0.001:
+                scale = min(scale, self.vol_target / realized)
+
+        return float(np.clip(scale, 0.0, 1.0))
+
     def run(self) -> BacktestResult:
         dates = self.panel.dates
         close = self.panel.get("close")
@@ -92,10 +129,14 @@ class BacktestEngine:
             else:
                 rates = {}
             self.acc.update(date, rates)
+            self._nav_history.append(self.acc.total())
 
             weights = self.strategy.generate_weights(date, self.factors, self.panel)
             if weights is not None and weights:
+                # 大盘择时
                 scale = self._timing_scale(date)
+                # 组合层风控（回撤熔断 + 波动率目标）
+                scale *= self._portfolio_risk_scale()
                 if scale < 1.0:
                     weights = {c: w * scale for c, w in weights.items()}
                 self.acc.rebalance(weights)

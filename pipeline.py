@@ -13,7 +13,7 @@ DEFAULT_FACTORS = ["rsi", "macd_hist", "bias20", "sma_gap", "momentum20", "vol_r
 def run_backtest(codes, strategy="momentum", start=None, end=None,
                  init_cash=None, topk=5, rebalance=5, benchmark=None,
                  timing=None, timing_window=20, timing_scale_off=0.3,
-                 strategy_params=None):
+                 dd_circuit=False, vol_target=None, strategy_params=None):
     store = DataStore()
     store.ensure(codes)
 
@@ -38,6 +38,7 @@ def run_backtest(codes, strategy="momentum", start=None, end=None,
         timing_scale_off=timing_scale_off,
         benchmark_high=bench_df["high"].reindex(panel.dates) if "high" in bench_df else None,
         benchmark_low=bench_df["low"].reindex(panel.dates) if "low" in bench_df else None,
+        dd_circuit=dd_circuit, vol_target=vol_target,
     )
     result = engine.run()
     metrics = compute_metrics(result.equity, result.benchmark)

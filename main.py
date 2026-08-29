@@ -35,7 +35,7 @@ def cmd_backtest(args):
     out = run_backtest(
         codes, strategy=args.strategy, start=args.start, end=args.end,
         topk=args.topk, rebalance=args.rebalance, benchmark=args.benchmark,
-        timing=args.timing,
+        timing=args.timing, dd_circuit=args.dd_circuit, vol_target=args.vol_target,
     )
     print("\n===== 绩效指标 =====")
     print(format_metrics(out["metrics"]))
@@ -116,6 +116,9 @@ def main():
     sp.add_argument("--end", default=DEFAULT_END)
     sp.add_argument("--benchmark", default=None)
     sp.add_argument("--timing", default=None, choices=[None, "ma20", "abs_mom", "rsrs"])
+    sp.add_argument("--dd-circuit", action="store_true", help="回撤熔断（组合回撤分档降仓）")
+    sp.add_argument("--vol-target", type=float, default=None,
+                    help="波动率目标仓位（如 0.15 表示年化波动目标15%%）")
     sp.set_defaults(func=cmd_backtest)
 
     sp = sub.add_parser("run", help="模拟盘单次运行")

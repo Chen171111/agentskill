@@ -73,6 +73,8 @@ def backtest(
     rebalance: int = Query(5),
     benchmark: str = Query(None),
     timing: str = Query(None),
+    dd_circuit: bool = Query(False),
+    vol_target: float = Query(None),
 ):
     from pipeline import run_backtest
     if pool == "个股动量":
@@ -88,6 +90,7 @@ def backtest(
     out = run_backtest(
         code_list, strategy=strategy, start=start, end=end,
         topk=topk, rebalance=rebalance, benchmark=benchmark, timing=timing,
+        dd_circuit=dd_circuit, vol_target=vol_target,
     )
     result = out["result"]
     eq = result.equity.reset_index()
