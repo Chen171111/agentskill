@@ -1,8 +1,9 @@
-"""券商（broker）抽象接口 + 模拟撮合实现。
+"""券商（broker）抽象接口 + 模拟撮合实现 + 同花顺客户端接入。
 
 设计目标：把「信号 → 下单 → 成交」与具体券商解耦。
 - PaperBroker : 本地模拟撮合（按收盘价成交，计入滑点/佣金/印花税），用于模拟盘；
-- 接入实盘时，实现 LiveBroker 子类（如基于 easytrader），无需改动上层执行逻辑。
+- ThsBroker   : 同花顺客户端（含模拟炒股），通过 easytrader 操控桌面界面下单。
+  接入实盘时，实现新的 Broker 子类即可，无需改动上层执行逻辑。
 """
 import abc
 import itertools
@@ -91,3 +92,81 @@ class PaperBroker(Broker):
         order.filled_qty = order.qty
         order.fee = fee
         return order
+
+
+class ThsBroker(Broker):
+    """同花顺客户端（ths）下单接口，基于 easytrader。
+
+    依赖
+    ----
+    pip install easytrader
+
+    使用前提
+    --------
+    1. 安装同花顺经典版客户端（v8.60+，而非极速版），并启动；
+    2. 手动登录到交易/模拟炒股窗口；
+    3. 客户端设置：系统设置>界面设置 超时时间=0；交易设置 默认买卖价格/数量=空；
+    4. 客户端不能最小化、不能用精简模式。
+
+    用法
+    ----
+        broker = ThsBroker(exe_path=r"C:\\同花顺\\xiadan.exe")
+        broker.connect()
+        broker.submit(Order("600519.SH", "buy", 100, 1500.0))
+    """
+
+    def __init__(self, exe_path: str = None):
+        import easytrader  # 延迟导入，避免未安装时报错
+        self._easytrader = easytrader
+        self.user = easytrader.use("ths")
+        self.exe_path = exe_path
+        self._connected = False
+
+    def connect(self, exe_path: str = None):
+        """连接到已登录的同花顺客户端交易窗口。"""
+        path = exe_path or self.exe_path
+        if path:
+            self.user.connect(path)
+        else:
+            # 无 exe_path 时，easytrader 会尝试识别已登录的窗口
+            self.user.connect()
+        self._connected = True
+        return self
+
+    @staticmethod
+    def _pure_code(code: str) -> str:
+        """600519.SH -> 600519（同花顺下单用纯 6 位数字）。"""
+        return code.split(".")[0]
+
+    def submit(self, order: Order) -> Order:
+        if not self._connected:
+            raise RuntimeError("ThsBroker 未连接，请先调用 connect()")
+        code = self._pure_code(order.code)
+        price = round(order.price, 2)
+        try:
+            if order.side == "buy":
+                self.user.buy(code, price=price, amount=int(order.qty))
+            else:
+                self.user.sell(code, price=price, amount=int(order.qty))
+            order.status = "filled"
+            order.filled_price = price
+            order.filled_qty = int(order.qty)
+            # 注：同花顺实际成交价/数量以委托回报为准，此处按限价记录，佣金由券商核算
+            order.fee = 0.0
+        except Exception as e:
+            order.status = "rejected"
+            order.reason = "下单失败: {}".format(e)
+        return order
+
+    # ---- 账户查询（可选，供状态同步）----
+    @property
+    def balance(self):
+        return self.user.balance
+
+    @property
+    def position(self):
+        return self.user.position
+
+    @property
+    def today_trades(self):
+        return self.user.today_trades

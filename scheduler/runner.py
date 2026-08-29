@@ -15,6 +15,7 @@ from strategies.registry import create_strategy
 from risk.manager import RiskManager
 from account.portfolio import PortfolioAccount
 from trader.execution import ExecutionEngine
+from trader.broker import ThsBroker
 from storage.db import TradeDB
 
 DEFAULT_FACTORS = ["rsi", "macd_hist", "bias20", "sma_gap", "momentum20", "vol_ratio"]
@@ -24,7 +25,7 @@ class DailyRunner:
     """单次交易日运行器。"""
 
     def __init__(self, codes, strategy="momentum", topk=5, rebalance=5, timing=None,
-                 init_cash=None):
+                 init_cash=None, broker=None):
         self.codes = codes
         self.strategy_name = strategy
         self.topk = topk
@@ -38,6 +39,8 @@ class DailyRunner:
         if saved:
             self.account.positions = saved
         self.strategy = create_strategy(strategy, topk=topk, rebalance_every=rebalance)
+        # 券商：None 表示用 PaperBroker（本地模拟撮合）
+        self.broker = broker
 
     def run_once(self, end: str = None) -> dict:
         """执行一个交易日的完整闭环。end 传 None 则用最新数据。"""
@@ -63,7 +66,7 @@ class DailyRunner:
         weights = risk.filter_weights(weights, self.account.positions, prices)
 
         # 执行订单
-        executor = ExecutionEngine()
+        executor = ExecutionEngine(self.broker) if self.broker else ExecutionEngine()
         orders = executor.rebalance(self.account, weights, prices)
 
         # 持久化

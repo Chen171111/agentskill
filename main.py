@@ -43,11 +43,20 @@ def cmd_backtest(args):
     return out
 
 
+def _make_broker(args):
+    """根据命令行参数构造券商对象。--ths 表示接入同花顺客户端(含模拟炒股)。"""
+    if getattr(args, "ths", None):
+        from trader.broker import ThsBroker
+        return ThsBroker(exe_path=getattr(args, "ths_exe", None)).connect()
+    return None
+
+
 def cmd_run(args):
     from scheduler.runner import DailyRunner
     codes = _codes(args)
     runner = DailyRunner(codes, strategy=args.strategy, topk=args.topk,
-                         rebalance=args.rebalance, timing=args.timing)
+                         rebalance=args.rebalance, timing=args.timing,
+                         broker=_make_broker(args))
     result = runner.run_once()
     _print_run_result(result)
 
@@ -56,7 +65,8 @@ def cmd_daemon(args):
     from scheduler.runner import DailyRunner, Scheduler
     codes = _codes(args)
     runner = DailyRunner(codes, strategy=args.strategy, topk=args.topk,
-                         rebalance=args.rebalance, timing=args.timing)
+                         rebalance=args.rebalance, timing=args.timing,
+                         broker=_make_broker(args))
     Scheduler(runner).run_forever()
 
 
@@ -125,11 +135,15 @@ def main():
     sp = sub.add_parser("run", help="模拟盘单次运行")
     add_common(sp)
     sp.add_argument("--timing", default=None, choices=[None, "ma20", "abs_mom", "rsrs"])
+    sp.add_argument("--ths", action="store_true", help="接入同花顺客户端(含模拟炒股)下单")
+    sp.add_argument("--ths-exe", default=None, help="同花顺 xiadan.exe 路径，如 C:\\同花顺\\xiadan.exe")
     sp.set_defaults(func=cmd_run)
 
     sp = sub.add_parser("daemon", help="每日定时自动运行")
     add_common(sp)
     sp.add_argument("--timing", default=None, choices=[None, "ma20", "abs_mom", "rsrs"])
+    sp.add_argument("--ths", action="store_true", help="接入同花顺客户端(含模拟炒股)下单")
+    sp.add_argument("--ths-exe", default=None, help="同花顺 xiadan.exe 路径，如 C:\\同花顺\\xiadan.exe")
     sp.set_defaults(func=cmd_daemon)
 
     sp = sub.add_parser("status", help="查看持仓/订单")

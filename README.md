@@ -129,29 +129,52 @@ python server.py
 | default | 温和宽基组合 |
 | 个股动量 | 沪深300 成分股抽样 20 只（动态生成） |
 
-## 六、接入实盘
+## 六、接入实盘 / 同花顺模拟炒股
 
-`trader/broker.py` 中 `Broker` 是抽象基类，`PaperBroker` 是模拟实现。接入实盘只需：
+### 方式一：同花顺客户端（含模拟炒股，无需真实券商账户）
+
+`trader/broker.py` 中的 `ThsBroker` 基于开源库 `easytrader`，通过操控同花顺 Windows 客户端界面下单（`xiadan.exe`）。
+
+**准备工作**：
+1. 安装同花顺**经典版**客户端（v8.60+，非极速版），并启动；
+2. 手动登录到「交易」或「模拟炒股」窗口（模拟炒股给 100 万初始资金，正好匹配 `INIT_CASH`）；
+3. 客户端设置：`系统设置 > 界面设置` 超时时间=0；`交易设置` 默认买卖价格/数量=空；
+4. 客户端**不能最小化**、不能用精简模式。
+
+**安装依赖**：
+```bash
+pip install easytrader
+```
+
+**运行（单次模拟盘下单到同花顺）**：
+```bash
+python main.py run --strategy momentum --pool 个股动量 --ths --ths-exe "C:\\同花顺\\xiadan.exe"
+```
+
+**每日自动运行（常驻，接入同花顺）**：
+```bash
+python main.py daemon --strategy momentum --pool 个股动量 --ths --ths-exe "C:\\同花顺\\xiadan.exe"
+```
+
+> 注意：`--ths-exe` 若省略，`easytrader` 会尝试自动识别已登录的同花顺窗口。实际委托成交价/数量以同花顺回报为准。
+
+### 方式二：自定义券商（实盘）
+
+`Broker` 是抽象基类，接入任意券商只需实现 `submit(order)` 方法：
 
 ```python
-from trader.broker import Broker, Order
+from trader.broker import Broker
 
-class LiveBroker(Broker):
-    def __init__(self):
-        import easytrader
-        self.user = easytrader.use("ths")   # 或 "ht_client" 等
-    def submit(self, order: Order) -> Order:
-        if order.side == "buy":
-            r = self.user.buy(order.code, price=round(order.price, 2), amount=int(order.filled_qty or order.qty))
-        else:
-            r = self.user.sell(order.code, price=round(order.price, 2), amount=int(order.qty))
+class MyBroker(Broker):
+    def submit(self, order):
+        # 调用你的券商 API，这里示例
         order.status = "filled"
-        order.filled_price = float(order.price)
-        order.filled_qty = int(order.qty)
+        order.filled_price = order.price
+        order.filled_qty = order.qty
         return order
 ```
 
-然后在 `DailyRunner` 中将 `ExecutionEngine()` 换成 `ExecutionEngine(LiveBroker())` 即可。
+然后在 `DailyRunner(..., broker=MyBroker())` 中传入即可。
 
 ## 七、项目结构
 
