@@ -20,12 +20,17 @@ _OCCL = {"vol": "volume", "日期": "date", "开盘": "open", "最高": "high",
 
 
 def classify_code(code: str) -> str:
-    """返回 'index' 或 'stock'。"""
+    """返回 'index' / 'etf' / 'stock'。"""
     code_up = code.upper()
     if code_up in _AK_SYMBOL_MAP:
         return "index"
     parts = code_up.split(".")
     base, market = parts[0], (parts[1] if len(parts) > 1 else None)
+    # ETF：沪市 51/56/58 开头，深市 15/16 开头
+    if market == "SH" and base.startswith(("51", "56", "58", "59")):
+        return "etf"
+    if market == "SZ" and base.startswith(("15", "16")):
+        return "etf"
     if market == "SH":
         return "index" if base.startswith(("000", "899")) else "stock"
     if market == "SZ":
@@ -83,6 +88,13 @@ def _normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
 def _download_one(ak, code: str, kind: str) -> pd.DataFrame:
     if kind == "index":
         df = ak.stock_zh_index_daily(symbol=to_ak_symbol(code))
+        if df is None or df.empty:
+            raise RuntimeError("{} 无数据返回".format(code))
+        return _normalize_ohlcv(df)
+
+    if kind == "etf":
+        # ETF 走新浪接口（东财 fund_etf_hist_em 易被限流）
+        df = ak.fund_etf_hist_sina(symbol=to_ak_symbol(code))
         if df is None or df.empty:
             raise RuntimeError("{} 无数据返回".format(code))
         return _normalize_ohlcv(df)
