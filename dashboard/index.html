@@ -98,18 +98,18 @@ $('pool').onchange=function(){
 
 function renderCards(m){
   const items=[
-    ['累计收益',m['累计收益'],m['累计收益']>=0],
-    ['年化收益',m['年化收益'],m['年化收益']>=0],
-    ['最大回撤',m['最大回撤'],false],
-    ['夏普比率',m['夏普比率'],m['夏普比率']>=0],
-    ['年化波动',m['年化波动'],false],
-    ['胜率',m['胜率'],true],
+    ['累计收益',m['累计收益'],m['累计收益']>=0,true],
+    ['年化收益',m['年化收益'],m['年化收益']>=0,true],
+    ['最大回撤',m['最大回撤'],false,true],
+    ['夏普比率',m['夏普比率'],m['夏普比率']>=0,false],
+    ['年化波动',m['年化波动'],false,true],
+    ['胜率',m['胜率'],true,true],
   ];
-  if('基准年化收益' in m){items.push(['基准年化',m['基准年化收益'],m['基准年化收益']>=0]);}
-  if('超额收益' in m){items.push(['超额收益',m['超额收益'],m['超额收益']>=0]);}
-  $('cards').innerHTML=items.map(([k,v,up])=>{
+  if('基准年化收益' in m){items.push(['基准年化',m['基准年化收益'],m['基准年化收益']>=0,true]);}
+  if('超额收益' in m){items.push(['超额收益',m['超额收益'],m['超额收益']>=0,true]);}
+  $('cards').innerHTML=items.map(([k,v,up,pct])=>{
     const cls=(k==='最大回撤'||k==='年化波动')?'dn':(up?'up':'dn');
-    return `<div class="card"><div class="k">${k}</div><div class="v ${cls}">${v.toFixed(2)}${k==='胜率'?'%':''}</div></div>`;
+    return `<div class="card"><div class="k">${k}</div><div class="v ${cls}">${v.toFixed(2)}${pct?'%':''}</div></div>`;
   }).join('');
 }
 

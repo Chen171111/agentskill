@@ -27,6 +27,9 @@ TRADING_COST = {
 
 INIT_CASH = 1_000_000.0
 
+# ---- 年化交易日数（A股约 244，美股约 252）----
+TRADING_DAYS_PER_YEAR = 244
+
 RISK = {
     "max_position_weight": 0.30,
     "max_total_weight": 0.95,
