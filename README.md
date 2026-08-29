@@ -131,32 +131,28 @@ python server.py
 
 ## 六、接入实盘 / 同花顺模拟炒股
 
-### 方式一：同花顺客户端（含模拟炒股，无需真实券商账户）
+> 完整配置步骤见 [docs/同花顺经典版接入指南.md](docs/同花顺经典版接入指南.md)，含同花顺客户端设置、依赖安装、常见问题排查。
 
-`trader/broker.py` 中的 `ThsBroker` 基于开源库 `easytrader`，通过操控同花顺 Windows 客户端界面下单（`xiadan.exe`）。
+### 方式一：同花顺经典版（含模拟炒股，无需真实券商账户）
 
-**准备工作**：
-1. 安装同花顺**经典版**客户端（v8.60+，非极速版），并启动；
-2. 手动登录到「交易」或「模拟炒股」窗口（模拟炒股给 100 万初始资金，正好匹配 `INIT_CASH`）；
-3. 客户端设置：`系统设置 > 界面设置` 超时时间=0；`交易设置` 默认买卖价格/数量=空；
-4. 客户端**不能最小化**、不能用精简模式。
+`trader/broker.py` 中的 `ThsBroker` 基于开源库 `easytrader`，通过操控同花顺经典版委托程序 `xiadan.exe` 下单。本机已装经典版：`D:\同花顺软件\同花顺\xiadan.exe`。
 
-**安装依赖**：
+**安装依赖**（沙盒内会被拦截，请在系统 PowerShell 手动执行）：
 ```bash
 pip install easytrader
 ```
 
 **运行（单次模拟盘下单到同花顺）**：
 ```bash
-python main.py run --strategy momentum --pool 个股动量 --ths --ths-exe "C:\\同花顺\\xiadan.exe"
+python main.py run --strategy momentum --pool 个股动量 --ths --ths-exe "D:\同花顺软件\同花顺\xiadan.exe"
 ```
 
 **每日自动运行（常驻，接入同花顺）**：
 ```bash
-python main.py daemon --strategy momentum --pool 个股动量 --ths --ths-exe "C:\\同花顺\\xiadan.exe"
+python main.py daemon --strategy momentum --pool 个股动量 --ths --ths-exe "D:\同花顺软件\同花顺\xiadan.exe"
 ```
 
-> 注意：`--ths-exe` 若省略，`easytrader` 会尝试自动识别已登录的同花顺窗口。实际委托成交价/数量以同花顺回报为准。
+> 关键前提：同花顺必须用**经典版**（远航版/极速版不兼容）；客户端要登录到「模拟炒股」交易窗口、不能最小化、超时时间设 0、默认买卖价格清空。
 
 ### 方式二：自定义券商（实盘）
 
