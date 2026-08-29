@@ -44,6 +44,33 @@ def win_rate(returns: pd.Series) -> float:
     return float((returns > 0).mean())
 
 
+def downside_volatility(returns: pd.Series, mar: float = 0.0) -> float:
+    """下行波动率：只统计低于最低可接受收益(MAR)的收益，年化。"""
+    downside = returns[returns < mar]
+    if len(downside) < 2:
+        return 0.0
+    return float(downside.std() * _ANN)
+
+
+def sortino_ratio(returns: pd.Series, mar: float = 0.0) -> float:
+    """索提诺比率：年化收益 / 下行波动率（只惩罚下行风险）。"""
+    if len(returns) < 2:
+        return 0.0
+    dd = downside_volatility(returns, mar)
+    if dd == 0:
+        return 0.0
+    annual = (returns.mean() - mar) * _TRADING_DAYS
+    return float(annual / dd)
+
+
+def calmar_ratio(equity: pd.Series) -> float:
+    """卡玛比率：年化收益 / |最大回撤|（衡量回撤的"性价比"）。"""
+    mdd = abs(max_drawdown(equity))
+    if mdd < 1e-9:
+        return 0.0
+    return float(annualized_return(equity) / mdd)
+
+
 def compute_metrics(equity_df: pd.DataFrame, benchmark_nav: pd.Series = None) -> dict:
     equity = equity_df["equity"]
     value = equity_df["value"]
@@ -55,6 +82,8 @@ def compute_metrics(equity_df: pd.DataFrame, benchmark_nav: pd.Series = None) ->
         "年化收益": annualized_return(equity) * 100,
         "最大回撤": max_drawdown(equity) * 100,
         "夏普比率": sharpe_ratio(returns),
+        "索提诺比率": sortino_ratio(returns),
+        "卡玛比率": calmar_ratio(equity),
         "年化波动": volatility(returns) * 100,
         "胜率": win_rate(returns) * 100,
     }

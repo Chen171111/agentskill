@@ -62,7 +62,7 @@
 - `engine.py`：`BacktestEngine` 逐日推进，支持大盘择时（ma20/abs_mom/rsrs）。
 
 ### 第 10 步 — 绩效分析 `analysis/`
-- `metrics.py`：年化收益、夏普、最大回撤、胜率、超额收益等。
+- `metrics.py`：年化收益、夏普、索提诺、卡玛、最大回撤、波动率、胜率、超额收益等。
 
 ### 第 11 步 — 入口 `main.py`
 - 四个子命令：`backtest` / `run` / `daemon` / `status`。

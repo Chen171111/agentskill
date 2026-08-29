@@ -1,4 +1,5 @@
 """回测流水线：数据→因子→策略→回测→绩效，供 CLI 复用。"""
+import config
 from dataprovider.store import DataStore
 from dataprovider.panel import build_panel
 from factors.engine import compute_factors
@@ -13,7 +14,10 @@ DEFAULT_FACTORS = ["rsi", "macd_hist", "bias20", "sma_gap", "momentum20", "vol_r
 def run_backtest(codes, strategy="momentum", start=None, end=None,
                  init_cash=None, topk=5, rebalance=5, benchmark=None,
                  timing=None, timing_window=20, timing_scale_off=0.3,
-                 dd_circuit=False, vol_target=None, strategy_params=None):
+                 dd_circuit=None, vol_target=None, strategy_params=None):
+    # dd_circuit 未显式传入时，走 config 默认方案
+    if dd_circuit is None:
+        dd_circuit = config.DEFAULT_DD_CIRCUIT
     store = DataStore()
     store.ensure(codes)
 
