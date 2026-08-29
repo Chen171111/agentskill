@@ -49,6 +49,11 @@ DEFAULT_END = "20251231"
 DEFAULT_TOP_K = 5
 DEFAULT_REBALANCE = 5
 
+# ---- 默认回撤控制方案（回撤熔断为默认，MA20/波动率目标为可选增强）----
+DEFAULT_TIMING = None        # 大盘择时：None / "ma20" / "abs_mom" / "rsrs"
+DEFAULT_DD_CIRCUIT = True    # 回撤熔断：默认开启
+DEFAULT_VOL_TARGET = None    # 波动率目标仓位：None 关闭，如 0.15
+
 
 def ensure_dirs():
     for d in (DATA_DIR, INDEX_DIR, STOCK_DIR, RESULT_DIR, DB_PATH.parent):

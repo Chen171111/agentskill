@@ -73,7 +73,7 @@ def backtest(
     rebalance: int = Query(5),
     benchmark: str = Query(None),
     timing: str = Query(None),
-    dd_circuit: bool = Query(False),
+    dd_circuit: bool = Query(config.DEFAULT_DD_CIRCUIT),
     vol_target: float = Query(None),
 ):
     from pipeline import run_backtest

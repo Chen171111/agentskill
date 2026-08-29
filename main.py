@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import (RECOMMENDED_POOLS, DEFAULT_STRATEGY, DEFAULT_START, DEFAULT_END,
-                    DEFAULT_TOP_K, DEFAULT_REBALANCE, ensure_dirs)
+                    DEFAULT_TOP_K, DEFAULT_REBALANCE, DEFAULT_DD_CIRCUIT, ensure_dirs)
 from analysis.metrics import format_metrics
 
 
@@ -116,7 +116,8 @@ def main():
     sp.add_argument("--end", default=DEFAULT_END)
     sp.add_argument("--benchmark", default=None)
     sp.add_argument("--timing", default=None, choices=[None, "ma20", "abs_mom", "rsrs"])
-    sp.add_argument("--dd-circuit", action="store_true", help="回撤熔断（组合回撤分档降仓）")
+    sp.add_argument("--dd-circuit", action=argparse.BooleanOptionalAction,
+                    default=DEFAULT_DD_CIRCUIT, help="回撤熔断（默认开，--no-dd-circuit 关闭）")
     sp.add_argument("--vol-target", type=float, default=None,
                     help="波动率目标仓位（如 0.15 表示年化波动目标15%%）")
     sp.set_defaults(func=cmd_backtest)
