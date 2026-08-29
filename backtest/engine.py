@@ -9,6 +9,12 @@ from .account import BacktestAccount
 
 _TRADING_DAYS = getattr(config, "TRADING_DAYS_PER_YEAR", 244)
 
+# 回撤熔断参数（带滞回的极端保险，只对深回撤反应，避免浅阈值反复"打脸"）
+# 降仓档位：(回撤幅度阈值 → 仓位系数)，从深到浅排列
+_CB_LEVELS = [(0.25, 0.0), (0.20, 0.40), (0.15, 0.65)]
+_CB_TRIGGER = 0.15    # 进入熔断的回撤幅度（≥15% 才启动）
+_CB_RECOVER = 0.10    # 退出熔断的回撤幅度（≤10% 才恢复，滞回带 5%）
+
 
 class BacktestResult:
     def __init__(self, equity: pd.DataFrame, holdings: dict,
@@ -35,6 +41,7 @@ class BacktestEngine:
         self.dd_circuit = bool(dd_circuit)          # 回撤熔断开关
         self.vol_target = float(vol_target) if vol_target else None  # 目标年化波动率
         self._nav_history = []                      # 组合净值历史（用于组合层风控）
+        self._cb_active = False                     # 回撤熔断滞回状态（是否处于熔断态）
         self._timing_ma = None
         self._timing_mom = None
         self._timing_rsrs = None
@@ -83,6 +90,30 @@ class BacktestEngine:
             return 1.0 if c > 0 else self.timing_scale_off
         return 1.0
 
+    def _circuit_scale(self, dd_depth: float) -> float:
+        """回撤熔断定仓（带滞回状态机）。
+
+        进入熔断：回撤 ≥ _CB_TRIGGER（15%）→ 按深度定档降仓；
+        退出熔断：回撤 ≤ _CB_RECOVER（10%）→ 恢复满仓（滞回带避免震荡）。
+        """
+        if self._cb_active:
+            # 熔断态：回撤修复到恢复线以下才退出
+            if dd_depth <= _CB_RECOVER:
+                self._cb_active = False
+                return 1.0
+        else:
+            # 非熔断态：回撤触及触发线才进入
+            if dd_depth >= _CB_TRIGGER:
+                self._cb_active = True
+            else:
+                return 1.0
+
+        # 熔断态：按深度定档（从深到浅）
+        for trig, lvl in _CB_LEVELS:
+            if dd_depth >= trig:
+                return lvl
+        return 1.0
+
     def _portfolio_risk_scale(self) -> float:
         """组合层风控：回撤熔断 + 波动率目标仓位，返回 0~1 的仓位系数。"""
         scale = 1.0
@@ -90,18 +121,11 @@ class BacktestEngine:
         if len(nav) < 2:
             return scale
 
-        # 1) 回撤熔断（分档降仓）
+        # 1) 回撤熔断（带滞回的极端保险）
         if self.dd_circuit:
             peak = max(nav)
-            dd = nav[-1] / peak - 1.0
-            if dd <= -0.20:
-                scale = 0.0
-            elif dd <= -0.15:
-                scale = 0.25
-            elif dd <= -0.10:
-                scale = 0.50
-            elif dd <= -0.05:
-                scale = 0.75
+            dd_depth = 1.0 - nav[-1] / peak   # 回撤幅度(正数)
+            scale = self._circuit_scale(dd_depth)
 
         # 2) 波动率目标仓位（组合实际波动 > 目标 → 等比降仓）
         if self.vol_target and len(nav) >= 20:
