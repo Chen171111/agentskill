@@ -74,7 +74,7 @@ def backtest(
     benchmark: str = Query(None),
     timing: str = Query(None),
     dd_circuit: bool = Query(config.DEFAULT_DD_CIRCUIT),
-    vol_target: float = Query(None),
+    vol_target: float = Query(config.DEFAULT_VOL_TARGET),
 ):
     from pipeline import run_backtest
     if pool == "个股动量":

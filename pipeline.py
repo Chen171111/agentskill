@@ -15,9 +15,11 @@ def run_backtest(codes, strategy="momentum", start=None, end=None,
                  init_cash=None, topk=5, rebalance=5, benchmark=None,
                  timing=None, timing_window=20, timing_scale_off=0.3,
                  dd_circuit=None, vol_target=None, strategy_params=None):
-    # dd_circuit 未显式传入时，走 config 默认方案
+    # 风控参数未显式传入时，走 config 默认方案（默认为熔断+波动率目标15%）
     if dd_circuit is None:
         dd_circuit = config.DEFAULT_DD_CIRCUIT
+    if vol_target is None:
+        vol_target = config.DEFAULT_VOL_TARGET
     store = DataStore()
     store.ensure(codes)
 

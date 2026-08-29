@@ -119,7 +119,7 @@ def main():
     sp.add_argument("--dd-circuit", action=argparse.BooleanOptionalAction,
                     default=DEFAULT_DD_CIRCUIT, help="回撤熔断（默认开，--no-dd-circuit 关闭）")
     sp.add_argument("--vol-target", type=float, default=None,
-                    help="波动率目标仓位（如 0.15 表示年化波动目标15%%）")
+                    help="波动率目标仓位，默认15%%（传 0 关闭）")
     sp.set_defaults(func=cmd_backtest)
 
     sp = sub.add_parser("run", help="模拟盘单次运行")
