@@ -26,6 +26,45 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
 
 DASH_PATH = ROOT / "dashboard" / "index.html"
 
+# ETF 名称映射（用于"今日建议"展示）
+ETF_NAMES = {
+    "510300.SH": "沪深300ETF", "510500.SH": "中证500ETF", "510050.SH": "上证50ETF",
+    "159915.SZ": "创业板ETF", "159928.SZ": "消费ETF", "159920.SZ": "恒生ETF",
+    "513100.SH": "纳指ETF", "513500.SH": "标普500ETF", "518880.SH": "黄金ETF",
+    "510880.SH": "红利ETF", "511010.SH": "国债ETF",
+}
+
+
+def _today_picks():
+    """运行 etf_rotation 策略，返回最新交易日的建议持仓（含风险平价权重与动量）。"""
+    from pipeline import DEFAULT_FACTORS
+    from dataprovider.store import DataStore
+    from dataprovider.panel import build_panel
+    from factors.engine import compute_factors
+    from strategies.registry import create_strategy
+
+    codes = list(config.RECOMMENDED_POOLS["ETF全球"])
+    store = DataStore()
+    store.ensure(codes)
+    panel = build_panel(store, codes)
+    factors = compute_factors(panel, DEFAULT_FACTORS)
+    strat = create_strategy("etf_rotation", topk=5, rebalance_every=5)
+    # 触发一次调仓，拿到"当前"目标权重
+    strat._since = strat.rebalance_every - 1
+
+    last = panel.dates[-1]
+    weights = strat.generate_weights(last, factors, panel) or {}
+    mom_df = factors.get("momentum20")
+    picks = []
+    for c, wt in sorted(weights.items(), key=lambda x: -x[1]):
+        mom = None
+        if mom_df is not None and last in mom_df.index and c in mom_df.columns:
+            v = mom_df.loc[last, c]
+            mom = round(float(v) * 100, 2) if v == v else None
+        picks.append({"code": c, "name": ETF_NAMES.get(c, c),
+                      "weight": round(wt, 4), "momentum20": mom})
+    return picks, last
+
 
 @app.get("/", response_class=HTMLResponse)
 def index():
@@ -117,6 +156,41 @@ def status():
         ],
         "orders": db.recent_orders(20),
     }
+
+
+@app.get("/api/market")
+def market():
+    """市场全景：大盘指数快照 + 两市成交额 + ETF轮动今日建议。"""
+    resp = {"indexes": [], "turnover_yi": None, "picks": [], "date": None}
+
+    try:
+        import akshare as ak
+        spot = ak.stock_zh_index_spot_sina()
+        # 指数展示：上证/深证/创业板；两市成交额=上证+深证（创业板属深证子集，不计入）
+        turnover = 0.0
+        turnover_ids = {"sh000001", "sz399001"}
+        for code, name in (("sh000001", "上证指数"), ("sz399001", "深证成指"),
+                           ("sz399006", "创业板指")):
+            row = spot[spot["代码"] == code]
+            if row.empty:
+                continue
+            r = row.iloc[0]
+            resp["indexes"].append({
+                "code": code, "name": name,
+                "price": round(float(r["最新价"]), 2),
+                "pct": round(float(r["涨跌幅"]), 2),
+            })
+            if code in turnover_ids:
+                turnover += float(r["成交额"])
+        resp["turnover_yi"] = round(turnover / 1e8)  # 元 → 亿
+    except Exception as e:
+        resp["market_error"] = str(e)[:200]
+
+    try:
+        resp["picks"], resp["date"] = _today_picks()
+    except Exception as e:
+        resp["picks_error"] = str(e)[:200]
+    return resp
 
 
 if __name__ == "__main__":
