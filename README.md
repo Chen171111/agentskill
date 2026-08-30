@@ -85,11 +85,14 @@ python main.py backtest --strategy momentum --codes 000300.SH,000905.SH,399006.S
 # 模拟盘单次运行（个股池，真实下单撮合）
 python main.py run --strategy momentum --pool 个股动量 --topk 3 --rebalance 5
 
-# 每日定时自动运行（常驻进程，交易日 15:05 触发）
+# 每日定时自动运行（常驻进程，交易日 14:50 尾盘触发）
 python main.py daemon --strategy momentum --pool 个股动量
 
 # 查看持仓与订单
 python main.py status
+
+# 测试同花顺连接并读取模拟盘资金/持仓
+python main.py ths-check --ths-exe "D:\同花顺软件\同花顺\xiadan.exe"
 
 # Web Dashboard（交互式回测 + 持仓查看）
 python server.py

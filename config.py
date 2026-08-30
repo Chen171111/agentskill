@@ -35,7 +35,7 @@ TRADING_COST = {
     "slippage_rate": 0.0005,
 }
 
-INIT_CASH = 1_000_000.0
+INIT_CASH = 200_000.0
 
 # ---- 年化交易日数（A股约 244，美股约 252）----
 TRADING_DAYS_PER_YEAR = 244

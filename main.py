@@ -85,6 +85,48 @@ def cmd_status(args):
                                                  o["filled_price"] or o["price"], o["status"]))
 
 
+def cmd_ths_check(args):
+    """测试同花顺连接：连接客户端并读取资金/持仓。"""
+    from trader.broker import ThsBroker
+    print("正在测试同花顺连接（xiadan.exe）...")
+    broker = ThsBroker(exe_path=args.ths_exe)
+    try:
+        broker.connect()
+        print("[OK] 连接成功！")
+    except Exception as e:
+        print("[FAIL] 连接失败: {} {}".format(type(e).__name__, str(e)[:200]))
+        return
+    # 资金
+    try:
+        bal = broker.balance
+        print("\n===== 资金状况 =====")
+        b = bal[0] if isinstance(bal, list) and bal else bal
+        if isinstance(b, dict):
+            for k, v in b.items():
+                print("  {}: {}".format(k, v))
+        else:
+            print(" ", bal)
+    except Exception as e:
+        print("[资金读取失败]", str(e)[:150])
+    # 持仓
+    try:
+        pos = broker.position
+        print("\n===== 持仓 =====")
+        plist = pos if isinstance(pos, list) else ([pos] if pos else [])
+        if not plist:
+            print(" （空仓）")
+        else:
+            for p in plist:
+                if isinstance(p, dict):
+                    print("  {} {} 持仓{} 成本{} 现价{}".format(
+                        p.get("证券代码", ""), p.get("证券名称", ""), p.get("当前持仓", ""),
+                        p.get("参考成本价", ""), p.get("参考市价", "")))
+                else:
+                    print(" ", p)
+    except Exception as e:
+        print("[持仓读取失败]", str(e)[:150])
+
+
 def _print_run_result(result):
     if result.get("status") == "no_data":
         print("无有效数据")
@@ -148,6 +190,10 @@ def main():
 
     sp = sub.add_parser("status", help="查看持仓/订单")
     sp.set_defaults(func=cmd_status)
+
+    sp = sub.add_parser("ths-check", help="测试同花顺连接并读取资金/持仓")
+    sp.add_argument("--ths-exe", default=None, help="同花顺 xiadan.exe 路径，如 C:\\同花顺\\xiadan.exe")
+    sp.set_defaults(func=cmd_ths_check)
 
     args = p.parse_args()
     args.func(args)
