@@ -7,8 +7,9 @@ from strategies.registry import create_strategy
 from backtest.engine import BacktestEngine
 from analysis.metrics import compute_metrics
 
-DEFAULT_FACTORS = ["rsi", "macd_hist", "bias20", "sma_gap", "momentum20", "vol_ratio",
-                   "zt_daily", "lianban"]
+DEFAULT_FACTORS = ["rsi", "macd_hist", "bias20", "sma_gap",
+                   "momentum5", "momentum20", "momentum60", "momentum120", "momentum250",
+                   "vol_ratio", "zt_daily", "lianban"]
 
 
 def run_backtest(codes, strategy="momentum", start=None, end=None,

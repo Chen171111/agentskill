@@ -1,10 +1,11 @@
 """策略注册表。"""
 from .base import Strategy
 from .builtin import (MomentumStrategy, MeanReversionStrategy, CrossMovingStrategy,
-                      MultiFactorStrategy, LianbanLeadStrategy)
+                      MultiFactorStrategy, LianbanLeadStrategy, EtfRotationStrategy)
 
 STRATEGIES = {
     "momentum": MomentumStrategy,
+    "etf_rotation": EtfRotationStrategy,
     "mean_reversion": MeanReversionStrategy,
     "cross_moving": CrossMovingStrategy,
     "multifactor": MultiFactorStrategy,

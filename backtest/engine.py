@@ -137,26 +137,31 @@ class BacktestEngine:
                 return lvl
         return 1.0
 
+    def _vol_target_scale(self) -> float:
+        """波动率目标仓位（仅调仓日应用）：组合实际波动 > 目标 → 等比降仓。"""
+        if not self.vol_target:
+            return 1.0
+        nav = self._nav_history
+        if len(nav) < 20:
+            return 1.0
+        rets = pd.Series(nav).pct_change().dropna().tail(20)
+        realized = rets.std() * np.sqrt(_TRADING_DAYS)
+        if realized <= 0.001:
+            return 1.0
+        return float(np.clip(self.vol_target / realized, 0.0, 1.0))
+
     def _portfolio_risk_scale(self) -> float:
-        """组合层风控：回撤熔断 + 波动率目标仓位，返回 0~1 的仓位系数。"""
+        """组合层风控（调仓日应用）：回撤熔断 + 波动率目标，返回 0~1 仓位系数。"""
         scale = 1.0
         nav = self._nav_history
         if len(nav) < 2:
             return scale
-
-        # 1) 回撤熔断（带滞回的极端保险）
         if self.dd_circuit:
             peak = max(nav)
-            dd_depth = 1.0 - nav[-1] / peak   # 回撤幅度(正数)
+            dd_depth = 1.0 - nav[-1] / peak
             scale = self._circuit_scale(dd_depth)
-
-        # 2) 波动率目标仓位（组合实际波动 > 目标 → 等比降仓）
-        if self.vol_target and len(nav) >= 20:
-            rets = pd.Series(nav).pct_change().dropna().tail(20)
-            realized = rets.std() * np.sqrt(_TRADING_DAYS)
-            if realized > 0.001:
-                scale = min(scale, self.vol_target / realized)
-
+        if self.vol_target:
+            scale = min(scale, self._vol_target_scale())
         return float(np.clip(scale, 0.0, 1.0))
 
     def run(self) -> BacktestResult:
@@ -179,7 +184,8 @@ class BacktestEngine:
             self._nav_history.append(self.acc.total())
 
             weights = self.strategy.generate_weights(date, self.factors, self.panel)
-            if weights is not None and weights:
+            # None=非调仓日不动作；空 dict=调仓日清仓（如趋势过滤全破位/情绪门空仓）
+            if weights is not None:
                 # 信号稳定性过滤（BigQuant 思想）：本/上期标的集合重叠度过低 → 空仓
                 if self.stability_min_overlap is not None:
                     cur_codes = set(weights.keys())
@@ -192,10 +198,8 @@ class BacktestEngine:
                             holdings[date] = self.acc.holding()
                             continue
                     self._last_codes = cur_codes
-                # 大盘择时
-                scale = self._timing_scale(date)
-                # 组合层风控（回撤熔断 + 波动率目标）
-                scale *= self._portfolio_risk_scale()
+                # 大盘择时 + 组合层风控（回撤熔断 + 波动率目标）
+                scale = self._timing_scale(date) * self._portfolio_risk_scale()
                 if scale < 1.0:
                     weights = {c: w * scale for c, w in weights.items()}
                 self.acc.rebalance(weights)

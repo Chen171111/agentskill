@@ -157,7 +157,7 @@ def main():
     # 公共参数
     def add_common(sp):
         sp.add_argument("--strategy", default=DEFAULT_STRATEGY,
-                        choices=["momentum", "mean_reversion", "cross_moving",
+                        choices=["momentum", "etf_rotation", "mean_reversion", "cross_moving",
                                  "multifactor", "lianban_lead"])
         sp.add_argument("--codes", default="000300.SH,000905.SH,399006.SZ,000688.SH")
         sp.add_argument("--pool", default=None, help="推荐池名（覆盖 codes）")

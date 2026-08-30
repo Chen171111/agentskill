@@ -5,28 +5,69 @@ from .base import Strategy, weighted_score, rank_snapshot, volatility_weighted
 
 
 class MomentumStrategy(Strategy):
-    """动量轮动：动量 + 均线趋势双因子打分取 TopK。"""
+    """动量轮动：动量 + 均线趋势双因子打分取 TopK。
+
+    可配参数：
+      window       动量回看窗口（默认 20，可 5/60/120/250）
+      trend_window 绝对趋势过滤（Faber GTAA 思想）：只保留站上自身均线的标的
+      include_sma  是否叠加短期均线趋势因子（长周期动量建议关闭）
+      risk_parity  风险平价加权（按波动率倒数分配，替代等权）
+    """
     name = "momentum"
 
-    def __init__(self, topk=3, window=20, risk_parity=False, **kw):
+    def __init__(self, topk=3, window=20, risk_parity=False,
+                 trend_window=None, include_sma=True, **kw):
         super().__init__(topk=topk, **kw)
         self.window = window
         self.risk_parity = bool(risk_parity)
-        self.factor = "momentum{}".format(window) if window != 20 else "momentum20"
+        self.trend_window = int(trend_window) if trend_window else None
+        self.include_sma = bool(include_sma)
+        self.factor = "momentum{}".format(window)
 
     def generate_weights(self, date, factors, panel):
         if not self._is_rebalance():
             return None
-        score = weighted_score(factors, date,
-                               [(self.factor, 1, 1.0), ("sma_gap", 1, 1.0)])
+        specs = [(self.factor, 1, 1.0)]
+        if self.include_sma:
+            specs.append(("sma_gap", 1, 1.0))
+        score = weighted_score(factors, date, specs)
         if score is None or score.empty:
             return {}
-        codes = score.sort_values(ascending=False).head(self.topk).index
+        codes = score.sort_values(ascending=False).head(self.topk).index.tolist()
+        # 绝对趋势过滤（Faber）：只保留站上自身均线的标的，趋势破坏则剔除
+        if self.trend_window:
+            close = panel.get("close")
+            if close is not None and date in close.index:
+                ma = close.rolling(self.trend_window).mean()
+                if date in ma.index:
+                    codes = [c for c in codes
+                             if c in close.columns and c in ma.columns
+                             and close[c].loc[date] == close[c].loc[date]
+                             and ma[c].loc[date] == ma[c].loc[date]
+                             and close[c].loc[date] > ma[c].loc[date]]
+        if not codes:
+            return {}
         if self.risk_parity and len(codes) > 1:
             # 风险平价：按波动率倒数分配，替代等权
-            w = volatility_weighted(list(codes), panel, date)
+            w = volatility_weighted(codes, panel, date)
             return {c: ww * self.max_total for c, ww in w.items()}
         return {c: min(1.0 / max(len(codes), 1) * 0.9, self.max_total) for c in codes}
+
+
+class EtfRotationStrategy(MomentumStrategy):
+    """ETF 轮动（跨周期稳健）：快动量(20) + 风险平价，剔除短期均线噪声。
+
+    相对纯个股动量的差异：
+      include_sma=False  —— 去掉 5/20 均线交叉噪声因子，回测显著降低回撤、提升收益
+      risk_parity=True   —— 按波动率倒数分配权重，抑制高波动标的（如券商/半导体/纳指）
+    保守替代：window=120（慢动量，长短区间都为正，但长区间收益更低）
+    """
+    name = "etf_rotation"
+
+    def __init__(self, topk=5, window=20, risk_parity=True, include_sma=False,
+                 trend_window=None, **kw):
+        super().__init__(topk=topk, window=window, risk_parity=risk_parity,
+                         include_sma=include_sma, trend_window=trend_window, **kw)
 
 
 class MeanReversionStrategy(Strategy):
