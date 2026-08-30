@@ -15,4 +15,4 @@ venv/
 # IDE
 .idea/
 .vscode/
-*.swp
+*.swpdebug.log
