@@ -45,6 +45,7 @@ class BacktestEngine:
         self._timing_ma = None
         self._timing_mom = None
         self._timing_rsrs = None
+        self._timing_bias = None
         if timing and benchmark is not None and len(benchmark) > timing_window:
             bc = benchmark.dropna()
             if timing == "ma20":
@@ -54,6 +55,10 @@ class BacktestEngine:
             elif timing == "rsrs":
                 self._timing_rsrs = self._build_rsrs(
                     benchmark, benchmark_high, benchmark_low, timing_window)
+            elif timing == "bias":
+                # BIAS 温度计：大盘 20 日乖离率，用于多档仓位调度
+                ma = bc.rolling(timing_window).mean()
+                self._timing_bias = (bc - ma) / ma
 
     def _build_rsrs(self, close, high, low, window):
         if high is None or low is None:
@@ -71,13 +76,27 @@ class BacktestEngine:
         return (alpha - alpha.rolling(M).mean()) / alpha.rolling(M).std()
 
     def _timing_scale(self, date) -> float:
-        if self._timing_ma is None and self._timing_mom is None and self._timing_rsrs is None:
+        if (self._timing_ma is None and self._timing_mom is None
+                and self._timing_rsrs is None and self._timing_bias is None):
             return 1.0
         if self._timing_rsrs is not None:
             z = self._timing_rsrs.get(date)
             if z is None or z != z:
                 return 1.0
             return 1.0 if z > 0 else self.timing_scale_off
+        if self._timing_bias is not None:
+            # BIAS 温度计多档仓位（聚宽"坦克300"思想）：
+            # 大盘极端深跌→空仓；均线下方→减仓；均线上方→满仓
+            b = self._timing_bias.get(date)
+            if b is None or b != b:
+                return 1.0
+            if b <= -0.08:
+                return 0.0
+            if b <= -0.05:
+                return 0.3
+            if b <= 0:
+                return 0.5
+            return 1.0
         if self._timing_ma is not None:
             c = self._timing_ma.get(date)
             if c is None or c != c:

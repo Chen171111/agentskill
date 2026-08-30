@@ -1,7 +1,30 @@
 """策略基类与横截面排名工具。"""
 import abc
 
+import numpy as np
 import pandas as pd
+
+
+def volatility_weighted(codes, panel, date, lookback=20):
+    """风险平价权重：按各标的近 lookback 日波动率倒数分配权重（抑制高波动标的）。
+
+    返回 {code: weight}，权重和 = 1。
+    """
+    weights = {}
+    rates = panel.get("rate")
+    if rates is None:
+        return {}
+    for c in codes:
+        if c not in rates.columns:
+            continue
+        # 该标的截至 date 的近期收益率序列
+        r = rates[c].loc[:date].dropna().tail(lookback)
+        vol = float(r.std())
+        weights[c] = 1.0 / vol if vol > 1e-9 else 0.0
+    total = sum(weights.values())
+    if total <= 0:
+        return {}
+    return {c: w / total for c, w in weights.items()}
 
 
 class Strategy(abc.ABC):

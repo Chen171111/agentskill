@@ -1,16 +1,17 @@
 """内置策略：动量、均值回归、双均线、多因子、连板龙头。"""
 import pandas as pd
 
-from .base import Strategy, weighted_score, rank_snapshot
+from .base import Strategy, weighted_score, rank_snapshot, volatility_weighted
 
 
 class MomentumStrategy(Strategy):
     """动量轮动：动量 + 均线趋势双因子打分取 TopK。"""
     name = "momentum"
 
-    def __init__(self, topk=3, window=20, **kw):
+    def __init__(self, topk=3, window=20, risk_parity=False, **kw):
         super().__init__(topk=topk, **kw)
         self.window = window
+        self.risk_parity = bool(risk_parity)
         self.factor = "momentum{}".format(window) if window != 20 else "momentum20"
 
     def generate_weights(self, date, factors, panel):
@@ -21,6 +22,10 @@ class MomentumStrategy(Strategy):
         if score is None or score.empty:
             return {}
         codes = score.sort_values(ascending=False).head(self.topk).index
+        if self.risk_parity and len(codes) > 1:
+            # 风险平价：按波动率倒数分配，替代等权
+            w = volatility_weighted(list(codes), panel, date)
+            return {c: ww * self.max_total for c, ww in w.items()}
         return {c: min(1.0 / max(len(codes), 1) * 0.9, self.max_total) for c in codes}
 
 

@@ -36,6 +36,7 @@ def cmd_backtest(args):
         codes, strategy=args.strategy, start=args.start, end=args.end,
         topk=args.topk, rebalance=args.rebalance, benchmark=args.benchmark,
         timing=args.timing, dd_circuit=args.dd_circuit, vol_target=args.vol_target,
+        strategy_params={"risk_parity": args.risk_parity} if args.risk_parity else None,
     )
     print("\n===== 绩效指标 =====")
     print(format_metrics(out["metrics"]))
@@ -167,23 +168,24 @@ def main():
     sp.add_argument("--start", default=DEFAULT_START)
     sp.add_argument("--end", default=DEFAULT_END)
     sp.add_argument("--benchmark", default=None)
-    sp.add_argument("--timing", default=None, choices=[None, "ma20", "abs_mom", "rsrs"])
+    sp.add_argument("--timing", default=None, choices=[None, "ma20", "abs_mom", "rsrs", "bias"])
     sp.add_argument("--dd-circuit", action=argparse.BooleanOptionalAction,
                     default=DEFAULT_DD_CIRCUIT, help="回撤熔断（默认开，--no-dd-circuit 关闭）")
     sp.add_argument("--vol-target", type=float, default=None,
                     help="波动率目标仓位，默认15%%（传 0 关闭）")
+    sp.add_argument("--risk-parity", action="store_true", help="风险平价加权（按波动率倒数分配，替代等权）")
     sp.set_defaults(func=cmd_backtest)
 
     sp = sub.add_parser("run", help="模拟盘单次运行")
     add_common(sp)
-    sp.add_argument("--timing", default=None, choices=[None, "ma20", "abs_mom", "rsrs"])
+    sp.add_argument("--timing", default=None, choices=[None, "ma20", "abs_mom", "rsrs", "bias"])
     sp.add_argument("--ths", action="store_true", help="接入同花顺客户端(含模拟炒股)下单")
     sp.add_argument("--ths-exe", default=None, help="同花顺 xiadan.exe 路径，如 C:\\同花顺\\xiadan.exe")
     sp.set_defaults(func=cmd_run)
 
     sp = sub.add_parser("daemon", help="每日定时自动运行")
     add_common(sp)
-    sp.add_argument("--timing", default=None, choices=[None, "ma20", "abs_mom", "rsrs"])
+    sp.add_argument("--timing", default=None, choices=[None, "ma20", "abs_mom", "rsrs", "bias"])
     sp.add_argument("--ths", action="store_true", help="接入同花顺客户端(含模拟炒股)下单")
     sp.add_argument("--ths-exe", default=None, help="同花顺 xiadan.exe 路径，如 C:\\同花顺\\xiadan.exe")
     sp.set_defaults(func=cmd_daemon)
