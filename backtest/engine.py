@@ -28,7 +28,7 @@ class BacktestEngine:
     def __init__(self, panel, factors, strategy, init_cash=None, benchmark=None,
                  timing=None, timing_window=20, timing_scale_off=0.3,
                  benchmark_high=None, benchmark_low=None,
-                 dd_circuit=False, vol_target=None):
+                 dd_circuit=False, vol_target=None, stability_min_overlap=None):
         self.panel = panel
         self.factors = factors
         self.strategy = strategy
@@ -40,6 +40,10 @@ class BacktestEngine:
         # 组合层风控
         self.dd_circuit = bool(dd_circuit)          # 回撤熔断开关
         self.vol_target = float(vol_target) if vol_target else None  # 目标年化波动率
+        # 信号稳定性过滤：本/上期 TopK 重叠度 < 阈值 → 空仓（BigQuant 信号稳定性思想）
+        self.stability_min_overlap = (float(stability_min_overlap)
+                                      if stability_min_overlap else None)
+        self._last_codes = None                     # 上一调仓期的标的集合
         self._nav_history = []                      # 组合净值历史（用于组合层风控）
         self._cb_active = False                     # 回撤熔断滞回状态（是否处于熔断态）
         self._timing_ma = None
@@ -176,6 +180,18 @@ class BacktestEngine:
 
             weights = self.strategy.generate_weights(date, self.factors, self.panel)
             if weights is not None and weights:
+                # 信号稳定性过滤（BigQuant 思想）：本/上期标的集合重叠度过低 → 空仓
+                if self.stability_min_overlap is not None:
+                    cur_codes = set(weights.keys())
+                    if self._last_codes is not None:
+                        overlap = len(cur_codes & self._last_codes) / max(len(cur_codes), 1)
+                        if overlap < self.stability_min_overlap:
+                            # 信号不稳，本期空仓（清掉已有持仓，不建新仓）
+                            self.acc.rebalance({})
+                            self._last_codes = cur_codes
+                            holdings[date] = self.acc.holding()
+                            continue
+                    self._last_codes = cur_codes
                 # 大盘择时
                 scale = self._timing_scale(date)
                 # 组合层风控（回撤熔断 + 波动率目标）

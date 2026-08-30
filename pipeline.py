@@ -14,7 +14,8 @@ DEFAULT_FACTORS = ["rsi", "macd_hist", "bias20", "sma_gap", "momentum20", "vol_r
 def run_backtest(codes, strategy="momentum", start=None, end=None,
                  init_cash=None, topk=5, rebalance=5, benchmark=None,
                  timing=None, timing_window=20, timing_scale_off=0.3,
-                 dd_circuit=None, vol_target=None, strategy_params=None):
+                 dd_circuit=None, vol_target=None, strategy_params=None,
+                 stability_min_overlap=None):
     # 风控参数未显式传入时，走 config 默认方案（默认为熔断+波动率目标15%）
     if dd_circuit is None:
         dd_circuit = config.DEFAULT_DD_CIRCUIT
@@ -45,6 +46,7 @@ def run_backtest(codes, strategy="momentum", start=None, end=None,
         benchmark_high=bench_df["high"].reindex(panel.dates) if "high" in bench_df else None,
         benchmark_low=bench_df["low"].reindex(panel.dates) if "low" in bench_df else None,
         dd_circuit=dd_circuit, vol_target=vol_target,
+        stability_min_overlap=stability_min_overlap,
     )
     result = engine.run()
     metrics = compute_metrics(result.equity, result.benchmark)

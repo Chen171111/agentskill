@@ -37,6 +37,7 @@ def cmd_backtest(args):
         topk=args.topk, rebalance=args.rebalance, benchmark=args.benchmark,
         timing=args.timing, dd_circuit=args.dd_circuit, vol_target=args.vol_target,
         strategy_params={"risk_parity": args.risk_parity} if args.risk_parity else None,
+        stability_min_overlap=args.stability,
     )
     print("\n===== 绩效指标 =====")
     print(format_metrics(out["metrics"]))
@@ -174,6 +175,8 @@ def main():
     sp.add_argument("--vol-target", type=float, default=None,
                     help="波动率目标仓位，默认15%%（传 0 关闭）")
     sp.add_argument("--risk-parity", action="store_true", help="风险平价加权（按波动率倒数分配，替代等权）")
+    sp.add_argument("--stability", type=float, default=None,
+                    help="信号稳定性过滤：本期与上期TopK重叠度低于此值(0~1)则空仓，如 0.8")
     sp.set_defaults(func=cmd_backtest)
 
     sp = sub.add_parser("run", help="模拟盘单次运行")
