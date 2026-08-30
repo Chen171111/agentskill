@@ -15,4 +15,7 @@ venv/
 # IDE
 .idea/
 .vscode/
-*.swpdebug.log
+*.swp
+
+# 运行时日志
+debug.log
