@@ -129,6 +129,74 @@ def cmd_ths_check(args):
         print("[持仓读取失败]", str(e)[:150])
 
 
+def cmd_simulate(args):
+    """模拟交易：选股 → 评估 → 下单（默认本地模拟撮合，--ths 接同花顺模拟盘）。"""
+    from scheduler.runner import DailyRunner
+    from trader.broker import ThsBroker
+    codes = _codes(args)
+    broker = None
+    if getattr(args, "ths", None):
+        broker = ThsBroker(exe_path=getattr(args, "ths_exe", None)).connect()
+    runner = DailyRunner(codes, strategy=args.strategy, topk=args.topk,
+                         rebalance=args.rebalance, timing=args.timing, broker=broker)
+    r = runner.run_once()
+    if r.get("status") == "no_data":
+        print("无有效数据")
+        return
+
+    print("\n===== 模拟交易日 {} =====".format(r.get("date")))
+    print("策略: {}   标的数: {}".format(r.get("strategy"), len(codes)))
+
+    print("\n【① 选股】策略候选（按目标权重排序）：")
+    if not r.get("selection"):
+        print("  （策略未选出任何标的）")
+    for s in r.get("selection", []):
+        mom = s.get("momentum20")
+        mom_s = "{:+.2f}%".format(mom) if mom is not None else "   NA "
+        print("  {:<8} {:<8} 目标权重 {:>6.2%}  20日动量 {}".format(
+            s.get("name", ""), s.get("code"), s.get("weight"), mom_s))
+
+    print("\n【② 评估】绝对动量质检（20日动量≤0 剔除）+ 风控：")
+    for e in r.get("evaluation", []):
+        tag = "√ 合格" if e.get("qualified") else "× 剔除"
+        print("  [{}] {} ({}) {}".format(tag, e.get("name"), e.get("code"),
+                                          e.get("reason", "")))
+
+    print("\n【③ 下单】{}".format(
+        "无合格标的 → 空仓" if r.get("empty") else "按风控后权重调仓"))
+    orders = r.get("orders", [])
+    if not orders:
+        print("  （无订单）")
+    for o in orders:
+        side = "买入" if o.get("side") == "buy" else "卖出"
+        px = o.get("filled_price") or o.get("price")
+        print("  {} {} {}股 @ {:.3f}  [{}]".format(side, o.get("code"), o.get("qty"),
+                                                    px, o.get("reason", "")))
+
+    acc = r.get("account", {})
+    print("\n账户：现金 {:.2f}  市值 {:.2f}  总资产 {:.2f}".format(
+        acc.get("cash", 0), acc.get("market_value", 0), acc.get("total_equity", 0)))
+    pos = acc.get("positions", [])
+    if pos:
+        print("当前持仓：")
+        for p in pos:
+            print("  {} {}股  成本 {:.3f}  现价 {:.3f}  浮盈 {:+.2%}".format(
+                p.get("code"), p.get("qty"), p.get("cost", 0),
+                p.get("price", 0), p.get("pct", 0)))
+
+
+def cmd_reset(args):
+    """清空模拟盘状态（持仓/订单/净值），从头开始。"""
+    from pathlib import Path
+    from config import DB_PATH
+    db = Path(DB_PATH)
+    if db.exists():
+        db.unlink()
+        print("[OK] 已清空模拟盘状态：{}".format(db))
+    else:
+        print("当前无模拟盘状态文件，无需重置。")
+
+
 def _print_run_result(result):
     if result.get("status") == "no_data":
         print("无有效数据")
@@ -186,6 +254,19 @@ def main():
     sp.add_argument("--ths-exe", default=None, help="同花顺 xiadan.exe 路径，如 C:\\同花顺\\xiadan.exe")
     sp.set_defaults(func=cmd_run)
 
+    sp = sub.add_parser("simulate", help="模拟交易：选股→评估→下单（默认 ETF全球+etf_rotation）")
+    sp.add_argument("--strategy", default="etf_rotation",
+                    choices=["momentum", "etf_rotation", "mean_reversion",
+                             "cross_moving", "multifactor", "lianban_lead"])
+    sp.add_argument("--pool", default="ETF全球", help="推荐池名（默认 ETF全球）")
+    sp.add_argument("--codes", default="", help="自定义代码（覆盖 pool）")
+    sp.add_argument("--topk", type=int, default=DEFAULT_TOP_K)
+    sp.add_argument("--rebalance", type=int, default=DEFAULT_REBALANCE)
+    sp.add_argument("--timing", default=None, choices=[None, "ma20", "abs_mom", "rsrs", "bias"])
+    sp.add_argument("--ths", action="store_true", help="接入同花顺模拟盘下单")
+    sp.add_argument("--ths-exe", default=None, help="同花顺 xiadan.exe 路径")
+    sp.set_defaults(func=cmd_simulate)
+
     sp = sub.add_parser("daemon", help="每日定时自动运行")
     add_common(sp)
     sp.add_argument("--timing", default=None, choices=[None, "ma20", "abs_mom", "rsrs", "bias"])
@@ -195,6 +276,9 @@ def main():
 
     sp = sub.add_parser("status", help="查看持仓/订单")
     sp.set_defaults(func=cmd_status)
+
+    sp = sub.add_parser("reset", help="清空模拟盘状态（持仓/订单/净值），重新开始")
+    sp.set_defaults(func=cmd_reset)
 
     sp = sub.add_parser("ths-check", help="测试同花顺连接并读取资金/持仓")
     sp.add_argument("--ths-exe", default=None, help="同花顺 xiadan.exe 路径，如 C:\\同花顺\\xiadan.exe")

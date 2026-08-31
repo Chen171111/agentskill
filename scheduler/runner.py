@@ -34,10 +34,13 @@ class DailyRunner:
         self.store = DataStore()
         self.db = TradeDB()
         self.account = PortfolioAccount(init_cash=init_cash)
-        # 恢复历史持仓（若存在）
+        # 恢复历史持仓与现金（若存在）
         saved = self.db.load_positions()
         if saved:
             self.account.positions = saved
+        latest = self.db.load_latest_equity()
+        if latest:
+            self.account.cash = float(latest.get("cash", self.account.cash))
         self.strategy = create_strategy(strategy, topk=topk, rebalance_every=rebalance)
         # 券商：None 表示用 PaperBroker（本地模拟撮合）
         self.broker = broker
@@ -55,17 +58,40 @@ class DailyRunner:
         factors = compute_factors(panel, DEFAULT_FACTORS)
         last_date = panel.dates[-1]
 
-        # 生成策略目标权重（每次 run_once 视为一个调仓评估日，强制触发信号）
+        # 第一步 选股：策略原始信号（每次 run_once 视为一个调仓评估日，强制触发）
         self.strategy._since = max(0, self.strategy.rebalance_every - 1)
-        weights = self.strategy.generate_weights(last_date, factors, panel)
-        weights = weights or {}
+        raw_weights = self.strategy.generate_weights(last_date, factors, panel) or {}
 
-        # 风控修正（基于当前持仓成本）
+        mom_df = factors.get("momentum20")
+        selection = []
+        for c in panel.codes:
+            w = raw_weights.get(c, 0.0)
+            if w <= 0:
+                continue
+            mom = None
+            if mom_df is not None and c in mom_df.columns:
+                v = mom_df.loc[last_date, c]
+                mom = round(float(v) * 100, 2) if v == v else None
+            selection.append({"code": c, "name": config.ETF_NAMES.get(c, c),
+                              "weight": round(w, 4), "momentum20": mom})
+        selection.sort(key=lambda x: -x["weight"])
+
+        # 第二步 评估：绝对动量质检（20日动量≤0 视为无合适，剔除）+ 风控修正
+        qualified = {}
+        evaluation = []
+        for s in selection:
+            ok = s["momentum20"] is not None and s["momentum20"] > 0
+            if ok:
+                qualified[s["code"]] = raw_weights[s["code"]]
+            evaluation.append(dict(s, qualified=ok,
+                                   reason="" if ok else "20日动量≤0，剔除"))
+
         risk = RiskManager()
         prices = {c: float(panel.get("close").loc[last_date, c]) for c in panel.codes}
-        weights = risk.filter_weights(weights, self.account.positions, prices)
+        weights = risk.filter_weights(qualified, self.account.positions, prices)
+        empty = not bool(weights)   # 无合格标的 → 空仓
 
-        # 执行订单
+        # 第三步 下单（空仓时 ExecutionEngine 会自然清掉旧持仓）
         executor = ExecutionEngine(self.broker) if self.broker else ExecutionEngine()
         orders = executor.rebalance(self.account, weights, prices)
 
@@ -82,6 +108,10 @@ class DailyRunner:
             "date": last_date,
             "strategy": self.strategy_name,
             "target_weights": {c: round(w, 4) for c, w in weights.items()},
+            "final_weights": {c: round(w, 4) for c, w in weights.items()},
+            "selection": selection,
+            "evaluation": evaluation,
+            "empty": empty,
             "orders": [o.to_dict() for o in orders],
             "account": snap,
         }

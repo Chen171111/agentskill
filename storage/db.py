@@ -70,6 +70,13 @@ class TradeDB:
         return {r["code"]: {"qty": r["qty"], "cost": r["cost"], "peak": r["peak"]}
                 for r in rows}
 
+    def load_latest_equity(self) -> dict:
+        """读取最近一次记录的现金/市值/总资产，用于跨运行恢复现金。"""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM equity ORDER BY date DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
+
     def recent_orders(self, limit=20) -> list:
         with self._conn() as c:
             rows = c.execute(

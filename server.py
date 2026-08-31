@@ -26,13 +26,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
 
 DASH_PATH = ROOT / "dashboard" / "index.html"
 
-# ETF 名称映射（用于"今日建议"展示）
-ETF_NAMES = {
-    "510300.SH": "沪深300ETF", "510500.SH": "中证500ETF", "510050.SH": "上证50ETF",
-    "159915.SZ": "创业板ETF", "159928.SZ": "消费ETF", "159920.SZ": "恒生ETF",
-    "513100.SH": "纳指ETF", "513500.SH": "标普500ETF", "518880.SH": "黄金ETF",
-    "510880.SH": "红利ETF", "511010.SH": "国债ETF",
-}
+ETF_NAMES = config.ETF_NAMES
 
 
 def _today_picks():

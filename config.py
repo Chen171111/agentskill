@@ -32,6 +32,14 @@ RECOMMENDED_POOLS = {
                 "511010.SH"],
 }
 
+# ETF 名称映射（供展示/输出用）
+ETF_NAMES = {
+    "510300.SH": "沪深300ETF", "510500.SH": "中证500ETF", "510050.SH": "上证50ETF",
+    "159915.SZ": "创业板ETF", "159928.SZ": "消费ETF", "159920.SZ": "恒生ETF",
+    "513100.SH": "纳指ETF", "513500.SH": "标普500ETF", "518880.SH": "黄金ETF",
+    "510880.SH": "红利ETF", "511010.SH": "国债ETF",
+}
+
 TRADING_COST = {
     "commission_rate": 0.0003,
     "min_commission": 5.0,
