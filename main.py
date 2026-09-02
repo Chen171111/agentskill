@@ -13,7 +13,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import (RECOMMENDED_POOLS, DEFAULT_STRATEGY, DEFAULT_START, DEFAULT_END,
-                    DEFAULT_TOP_K, DEFAULT_REBALANCE, DEFAULT_DD_CIRCUIT, ensure_dirs)
+                    DEFAULT_TOP_K, DEFAULT_REBALANCE, DEFAULT_DD_CIRCUIT, ensure_dirs,
+                    THS_EXE_PATH)
 from analysis.metrics import format_metrics
 
 
@@ -49,7 +50,8 @@ def _make_broker(args):
     """根据命令行参数构造券商对象。--ths 表示接入同花顺客户端(含模拟炒股)。"""
     if getattr(args, "ths", None):
         from trader.broker import ThsBroker
-        return ThsBroker(exe_path=getattr(args, "ths_exe", None)).connect()
+        exe = getattr(args, "ths_exe", None) or THS_EXE_PATH
+        return ThsBroker(exe_path=exe).connect()
     return None
 
 
@@ -130,13 +132,10 @@ def cmd_ths_check(args):
 
 
 def cmd_simulate(args):
-    """模拟交易：选股 → 评估 → 下单（默认本地模拟撮合，--ths 接同花顺模拟盘）。"""
+    """模拟交易：选股 → 评估 → 下单（--ths 接同花顺模拟盘，默认本地模拟撮合）。"""
     from scheduler.runner import DailyRunner
-    from trader.broker import ThsBroker
     codes = _codes(args)
-    broker = None
-    if getattr(args, "ths", None):
-        broker = ThsBroker(exe_path=getattr(args, "ths_exe", None)).connect()
+    broker = _make_broker(args)
     runner = DailyRunner(codes, strategy=args.strategy, topk=args.topk,
                          rebalance=args.rebalance, timing=args.timing, broker=broker)
     r = runner.run_once()

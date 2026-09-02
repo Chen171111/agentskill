@@ -150,6 +150,47 @@ class DataStore:
                 print("[DataStore] 下载失败 {}: {}".format(code, e))
         return added
 
+    def _last_date(self, p: Path):
+        try:
+            df = pd.read_csv(p, dtype={"date": str})
+            if df.empty:
+                return None
+            return str(df["date"].max())
+        except Exception:
+            return None
+
+    def refresh(self, codes, now=None, force=False):
+        """强制刷新缓存到「最近已收盘交易日」（含交易日历）。
+
+        - 每个标的数据陈旧（最新日期 < 已收盘基准）时重新下载覆盖；
+        - 下载后裁剪掉晚于已收盘基准的行，避免盘中未收盘的实时 bar 混入；
+        - 个股/指数/ETF 统一走全量覆盖，保证复权口径一致（后续可优化为个股增量）。
+        """
+        import akshare as ak
+        from .calendar import latest_closed_trading_day
+        target = latest_closed_trading_day(now)
+        refreshed = []
+        for code in codes:
+            kind = classify_code(code)
+            self.dir_for(kind).mkdir(parents=True, exist_ok=True)
+            p = self.path_for(code)
+            last = self._last_date(p) if p.exists() else None
+            if not force and last is not None and last >= target:
+                continue  # 已新鲜，跳过
+            try:
+                df = _download_one(ak, code, kind)
+                if df is None or df.empty:
+                    continue
+                df = df[df["date"] <= target]
+                if df.empty:
+                    continue
+                df.to_csv(p, index=False)
+                self._cache.pop(code, None)
+                refreshed.append(code)
+            except Exception as e:
+                print("[refresh] {} 刷新失败: {}".format(code, e))
+        return refreshed
+
     def read(self, code: str, start=None, end=None):
         if code in self._cache:
             df = self._cache[code].copy()

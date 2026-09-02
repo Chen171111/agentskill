@@ -6,6 +6,7 @@ import pandas as pd
 
 import config
 from .account import BacktestAccount
+from dataprovider.store import classify_code
 
 _TRADING_DAYS = getattr(config, "TRADING_DAYS_PER_YEAR", 244)
 
@@ -164,10 +165,58 @@ class BacktestEngine:
             scale = min(scale, self._vol_target_scale())
         return float(np.clip(scale, 0.0, 1.0))
 
+    def _row(self, df, date):
+        """取某字段当日行，过滤 NaN，返回 {code: 值}。"""
+        if df is None or date not in df.index:
+            return {}
+        r = df.loc[date]
+        return {c: r[c] for c in r.index if r[c] == r[c]}
+
+    @staticmethod
+    def _limit_pct(code):
+        """个股涨跌停幅度。ETF/基金无涨跌停返回 None。"""
+        kind = classify_code(code)
+        if kind != "stock":
+            return None
+        cu = code.upper()
+        if cu.startswith("688") or cu.startswith("300") or cu.startswith("301"):
+            return 0.20   # 科创板/创业板
+        return 0.10       # 主板
+
+    def _blocked(self, date, open_px, prev_close, volume):
+        """当日不可成交集合：停牌 + 一字涨停(买不进) / 一字跌停(卖不出)。"""
+        buy_blocked, sell_blocked = set(), set()
+        for code in self.panel.codes:
+            vol = None
+            if volume is not None and date in volume.index and code in volume.columns:
+                vol = volume.loc[date, code]
+            is_suspend = vol is None or vol != vol or vol == 0
+            if is_suspend:
+                buy_blocked.add(code)
+                sell_blocked.add(code)
+                continue
+            limit = self._limit_pct(code)
+            if limit is None:
+                continue  # ETF/基金无涨跌停
+            pc = prev_close.loc[date, code] if prev_close is not None and date in prev_close.index else None
+            if pc is None or pc != pc or pc <= 0:
+                continue
+            oc = open_px.get(code)
+            if oc is None:
+                continue
+            if oc >= round(pc * (1 + limit), 2):
+                buy_blocked.add(code)
+            if oc <= round(pc * (1 - limit), 2):
+                sell_blocked.add(code)
+        return buy_blocked, sell_blocked
+
     def run(self) -> BacktestResult:
         dates = self.panel.dates
         close = self.panel.get("close")
-        rate = self.panel.get("rate")
+        open_ = self.panel.get("open")
+        volume = self.panel.get("volume")
+        prev_close = close.shift(1) if close is not None else None
+
         bench_nav = None
         if self.benchmark is not None:
             bc = self.benchmark
@@ -175,34 +224,44 @@ class BacktestEngine:
             bench_nav = b0 / b0.iloc[0]
 
         holdings = {}
+        pending = None  # 上一交易日收盘决策的目标权重，今日开盘成交
         for date in dates:
-            if date in rate.index:
-                rates = {c: (r if r == r else 0.0) for c, r in rate.loc[date].items()}
-            else:
-                rates = {}
-            self.acc.update(date, rates)
-            self._nav_history.append(self.acc.total())
+            close_px = self._row(close, date)
+            open_px = self._row(open_, date)
+            buy_blocked, sell_blocked = self._blocked(date, open_px, prev_close, volume)
 
+            # 1) 今日开盘执行昨日决策（避免「当日收盘信号 + 当日收盘成交」的前视偏差）
+            if pending is not None:
+                self.acc.trade(pending, open_px, buy_blocked, sell_blocked)
+                pending = None
+
+            # 2) 今日收盘记账
+            px = close_px or open_px
+            if not px:
+                holdings[date] = self.acc.holding()
+                self._nav_history.append(self._nav_history[-1] if self._nav_history else self.acc.total({}))
+                continue
+            self.acc.mark_to_close(date, px)
+            self._nav_history.append(self.acc.total(px))
+
+            # 3) 今日收盘后决策（生成下一开盘的调仓目标）
             weights = self.strategy.generate_weights(date, self.factors, self.panel)
-            # None=非调仓日不动作；空 dict=调仓日清仓（如趋势过滤全破位/情绪门空仓）
+            # None=非调仓日不动作；空 dict=调仓日清仓（趋势过滤全破位/情绪门空仓）
             if weights is not None:
-                # 信号稳定性过滤（BigQuant 思想）：本/上期标的集合重叠度过低 → 空仓
                 if self.stability_min_overlap is not None:
                     cur_codes = set(weights.keys())
                     if self._last_codes is not None:
                         overlap = len(cur_codes & self._last_codes) / max(len(cur_codes), 1)
                         if overlap < self.stability_min_overlap:
-                            # 信号不稳，本期空仓（清掉已有持仓，不建新仓）
-                            self.acc.rebalance({})
                             self._last_codes = cur_codes
+                            pending = {}  # 信号不稳 → 下一开盘清仓
                             holdings[date] = self.acc.holding()
                             continue
                     self._last_codes = cur_codes
-                # 大盘择时 + 组合层风控（回撤熔断 + 波动率目标）
                 scale = self._timing_scale(date) * self._portfolio_risk_scale()
                 if scale < 1.0:
                     weights = {c: w * scale for c, w in weights.items()}
-                self.acc.rebalance(weights)
+                pending = weights
             holdings[date] = self.acc.holding()
 
         return BacktestResult(self.acc.results(), holdings, bench_nav)

@@ -15,6 +15,12 @@ import config
 _cost = config.TRADING_COST
 
 
+def _is_a_stock(code: str) -> bool:
+    """判断是否 A股个股（用于印花税：个股卖出收 0.1%，ETF/基金免征）。"""
+    from dataprovider.store import classify_code
+    return classify_code(code) == "stock"
+
+
 class Order:
     """订单对象。side: buy/sell。"""
 
@@ -86,9 +92,11 @@ class PaperBroker(Broker):
             filled = px * (1 - self.slippage_rate)
 
         notional = filled * order.qty
-        fee = notional * (self.commission_rate + self.slippage_rate)
+        # 佣金（滑点已体现在成交价里，不再重复计费）
+        fee = notional * self.commission_rate
         fee = max(fee, self.min_commission if order.qty > 0 else 0.0)
-        if order.side == "sell":
+        # 印花税：仅个股卖出收取（ETF/基金免征）
+        if order.side == "sell" and _is_a_stock(order.code):
             fee += notional * self.sell_tax_rate
 
         order.status = "filled"

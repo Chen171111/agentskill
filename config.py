@@ -49,6 +49,9 @@ TRADING_COST = {
 
 INIT_CASH = 200_000.0
 
+# 同花顺经典版客户端路径（模拟炒股下单用；需已登录、窗口保持打开不可最小化）
+THS_EXE_PATH = r"D:\同花顺软件\同花顺\xiadan.exe"
+
 # ---- 年化交易日数（A股约 244，美股约 252）----
 TRADING_DAYS_PER_YEAR = 244
 

@@ -47,7 +47,9 @@ class DailyRunner:
 
     def run_once(self, end: str = None) -> dict:
         """执行一个交易日的完整闭环。end 传 None 则用最新数据。"""
+        # 先补缺，再强制增量刷新缓存到「最近已收盘交易日」，杜绝用陈旧数据下单
         self.store.ensure(self.codes)
+        self.store.refresh(self.codes)
         end = end or datetime.now().strftime("%Y%m%d")
         # 取最近 200 个交易日用于计算因子
         start = _n_days_ago(end, 200)
@@ -137,8 +139,9 @@ class Scheduler:
         self._last_run = None
 
     def _is_trading_day(self) -> bool:
-        """A股：周一至周五（不含节假日，节假日判断从简，可替换为交易日历）。"""
-        return date.today().weekday() < 5
+        """A股交易日：接入 akshare 交易日历，识别节假日（替代粗糙的 weekday 判断）。"""
+        from dataprovider.calendar import is_trading_day
+        return is_trading_day(date.today())
 
     def run_forever(self):
         print("[Scheduler] 启动，每日 {} 触发（仅交易日）。Ctrl+C 退出。".format(self.run_time))
