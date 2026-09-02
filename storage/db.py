@@ -77,6 +77,12 @@ class TradeDB:
                 "SELECT * FROM equity ORDER BY date DESC LIMIT 1").fetchone()
         return dict(row) if row else None
 
+    def load_equity_history(self) -> list:
+        """读取历史组合净值序列（total，升序），用于组合级回撤熔断/波动率目标。"""
+        with self._conn() as c:
+            rows = c.execute("SELECT total FROM equity ORDER BY date ASC").fetchall()
+        return [r["total"] for r in rows]
+
     def recent_orders(self, limit=20) -> list:
         with self._conn() as c:
             rows = c.execute(

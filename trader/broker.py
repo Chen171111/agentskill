@@ -163,8 +163,9 @@ class ThsBroker(Broker):
             order.status = "filled"
             order.filled_price = price
             order.filled_qty = int(order.qty)
-            # 注：同花顺实际成交价/数量以委托回报为准，此处按限价记录，佣金由券商核算
             order.fee = 0.0
+            # 回读今日成交，用真实成交价/数量修正订单（替代限价记账，避免账本失真）
+            self.sync_fill(order)
         except Exception as e:
             order.status = "rejected"
             order.reason = "下单失败: {}".format(e)
@@ -182,3 +183,128 @@ class ThsBroker(Broker):
     @property
     def today_trades(self):
         return self.user.today_trades
+
+    # ---- 对账：回读同花顺真实持仓/资金/成交，消除双账本 ----
+
+    @staticmethod
+    def _as_records(data):
+        """把 easytrader 返回的 DataFrame/dict/list 统一成 list[dict]。"""
+        if data is None:
+            return []
+        if hasattr(data, "to_dict"):
+            try:
+                return data.to_dict("records")
+            except Exception:
+                return []
+        if isinstance(data, dict):
+            return [data]
+        if isinstance(data, (list, tuple)):
+            return [d for d in data if isinstance(d, dict)]
+        return []
+
+    @staticmethod
+    def _pick(rec, *keys):
+        for k in keys:
+            if k in rec and rec[k] is not None:
+                return rec[k]
+        return None
+
+    @staticmethod
+    def _guess_full_code(code6: str) -> str:
+        code6 = str(code6).zfill(6)
+        if code6.startswith(("6", "9", "5")):
+            return code6 + ".SH"
+        if code6.startswith(("0", "3", "1")):
+            return code6 + ".SZ"
+        return code6
+
+    def fetch_position(self) -> dict:
+        """回读同花顺真实持仓 → {纯代码: {"qty", "cost", "price"}}。"""
+        try:
+            records = self._as_records(self.user.position)
+        except Exception as e:
+            print("[ThsBroker] 读取持仓失败: {}".format(e))
+            return {}
+        out = {}
+        for r in records:
+            raw = self._pick(r, "证券代码", "股票代码", "证券", "code")
+            if raw is None:
+                continue
+            code = str(raw).zfill(6)
+            qty = self._pick(r, "股票余额", "持仓数量", "当前持仓", "可用余额", "qty")
+            try:
+                qty = int(float(qty)) if qty is not None else 0
+            except (TypeError, ValueError):
+                qty = 0
+            if qty <= 0:
+                continue
+            cost = self._pick(r, "成本价", "摊薄成本", "成本", "cost")
+            price = self._pick(r, "市价", "最新价", "price")
+            out[code] = {
+                "qty": qty,
+                "cost": float(cost) if cost is not None else 0.0,
+                "price": float(price) if price is not None else 0.0,
+            }
+        return out
+
+    def fetch_balance(self) -> dict:
+        """回读同花顺真实资金 → {"cash", "market_value", "total"}（字段可得则返回）。"""
+        try:
+            records = self._as_records(self.user.balance)
+        except Exception as e:
+            print("[ThsBroker] 读取资金失败: {}".format(e))
+            return {}
+        if not records:
+            return {}
+        r = records[0]
+        out = {}
+        cash = self._pick(r, "可用金额", "可用资金", "资金余额", "enable_balance", "cash")
+        mv = self._pick(r, "股票市值", "证券市值", "持仓市值", "market_value")
+        total = self._pick(r, "总资产", "资产总值", "total_asset", "total")
+        if cash is not None:
+            out["cash"] = float(cash)
+        if mv is not None:
+            out["market_value"] = float(mv)
+        if total is not None:
+            out["total"] = float(total)
+        return out
+
+    def sync_fill(self, order: Order):
+        """下单后回读今日成交，用真实成交价/数量修正订单（替代限价记账）。"""
+        try:
+            records = self._as_records(self.user.today_trades)
+        except Exception:
+            return
+        code = self._pure_code(order.code)
+        for r in records:
+            rc = self._pick(r, "证券代码", "股票代码", "证券", "code")
+            if rc is None or str(rc).zfill(6) != code:
+                continue
+            px = self._pick(r, "成交价格", "成交价", "价格", "price")
+            qty = self._pick(r, "成交数量", "成交量", "数量", "qty")
+            if px is not None:
+                order.filled_price = float(px)
+            if qty is not None:
+                order.filled_qty = int(float(qty))
+            return
+
+    def reconcile(self, account) -> bool:
+        """用同花顺真实持仓/资金校正本地账户，消除双账本。返回是否校正成功。"""
+        pos = self.fetch_position()
+        bal = self.fetch_balance()
+        if not pos and not bal:
+            return False
+        new_positions = {}
+        for code, p in pos.items():
+            full = self._guess_full_code(code)
+            new_positions[full] = {
+                "qty": p["qty"],
+                "cost": p["cost"],
+                "peak": p["price"] or p["cost"] or 0.0,
+            }
+        account.positions = new_positions
+        if "cash" in bal:
+            account.cash = bal["cash"]
+        elif "total" in bal and "market_value" in bal:
+            account.cash = bal["total"] - bal["market_value"]
+        return True

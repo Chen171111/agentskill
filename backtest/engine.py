@@ -7,6 +7,7 @@ import pandas as pd
 import config
 from .account import BacktestAccount
 from dataprovider.store import classify_code
+from risk.portfolio import PortfolioRisk
 
 _TRADING_DAYS = getattr(config, "TRADING_DAYS_PER_YEAR", 244)
 
@@ -38,15 +39,13 @@ class BacktestEngine:
         self.timing = timing
         self.timing_window = timing_window
         self.timing_scale_off = timing_scale_off
-        # 组合层风控
-        self.dd_circuit = bool(dd_circuit)          # 回撤熔断开关
-        self.vol_target = float(vol_target) if vol_target else None  # 目标年化波动率
+        # 组合层风控（回撤熔断 + 波动率目标，与实盘共享 PortfolioRisk）
+        self._p_risk = PortfolioRisk(dd_circuit=dd_circuit, vol_target=vol_target)
         # 信号稳定性过滤：本/上期 TopK 重叠度 < 阈值 → 空仓（BigQuant 信号稳定性思想）
         self.stability_min_overlap = (float(stability_min_overlap)
                                       if stability_min_overlap else None)
         self._last_codes = None                     # 上一调仓期的标的集合
         self._nav_history = []                      # 组合净值历史（用于组合层风控）
-        self._cb_active = False                     # 回撤熔断滞回状态（是否处于熔断态）
         self._timing_ma = None
         self._timing_mom = None
         self._timing_rsrs = None
@@ -114,56 +113,9 @@ class BacktestEngine:
             return 1.0 if c > 0 else self.timing_scale_off
         return 1.0
 
-    def _circuit_scale(self, dd_depth: float) -> float:
-        """回撤熔断定仓（带滞回状态机）。
-
-        进入熔断：回撤 ≥ _CB_TRIGGER（15%）→ 按深度定档降仓；
-        退出熔断：回撤 ≤ _CB_RECOVER（10%）→ 恢复满仓（滞回带避免震荡）。
-        """
-        if self._cb_active:
-            # 熔断态：回撤修复到恢复线以下才退出
-            if dd_depth <= _CB_RECOVER:
-                self._cb_active = False
-                return 1.0
-        else:
-            # 非熔断态：回撤触及触发线才进入
-            if dd_depth >= _CB_TRIGGER:
-                self._cb_active = True
-            else:
-                return 1.0
-
-        # 熔断态：按深度定档（从深到浅）
-        for trig, lvl in _CB_LEVELS:
-            if dd_depth >= trig:
-                return lvl
-        return 1.0
-
-    def _vol_target_scale(self) -> float:
-        """波动率目标仓位（仅调仓日应用）：组合实际波动 > 目标 → 等比降仓。"""
-        if not self.vol_target:
-            return 1.0
-        nav = self._nav_history
-        if len(nav) < 20:
-            return 1.0
-        rets = pd.Series(nav).pct_change().dropna().tail(20)
-        realized = rets.std() * np.sqrt(_TRADING_DAYS)
-        if realized <= 0.001:
-            return 1.0
-        return float(np.clip(self.vol_target / realized, 0.0, 1.0))
-
     def _portfolio_risk_scale(self) -> float:
-        """组合层风控（调仓日应用）：回撤熔断 + 波动率目标，返回 0~1 仓位系数。"""
-        scale = 1.0
-        nav = self._nav_history
-        if len(nav) < 2:
-            return scale
-        if self.dd_circuit:
-            peak = max(nav)
-            dd_depth = 1.0 - nav[-1] / peak
-            scale = self._circuit_scale(dd_depth)
-        if self.vol_target:
-            scale = min(scale, self._vol_target_scale())
-        return float(np.clip(scale, 0.0, 1.0))
+        """组合层风控（调仓日应用）：回撤熔断 + 波动率目标，返回 0~1 仓位系数（共享 PortfolioRisk）。"""
+        return self._p_risk.scale(self._nav_history)
 
     def _row(self, df, date):
         """取某字段当日行，过滤 NaN，返回 {code: 值}。"""

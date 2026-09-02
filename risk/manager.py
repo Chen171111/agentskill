@@ -5,18 +5,26 @@
 - 限制单标的权重上限与组合总仓位上限。
 """
 import config
+from .portfolio import PortfolioRisk
 
 
 class RiskManager:
-    def __init__(self, risk: dict = None):
+    def __init__(self, risk: dict = None, dd_circuit: bool = None, vol_target: float = None):
         risk = risk or config.RISK
         self.max_position_weight = risk.get("max_position_weight", 0.30)
         self.max_total_weight = risk.get("max_total_weight", 0.95)
         self.stop_loss = risk.get("stop_loss", -0.08)
         self.take_profit = risk.get("take_profit", 0.30)
         self.trailing_stop = risk.get("trailing_stop", 0.15)
+        # 组合级风控（回撤熔断 + 波动率目标，默认跟随 config，与回测同一套）
+        if dd_circuit is None:
+            dd_circuit = config.DEFAULT_DD_CIRCUIT
+        if vol_target is None:
+            vol_target = config.DEFAULT_VOL_TARGET
+        self.portfolio = PortfolioRisk(dd_circuit=dd_circuit, vol_target=vol_target)
 
-    def filter_weights(self, target_weights: dict, positions: dict, prices: dict) -> dict:
+    def filter_weights(self, target_weights: dict, positions: dict, prices: dict,
+                       nav_history=None) -> dict:
         """根据当前持仓与成本，过滤/修正目标权重。
 
         参数
@@ -62,5 +70,11 @@ class RiskManager:
         if total > self.max_total_weight:
             scale = self.max_total_weight / total
             out = {c: w * scale for c, w in out.items()}
+
+        # 组合级风控：回撤熔断 + 波动率目标（基于组合净值历史，与回测共享 PortfolioRisk）
+        if nav_history is not None:
+            pscale = self.portfolio.scale(nav_history)
+            if pscale < 1.0:
+                out = {c: w * pscale for c, w in out.items()}
 
         return out

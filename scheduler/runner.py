@@ -90,12 +90,23 @@ class DailyRunner:
 
         risk = RiskManager()
         prices = {c: float(panel.get("close").loc[last_date, c]) for c in panel.codes}
-        weights = risk.filter_weights(qualified, self.account.positions, prices)
+        # 组合级风控净值历史：DB 历史净值 + 当日总资产（接入回撤熔断 + 波动率目标）
+        nav_history = self.db.load_equity_history()
+        nav_history.append(self.account.total_equity(prices))
+        weights = risk.filter_weights(qualified, self.account.positions, prices,
+                                     nav_history=nav_history)
         empty = not bool(weights)   # 无合格标的 → 空仓
 
         # 第三步 下单（空仓时 ExecutionEngine 会自然清掉旧持仓）
         executor = ExecutionEngine(self.broker) if self.broker else ExecutionEngine()
         orders = executor.rebalance(self.account, weights, prices)
+
+        # 账本对账（同花顺模式）：回读真实持仓/资金校正本地账户，杜绝双账本
+        if self.broker is not None and hasattr(self.broker, "reconcile"):
+            try:
+                self.broker.reconcile(self.account)
+            except Exception as e:
+                print("[runner] 对账失败: {}".format(e))
 
         # 持久化
         for o in orders:
