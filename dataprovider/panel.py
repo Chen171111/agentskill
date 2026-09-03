@@ -24,6 +24,19 @@ class Panel:
     def __len__(self):
         return len(self.codes)
 
+    def slice(self, start=None, end=None):
+        """按日期截断面板（用于因子 warmup 预热后截取回测区间）。"""
+        close = self.fields.get("close")
+        if close is None:
+            return self
+        idx = close.index
+        if start:
+            idx = idx[idx >= str(start)]
+        if end:
+            idx = idx[idx <= str(end)]
+        fields = {f: df.reindex(idx) for f, df in self.fields.items()}
+        return Panel(fields, self.codes, self.categories)
+
 
 def build_panel(store: DataStore, codes, start=None, end=None,
                 fields: List[str] = None, align="close") -> Panel:

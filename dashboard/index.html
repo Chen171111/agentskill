@@ -167,6 +167,9 @@ a{color:var(--accent)}
 </div>
 
 <script>
+// —— 访问令牌注入：URL ?token=xxx 或 localStorage，自动给 /api/* 请求带 X-Access-Token ——
+const __tk=(()=>{const t=new URLSearchParams(location.search).get('token');if(t)localStorage.setItem('agentskill_token',t);return localStorage.getItem('agentskill_token')||'';})();
+if(__tk){const __f=window.fetch;window.fetch=(u,o)=>{o=o||{};if(String(u).startsWith('/api/')){o.headers=Object.assign({},o.headers,{'X-Access-Token':__tk});}return __f(u,o);};}
 const $=id=>document.getElementById(id);
 const UP='#f0483e', DOWN='#16c784';
 const navChart=echarts.init($('navChart'));

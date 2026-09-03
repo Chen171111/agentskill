@@ -8,7 +8,7 @@ import time
 from datetime import datetime, date
 
 import config
-from dataprovider.store import DataStore
+from dataprovider.store import DataStore, validate_tradeable
 from dataprovider.panel import build_panel
 from factors.engine import compute_factors
 from strategies.registry import create_strategy
@@ -26,6 +26,7 @@ class DailyRunner:
 
     def __init__(self, codes, strategy="momentum", topk=5, rebalance=5, timing=None,
                  init_cash=None, broker=None):
+        validate_tradeable(codes)   # 指数不可直接交易，前置拦截
         self.codes = codes
         self.strategy_name = strategy
         self.topk = topk
@@ -42,6 +43,13 @@ class DailyRunner:
         if latest:
             self.account.cash = float(latest.get("cash", self.account.cash))
         self.strategy = create_strategy(strategy, topk=topk, rebalance_every=rebalance)
+        # 恢复调仓计数（跨运行持久化，与回测「每 N 日调仓」口径一致）
+        saved_since = self.db.get_state("strategy_since")
+        if saved_since is not None:
+            try:
+                self.strategy._since = int(saved_since)
+            except (TypeError, ValueError):
+                pass
         # 券商：None 表示用 PaperBroker（本地模拟撮合）
         self.broker = broker
 
@@ -59,10 +67,25 @@ class DailyRunner:
 
         factors = compute_factors(panel, DEFAULT_FACTORS)
         last_date = panel.dates[-1]
+        prices = {c: float(panel.get("close").loc[last_date, c]) for c in panel.codes}
 
-        # 第一步 选股：策略原始信号（每次 run_once 视为一个调仓评估日，强制触发）
-        self.strategy._since = max(0, self.strategy.rebalance_every - 1)
-        raw_weights = self.strategy.generate_weights(last_date, factors, panel) or {}
+        # 第一步 选股：仅在调仓日触发（与回测「每 N 日调仓」口径一致，非调仓日返回 None）
+        raw_weights = self.strategy.generate_weights(last_date, factors, panel)
+        self.db.set_state("strategy_since", str(self.strategy._since))
+
+        if raw_weights is None:
+            # 非调仓日：不重新选股、不清仓，仅记录当日净值
+            snap = self.account.snapshot(prices)
+            self.db.save_equity(last_date, snap["cash"], snap["market_value"],
+                                snap["total_equity"])
+            return {
+                "status": "ok", "date": last_date, "strategy": self.strategy_name,
+                "rebalanced": False, "target_weights": {}, "final_weights": {},
+                "selection": [], "evaluation": [], "empty": True,
+                "orders": [], "account": snap,
+            }
+
+        raw_weights = raw_weights or {}   # 调仓日（空 dict 表示清仓）
 
         mom_df = factors.get("momentum20")
         selection = []
@@ -89,7 +112,6 @@ class DailyRunner:
                                    reason="" if ok else "20日动量≤0，剔除"))
 
         risk = RiskManager()
-        prices = {c: float(panel.get("close").loc[last_date, c]) for c in panel.codes}
         # 组合级风控净值历史：DB 历史净值 + 当日总资产（接入回撤熔断 + 波动率目标）
         nav_history = self.db.load_equity_history()
         nav_history.append(self.account.total_equity(prices))
@@ -120,6 +142,7 @@ class DailyRunner:
             "status": "ok",
             "date": last_date,
             "strategy": self.strategy_name,
+            "rebalanced": True,
             "target_weights": {c: round(w, 4) for c, w in weights.items()},
             "final_weights": {c: round(w, 4) for c, w in weights.items()},
             "selection": selection,

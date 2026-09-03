@@ -41,6 +41,11 @@ class BacktestEngine:
         self.timing_scale_off = timing_scale_off
         # 组合层风控（回撤熔断 + 波动率目标，与实盘共享 PortfolioRisk）
         self._p_risk = PortfolioRisk(dd_circuit=dd_circuit, vol_target=vol_target)
+        # 个股级风控（止损/止盈/回撤止盈，与实盘 RiskManager 同构）
+        _risk = config.RISK
+        self.stop_loss = float(_risk.get("stop_loss", -0.08))
+        self.take_profit = float(_risk.get("take_profit", 0.30))
+        self.trailing_stop = float(_risk.get("trailing_stop", 0.15))
         # 信号稳定性过滤：本/上期 TopK 重叠度 < 阈值 → 空仓（BigQuant 信号稳定性思想）
         self.stability_min_overlap = (float(stability_min_overlap)
                                       if stability_min_overlap else None)
@@ -214,6 +219,12 @@ class BacktestEngine:
                 if scale < 1.0:
                     weights = {c: w * scale for c, w in weights.items()}
                 pending = weights
+            # 个股级止损/止盈/回撤止盈（与实盘 RiskManager 同构）：触发则下一开盘强平
+            stop_codes = self.acc.stop_loss_codes(px, self.stop_loss, self.take_profit, self.trailing_stop)
+            if stop_codes:
+                pending = pending or {}
+                for c in stop_codes:
+                    pending[c] = 0.0
             holdings[date] = self.acc.holding()
 
         return BacktestResult(self.acc.results(), holdings, bench_nav)

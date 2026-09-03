@@ -1,4 +1,5 @@
 """agentskill 统一配置：路径、交易成本、风控、调度参数。"""
+import os
 from pathlib import Path
 
 
@@ -11,11 +12,13 @@ RESULT_DIR = PROJECT_ROOT / "results"
 DB_PATH = PROJECT_ROOT / "state" / "trading.db"
 
 RECOMMENDED_POOLS = {
+    # 指数池（指数不可直接交易，仅作基准/指标参考，选作交易标的会被 validate_tradeable 拦截）
     "宽基成长": ["000300.SH", "000905.SH", "000852.SH", "000688.SH", "399006.SZ",
                  "399673.SZ", "399005.SZ"],
     "行业轮动": ["399997.SZ", "399989.SZ", "399967.SZ", "399986.SZ",
                  "399808.SZ", "000688.SH", "399673.SZ", "399975.SZ"],
-    "default": ["000300.SH", "000905.SH", "399006.SZ", "399324.SZ"],
+    # 默认池：可交易的 ETF（指数不可直接交易）
+    "default": ["510300.SH", "510500.SH", "159915.SZ", "510880.SH"],
     # ===== ETF 池 =====
     "ETF宽基": ["510300.SH", "510500.SH", "510050.SH", "159915.SZ", "159949.SZ",
                 "512100.SH"],
@@ -51,6 +54,10 @@ INIT_CASH = 200_000.0
 
 # 同花顺经典版客户端路径（模拟炒股下单用；需已登录、窗口保持打开不可最小化）
 THS_EXE_PATH = r"D:\同花顺软件\同花顺\xiadan.exe"
+
+# Web 访问令牌：设置后 /api/* 敏感接口需请求头 X-Access-Token 匹配（公网分享前务必设置）
+# 建议通过环境变量 AGENTSKILL_TOKEN 设置；None = 不鉴权（仅本地开发）
+ACCESS_TOKEN = os.environ.get("AGENTSKILL_TOKEN")
 
 # ---- 年化交易日数（A股约 244，美股约 252）----
 TRADING_DAYS_PER_YEAR = 244

@@ -1,10 +1,11 @@
 """agentskill：自动化量化交易模型。
 
 用法：
-    python main.py backtest --strategy momentum --codes 000300.SH,399006.SZ --start 20190101 --end 20251231
-    python main.py run       --strategy momentum --codes 000300.SH,399006.SZ   # 模拟盘单次运行
-    python main.py daemon    --strategy momentum --codes 000300.SH,399006.SZ   # 每日定时自动运行
-    python main.py status                                                      # 查看持仓/净值
+    python main.py backtest --strategy etf_rotation --pool ETF全球 --start 20200101 --end 20251231
+    python main.py run       --strategy etf_rotation --pool ETF全球   # 模拟盘单次运行
+    python main.py daemon    --strategy etf_rotation --pool ETF全球   # 每日定时自动运行
+    python main.py status                                              # 查看持仓/净值
+    说明：交易标的须为可买卖的 ETF/个股（指数不可直接交易，请用 --benchmark 指定基准）。
 """
 import argparse
 import sys
@@ -226,7 +227,7 @@ def main():
         sp.add_argument("--strategy", default=DEFAULT_STRATEGY,
                         choices=["momentum", "etf_rotation", "mean_reversion", "cross_moving",
                                  "multifactor", "lianban_lead"])
-        sp.add_argument("--codes", default="000300.SH,000905.SH,399006.SZ,000688.SH")
+        sp.add_argument("--codes", default="510300.SH,510500.SH,159915.SZ,510880.SH")
         sp.add_argument("--pool", default=None, help="推荐池名（覆盖 codes）")
         sp.add_argument("--topk", type=int, default=DEFAULT_TOP_K)
         sp.add_argument("--rebalance", type=int, default=DEFAULT_REBALANCE)

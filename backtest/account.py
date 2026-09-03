@@ -1,6 +1,7 @@
 """回测账户：数量式组合账户（对齐实盘 PortfolioAccount 口径）。
 
-按开盘价撮合到目标权重，计入整手(100股)、手续费/滑点/印花税，每日按收盘价记账。
+按开盘价撮合到目标权重，计入整手(100股)、手续费/滑点/印花税，每日按收盘价记账；
+持仓记录成本价与持仓期峰值，供个股级止损/止盈/回撤止盈（与实盘 RiskManager 同构）。
 """
 import pandas as pd
 
@@ -27,19 +28,27 @@ class BacktestAccount:
         self.min_commission = float(cost.get("min_commission", 5.0))
         self.sell_tax = float(cost.get("sell_tax_rate", 0.001))
         self.slippage = float(cost.get("slippage_rate", 0.0005))
-        self.positions = {}   # {code: int 股数}
+        self.positions = {}   # {code: {"qty": int, "cost": float, "peak": float}}
         self._dates = []
         self._equity = []
 
+    def _qty(self, code: str) -> int:
+        p = self.positions.get(code)
+        return p["qty"] if p else 0
+
     # ---- 市值 / 权益 ----
     def market_value(self, prices: dict) -> float:
-        return sum(qty * prices.get(c, 0.0) for c, qty in self.positions.items())
+        return sum(p["qty"] * prices.get(c, 0.0) for c, p in self.positions.items())
 
     def total(self, prices: dict = None) -> float:
         return self.cash + self.market_value(prices or {})
 
     def mark_to_close(self, date, prices: dict):
-        """每日收盘记录总权益（现金 + 收盘市值）。"""
+        """每日收盘：更新持仓峰值 + 记录总权益。"""
+        for code, p in self.positions.items():
+            px = prices.get(code)
+            if px and px > p["peak"]:
+                p["peak"] = px
         self._dates.append(date)
         self._equity.append(self.cash + self.market_value(prices))
 
@@ -70,28 +79,29 @@ class BacktestAccount:
 
         # 1) 先卖：减仓/清仓（跌停/停牌卖不出）
         for code in list(self.positions.keys()):
-            qty = self.positions.get(code, 0)
+            qty = self._qty(code)
             px = open_prices.get(code, 0.0)
             if qty <= 0 or px <= 0 or code in sell_blocked:
                 continue
-            cur_mv = qty * px
-            if cur_mv > target_mv.get(code, 0.0):
-                sell_qty = min(_round_lot(int((cur_mv - target_mv.get(code, 0.0)) / px)), qty)
+            if qty * px > target_mv.get(code, 0.0):
+                sell_qty = min(_round_lot(int((qty * px - target_mv.get(code, 0.0)) / px)), qty)
                 if sell_qty <= 0:
                     continue
                 fill = px * (1 - self.slippage)
                 notional = fill * sell_qty
                 self.cash += notional - self._fee(notional, True, code)
-                self.positions[code] = qty - sell_qty
-                if self.positions[code] <= 0:
+                new_qty = qty - sell_qty
+                if new_qty <= 0:
                     del self.positions[code]
+                else:
+                    self.positions[code]["qty"] = new_qty
 
         # 2) 后买：建仓/加仓（涨停/停牌买不进，现金不足按整手收敛）
         for code, tgt_mv in target_mv.items():
             px = open_prices.get(code, 0.0)
             if px <= 0 or code in buy_blocked:
                 continue
-            cur_qty = self.positions.get(code, 0)
+            cur_qty = self._qty(code)
             if tgt_mv > cur_qty * px:
                 fill = px * (1 + self.slippage)
                 buy_qty = _round_lot(int(min(tgt_mv - cur_qty * px, self.cash) / fill))
@@ -99,11 +109,38 @@ class BacktestAccount:
                     buy_qty -= 100
                 if buy_qty > 0:
                     notional = fill * buy_qty
-                    self.cash -= notional + self._fee(notional, False, code)
-                    self.positions[code] = self.positions.get(code, 0) + buy_qty
+                    fee = self._fee(notional, False, code)
+                    self.cash -= notional + fee
+                    old = self.positions.get(code)
+                    if old:
+                        tot_cost = old["cost"] * old["qty"] + notional + fee
+                        old["qty"] += buy_qty
+                        old["cost"] = tot_cost / old["qty"]
+                        old["peak"] = max(old["peak"], fill)
+                    else:
+                        self.positions[code] = {"qty": buy_qty,
+                                                "cost": (notional + fee) / buy_qty,
+                                                "peak": fill}
+
+    def stop_loss_codes(self, prices: dict, stop_loss=-0.08,
+                        take_profit=0.30, trailing_stop=0.15):
+        """返回触发个股级止损/止盈/回撤止盈的 code 集合（与实盘 RiskManager 同构）。"""
+        out = set()
+        for code, p in self.positions.items():
+            px = prices.get(code)
+            if not px or p["cost"] <= 0:
+                continue
+            ret = px / p["cost"] - 1.0
+            if ret <= stop_loss:
+                out.add(code)
+            elif ret >= take_profit:
+                out.add(code)
+            elif ret > 0 and p["peak"] > 0 and (px / p["peak"] - 1.0) <= -trailing_stop:
+                out.add(code)
+        return out
 
     def holding(self) -> list:
-        return [c for c, qty in self.positions.items() if qty > 0]
+        return [c for c, p in self.positions.items() if p["qty"] > 0]
 
     def results(self) -> pd.DataFrame:
         df = pd.DataFrame({"date": self._dates, "value": self._equity})

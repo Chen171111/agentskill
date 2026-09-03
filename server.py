@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 import uvicorn
 
 import config
@@ -21,8 +21,19 @@ from strategies.registry import list_strategies
 from storage.db import TradeDB
 
 app = FastAPI(title="agentskill 自动化量化交易", version="0.1.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
-                   allow_headers=["*"])
+app.add_middleware(CORSMiddleware,
+                   allow_origins=["http://127.0.0.1:8000", "http://localhost:8000"],
+                   allow_methods=["*"], allow_headers=["*"])
+
+
+@app.middleware("http")
+async def auth_middleware(request, call_next):
+    """敏感接口鉴权：设置了 ACCESS_TOKEN 时，/api/*（除 health）需 X-Access-Token 匹配。"""
+    token = config.ACCESS_TOKEN
+    if token and request.url.path.startswith("/api/") and request.url.path != "/api/health":
+        if request.headers.get("x-access-token") != token:
+            return JSONResponse({"error": "unauthorized"}, status_code=403)
+    return await call_next(request)
 
 DASH_PATH = ROOT / "dashboard" / "index.html"
 

@@ -38,6 +38,19 @@ def classify_code(code: str) -> str:
     return "stock" if base.isdigit() and len(base) == 6 else "index"
 
 
+def validate_tradeable(codes):
+    """校验交易标的：指数不可直接买卖，含指数时抛出 ValueError。
+
+    指数（如 000300.SH）只能当基准（--benchmark），真正能持仓的是 ETF/个股。
+    """
+    bad = [c for c in codes if classify_code(c) == "index"]
+    if bad:
+        raise ValueError(
+            "指数不可直接交易：{}。请把指数放到 --benchmark 作基准，"
+            "交易标的改用 ETF（如 510300.SH=沪深300ETF）或个股。".format("、".join(bad)))
+    return list(codes)
+
+
 def to_ak_symbol(code: str) -> str:
     """代码 -> akshare symbol。"""
     code_up = code.upper()

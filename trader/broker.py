@@ -7,6 +7,7 @@
 """
 import abc
 import itertools
+import time
 import uuid
 from datetime import datetime
 
@@ -134,16 +135,26 @@ class ThsBroker(Broker):
         self.exe_path = exe_path
         self._connected = False
 
-    def connect(self, exe_path: str = None):
-        """连接到已登录的同花顺客户端交易窗口。"""
+    def connect(self, exe_path: str = None, retries: int = 2):
+        """连接到已登录的同花顺客户端交易窗口（失败重试 + 友好告警，不裸抛 pywinauto）。"""
         path = exe_path or self.exe_path
-        if path:
-            self.user.connect(path)
-        else:
-            # 无 exe_path 时，easytrader 会尝试识别已登录的窗口
-            self.user.connect()
-        self._connected = True
-        return self
+        last_err = None
+        for attempt in range(retries + 1):
+            try:
+                if path:
+                    self.user.connect(path)
+                else:
+                    # 无 exe_path 时，easytrader 会尝试识别已登录的窗口
+                    self.user.connect()
+                self._connected = True
+                return self
+            except Exception as e:
+                last_err = e
+                if attempt < retries:
+                    time.sleep(1)
+        raise RuntimeError(
+            "同花顺连接失败：{}。请确认 1) 同花顺经典版已启动并登录到模拟炒股；"
+            "2) 委托窗口可见（不可最小化/精简模式）；3) 以管理员权限运行。".format(last_err))
 
     @staticmethod
     def _pure_code(code: str) -> str:
@@ -294,13 +305,16 @@ class ThsBroker(Broker):
         bal = self.fetch_balance()
         if not pos and not bal:
             return False
+        old_pos = getattr(account, "positions", {}) or {}
         new_positions = {}
         for code, p in pos.items():
             full = self._guess_full_code(code)
+            old = old_pos.get(full)
+            old_peak = old.get("peak", 0.0) if old else 0.0
             new_positions[full] = {
                 "qty": p["qty"],
                 "cost": p["cost"],
-                "peak": p["price"] or p["cost"] or 0.0,
+                "peak": max(p["price"] or p["cost"] or 0.0, old_peak),  # 保留历史峰值，避免回撤止盈基线失真
             }
         account.positions = new_positions
         if "cash" in bal:
