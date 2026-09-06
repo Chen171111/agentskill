@@ -217,8 +217,11 @@ class TechOffensiveStrategy(Strategy):
 
     def __init__(self, topk=4, window_fast=5, window_slow=10,
                  trend_gate=True, gate_window=60,
-                 gate_threshold=0.3, gate_topk=7, **kw):
+                 gate_threshold=0.3, gate_topk=7, stops_enabled=True, **kw):
         super().__init__(topk=topk, **kw)
+        # 实测：关闭个股止损后 2026 样本外由 +22% 转 -20%（科技ETF波动极大，
+        # 止损止盈实为保护而非掣肘），故默认开启；如需"纯进攻无止损"可传 False。
+        self.stops_enabled = bool(stops_enabled)
         self.window_fast = int(window_fast)
         self.window_slow = int(window_slow)
         self.trend_gate = bool(trend_gate)

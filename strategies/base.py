@@ -42,6 +42,7 @@ class Strategy(abc.ABC):
         self.max_weight = max_weight
         self.max_total = max_total
         self._since = 0
+        self.stops_enabled = True   # 个股级止损/止盈/回撤止盈开关（进攻型策略可关闭）
 
     @abc.abstractmethod
     def generate_weights(self, date, factors, panel):

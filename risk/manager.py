@@ -24,7 +24,7 @@ class RiskManager:
         self.portfolio = PortfolioRisk(dd_circuit=dd_circuit, vol_target=vol_target)
 
     def filter_weights(self, target_weights: dict, positions: dict, prices: dict,
-                       nav_history=None) -> dict:
+                       nav_history=None, enforce_stops: bool = True) -> dict:
         """根据当前持仓与成本，过滤/修正目标权重。
 
         参数
@@ -44,24 +44,25 @@ class RiskManager:
             if w > self.max_position_weight:
                 w = self.max_position_weight
 
-            # 已持有：检查止损/止盈
-            pos = positions.get(code)
-            if pos and pos.get("qty", 0) > 0 and code in prices:
-                cost = pos.get("cost", 0.0)
-                px = prices[code]
-                ret = (px / cost - 1.0) if cost > 0 else 0.0
-                # 回撤止盈：从持仓期最高价回落
-                peak = pos.get("peak", cost)
-                drawdown = (px / peak - 1.0) if peak > 0 else 0.0
-                if ret <= self.stop_loss:      # 触发止损 -> 清仓
-                    out[code] = 0.0
-                    continue
-                if ret >= self.take_profit:    # 触发止盈 -> 清仓
-                    out[code] = 0.0
-                    continue
-                if ret > 0 and drawdown <= -self.trailing_stop:  # 回撤止盈
-                    out[code] = 0.0
-                    continue
+            # 已持有：检查止损/止盈（进攻型策略可关闭）
+            if enforce_stops:
+                pos = positions.get(code)
+                if pos and pos.get("qty", 0) > 0 and code in prices:
+                    cost = pos.get("cost", 0.0)
+                    px = prices[code]
+                    ret = (px / cost - 1.0) if cost > 0 else 0.0
+                    # 回撤止盈：从持仓期最高价回落
+                    peak = pos.get("peak", cost)
+                    drawdown = (px / peak - 1.0) if peak > 0 else 0.0
+                    if ret <= self.stop_loss:      # 触发止损 -> 清仓
+                        out[code] = 0.0
+                        continue
+                    if ret >= self.take_profit:    # 触发止盈 -> 清仓
+                        out[code] = 0.0
+                        continue
+                    if ret > 0 and drawdown <= -self.trailing_stop:  # 回撤止盈
+                        out[code] = 0.0
+                        continue
 
             out[code] = w
 

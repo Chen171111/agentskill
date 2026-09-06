@@ -127,7 +127,8 @@ class DailyRunner:
         nav_history = self.db.load_equity_history()
         nav_history.append(self.account.total_equity(prices))
         weights = risk.filter_weights(qualified, self.account.positions, prices,
-                                     nav_history=nav_history)
+                                     nav_history=nav_history,
+                                     enforce_stops=getattr(self.strategy, "stops_enabled", True))
         empty = not bool(weights)   # 无合格标的 → 空仓
 
         # 第三步 下单（空仓时 ExecutionEngine 会自然清掉旧持仓）

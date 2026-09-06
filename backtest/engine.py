@@ -220,11 +220,13 @@ class BacktestEngine:
                     weights = {c: w * scale for c, w in weights.items()}
                 pending = weights
             # 个股级止损/止盈/回撤止盈（与实盘 RiskManager 同构）：触发则下一开盘强平
-            stop_codes = self.acc.stop_loss_codes(px, self.stop_loss, self.take_profit, self.trailing_stop)
-            if stop_codes:
-                pending = pending or {}
-                for c in stop_codes:
-                    pending[c] = 0.0
+            # 进攻型策略(stops_enabled=False)不做个股止损，仅靠组合级防守
+            if getattr(self.strategy, "stops_enabled", True):
+                stop_codes = self.acc.stop_loss_codes(px, self.stop_loss, self.take_profit, self.trailing_stop)
+                if stop_codes:
+                    pending = pending or {}
+                    for c in stop_codes:
+                        pending[c] = 0.0
             holdings[date] = self.acc.holding()
 
         return BacktestResult(self.acc.results(), holdings, bench_nav)
