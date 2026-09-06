@@ -226,10 +226,10 @@ def main():
     def add_common(sp):
         sp.add_argument("--strategy", default=DEFAULT_STRATEGY,
                         choices=["momentum", "etf_rotation", "mean_reversion", "cross_moving",
-                                 "multifactor", "lianban_lead"])
+                                 "multifactor", "lianban_lead", "tech_offensive"])
         sp.add_argument("--codes", default="510300.SH,510500.SH,159915.SZ,510880.SH")
         sp.add_argument("--pool", default=None, help="推荐池名（覆盖 codes）")
-        sp.add_argument("--topk", type=int, default=DEFAULT_TOP_K)
+        sp.add_argument("--topk", type=int, default=None)
         sp.add_argument("--rebalance", type=int, default=DEFAULT_REBALANCE)
 
     sp = sub.add_parser("backtest", help="历史回测")
@@ -257,10 +257,11 @@ def main():
     sp = sub.add_parser("simulate", help="模拟交易：选股→评估→下单（默认 ETF全球+etf_rotation）")
     sp.add_argument("--strategy", default="etf_rotation",
                     choices=["momentum", "etf_rotation", "mean_reversion",
-                             "cross_moving", "multifactor", "lianban_lead"])
+                             "cross_moving", "multifactor", "lianban_lead",
+                             "tech_offensive"])
     sp.add_argument("--pool", default="ETF全球", help="推荐池名（默认 ETF全球）")
     sp.add_argument("--codes", default="", help="自定义代码（覆盖 pool）")
-    sp.add_argument("--topk", type=int, default=DEFAULT_TOP_K)
+    sp.add_argument("--topk", type=int, default=None)
     sp.add_argument("--rebalance", type=int, default=DEFAULT_REBALANCE)
     sp.add_argument("--timing", default=None, choices=[None, "ma20", "abs_mom", "rsrs", "bias"])
     sp.add_argument("--ths", action="store_true", help="接入同花顺模拟盘下单")
@@ -285,6 +286,11 @@ def main():
     sp.set_defaults(func=cmd_ths_check)
 
     args = p.parse_args()
+    # topk 默认值按策略类定义下沉：tech_offensive 用 4（2026-09 样本外验证），
+    # 其余策略沿用 DEFAULT_TOP_K=5。--topk 显式传入时优先。
+    if getattr(args, "topk", None) is None:
+        args.topk = (4 if getattr(args, "strategy", "") == "tech_offensive"
+                     else DEFAULT_TOP_K)
     args.func(args)
 
 

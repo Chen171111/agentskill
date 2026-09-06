@@ -20,7 +20,7 @@ def _shift_date(yyyymmdd, days):
 
 
 def run_backtest(codes, strategy="momentum", start=None, end=None,
-                 init_cash=None, topk=5, rebalance=5, benchmark=None,
+                 init_cash=None, topk=None, rebalance=5, benchmark=None,
                  timing=None, timing_window=20, timing_scale_off=0.3,
                  dd_circuit=None, vol_target=None, strategy_params=None,
                  stability_min_overlap=None):
@@ -43,7 +43,10 @@ def run_backtest(codes, strategy="momentum", start=None, end=None,
     factors = {k: v.reindex(panel.dates) for k, v in factors_full.items()}
 
     kw = dict(strategy_params or {})
-    kw.setdefault("topk", topk)
+    # topk=None 时不注入，回落各策略类定义默认（如 tech_offensive=4）；
+    # 显式传入时覆盖类默认。
+    if topk is not None:
+        kw.setdefault("topk", topk)
     kw.setdefault("rebalance_every", rebalance)
     strat = create_strategy(strategy, **kw)
 

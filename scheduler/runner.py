@@ -6,6 +6,7 @@ Scheduler 负责按 SCHEDULE.run_time 每日定时触发（收盘后）。
 """
 import time
 from datetime import datetime, date
+from pathlib import Path
 
 import config
 from dataprovider.store import DataStore, validate_tradeable
@@ -22,18 +23,28 @@ DEFAULT_FACTORS = ["rsi", "macd_hist", "bias20", "sma_gap", "momentum20", "vol_r
 
 
 class DailyRunner:
-    """单次交易日运行器。"""
+    """单次交易日运行器。
+
+    profile：账本实例名。传入后使用独立 DB（state/trading_{profile}.db），
+    用于并行运行多套互不干扰的策略组合（如防守 etf_rotation + 进攻 tech_offensive）。
+    """
 
     def __init__(self, codes, strategy="momentum", topk=5, rebalance=5, timing=None,
-                 init_cash=None, broker=None):
+                 init_cash=None, broker=None, profile=None):
         validate_tradeable(codes)   # 指数不可直接交易，前置拦截
         self.codes = codes
         self.strategy_name = strategy
         self.topk = topk
         self.rebalance = rebalance
         self.timing = timing
+        self.profile = profile
         self.store = DataStore()
-        self.db = TradeDB()
+        if profile:
+            db_path = str(Path(config.DB_PATH).with_name(
+                "trading_{}.db".format(profile)))
+        else:
+            db_path = None
+        self.db = TradeDB(db_path=db_path)
         self.account = PortfolioAccount(init_cash=init_cash)
         # 恢复历史持仓与现金（若存在）
         saved = self.db.load_positions()
