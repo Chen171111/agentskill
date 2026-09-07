@@ -48,11 +48,14 @@ def cmd_backtest(args):
 
 
 def _make_broker(args):
-    """根据命令行参数构造券商对象。--ths 表示接入同花顺客户端(含模拟炒股)。"""
+    """根据命令行参数构造券商对象。--ths 表示接入同花顺客户端(含模拟炒股)。
+
+    用 UIA 后端实现（easytrader 的 win32 实现无法适配新版同花顺自绘 UI）。
+    """
     if getattr(args, "ths", None):
-        from trader.broker import ThsBroker
+        from trader.ths_uia import UiaThsBroker
         exe = getattr(args, "ths_exe", None) or THS_EXE_PATH
-        return ThsBroker(exe_path=exe).connect()
+        return UiaThsBroker(exe_path=exe).connect()
     return None
 
 
@@ -92,9 +95,9 @@ def cmd_status(args):
 
 def cmd_ths_check(args):
     """测试同花顺连接：连接客户端并读取资金/持仓。"""
-    from trader.broker import ThsBroker
-    print("正在测试同花顺连接（xiadan.exe）...")
-    broker = ThsBroker(exe_path=args.ths_exe)
+    from trader.ths_uia import UiaThsBroker
+    print("正在测试同花顺连接（UIA，xiadan.exe）...")
+    broker = UiaThsBroker(exe_path=args.ths_exe)
     try:
         broker.connect()
         print("[OK] 连接成功！")
@@ -103,31 +106,20 @@ def cmd_ths_check(args):
         return
     # 资金
     try:
-        bal = broker.balance
+        bal = broker.fetch_balance()
         print("\n===== 资金状况 =====")
-        b = bal[0] if isinstance(bal, list) and bal else bal
-        if isinstance(b, dict):
-            for k, v in b.items():
-                print("  {}: {}".format(k, v))
-        else:
-            print(" ", bal)
+        print("  总资产: {}".format(bal.get("total")))
+        print("  可用金额: {}".format(bal.get("cash")))
     except Exception as e:
         print("[资金读取失败]", str(e)[:150])
     # 持仓
     try:
-        pos = broker.position
+        pos = broker.fetch_position()
         print("\n===== 持仓 =====")
-        plist = pos if isinstance(pos, list) else ([pos] if pos else [])
-        if not plist:
+        if not pos:
             print(" （空仓）")
-        else:
-            for p in plist:
-                if isinstance(p, dict):
-                    print("  {} {} 持仓{} 成本{} 现价{}".format(
-                        p.get("证券代码", ""), p.get("证券名称", ""), p.get("当前持仓", ""),
-                        p.get("参考成本价", ""), p.get("参考市价", "")))
-                else:
-                    print(" ", p)
+        for c, p in pos.items():
+            print("  {}  数量={}  成本={:.4f}".format(c, p["qty"], p["cost"]))
     except Exception as e:
         print("[持仓读取失败]", str(e)[:150])
 
