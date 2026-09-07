@@ -65,6 +65,7 @@ FACTOR_FUNCS: Dict[str, Callable] = {
     "sma_gap": lambda px: _sma_gap(px),
     "natr": lambda px: _natr(px),
     "momentum5": lambda px: _momentum(px, 5),
+    "momentum10": lambda px: _momentum(px, 10),
     "momentum20": lambda px: _momentum(px, 20),
     "momentum60": lambda px: _momentum(px, 60),
     "momentum120": lambda px: _momentum(px, 120),

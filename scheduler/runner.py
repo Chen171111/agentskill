@@ -19,7 +19,10 @@ from trader.execution import ExecutionEngine
 from trader.broker import ThsBroker
 from storage.db import TradeDB
 
-DEFAULT_FACTORS = ["rsi", "macd_hist", "bias20", "sma_gap", "momentum20", "vol_ratio"]
+DEFAULT_FACTORS = ["rsi", "macd_hist", "bias20", "sma_gap",
+                   "momentum5", "momentum10", "momentum20",
+                   "momentum60", "momentum120", "momentum250",
+                   "vol_ratio", "zt_daily", "lianban"]
 
 
 class DailyRunner:
