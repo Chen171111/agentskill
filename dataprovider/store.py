@@ -148,16 +148,26 @@ class DataStore:
         return self.dir_for(classify_code(code)) / (code + ".csv")
 
     def ensure(self, codes):
-        import akshare as ak
-        added = []
+        # 先确定需要下载的标的后才 import akshare（数据齐全时零依赖，32 位可无 akshare 运行）
+        need = []
         for code in codes:
             self.dir_for(classify_code(code)).mkdir(parents=True, exist_ok=True)
             p = self.path_for(code)
-            if p.exists() and not self.force_download:
-                continue
+            if not (p.exists() and not self.force_download):
+                need.append(code)
+        if not need:
+            return []
+        try:
+            import akshare as ak
+        except ImportError as e:
+            print("[ensure] 需下载 {} 但缺少 akshare({})，请用 64 位 E:\\Python 先准备数据".format(
+                ", ".join(need), e))
+            return []
+        added = []
+        for code in need:
             try:
                 df = _download_one(ak, code, classify_code(code))
-                df.to_csv(p, index=False)
+                df.to_csv(self.path_for(code), index=False)
                 added.append(code)
             except Exception as e:
                 print("[DataStore] 下载失败 {}: {}".format(code, e))
@@ -177,12 +187,11 @@ class DataStore:
 
         - 每个标的数据陈旧（最新日期 < 已收盘基准）时重新下载覆盖；
         - 下载后裁剪掉晚于已收盘基准的行，避免盘中未收盘的实时 bar 混入；
-        - 个股/指数/ETF 统一走全量覆盖，保证复权口径一致（后续可优化为个股增量）。
+        - 仅当确有陈旧标的需要下载时才 import akshare（数据全新鲜时零依赖，32 位 Python 可无 akshare 直接运行）。
         """
-        import akshare as ak
         from .calendar import latest_closed_trading_day
         target = latest_closed_trading_day(now)
-        refreshed = []
+        stale = []
         for code in codes:
             kind = classify_code(code)
             self.dir_for(kind).mkdir(parents=True, exist_ok=True)
@@ -190,6 +199,22 @@ class DataStore:
             last = self._last_date(p) if p.exists() else None
             if not force and last is not None and last >= target:
                 continue  # 已新鲜，跳过
+            stale.append(code)
+        if not stale:
+            return []
+
+        # 只有当确实需要下载时才引入 akshare（避免 32 位环境因无 akshare 而失败）
+        try:
+            import akshare as ak
+        except ImportError as e:
+            print("[refresh] 需下载 {} 但缺少 akshare({})，请用 64 位 E:\\Python 先刷新数据".format(
+                ", ".join(stale), e))
+            return []
+
+        refreshed = []
+        for code in stale:
+            kind = classify_code(code)
+            p = self.path_for(code)
             try:
                 df = _download_one(ak, code, kind)
                 if df is None or df.empty:
