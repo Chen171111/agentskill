@@ -9,25 +9,45 @@
 fetch_balance / sync_fill / reconcile。
 """
 import time
+import ctypes
 import logging
 from threading import Lock
 
 logging.disable(logging.CRITICAL)
 
+import win32clipboard
 import pytesseract
 from PIL import ImageGrab
 from pywinauto import Desktop
+from pywinauto import keyboard as _kbd
 
 from .broker import Broker, Order
 
 pytesseract.pytesseract.tesseract_cmd = r"E:\Tesseract-OCR\tesseract.exe"
 
-_TITLE = "网上股票交易系统5.0"
+_TITLE = "同花顺"  # 主窗口标题前缀:如 "同花顺(9.60.61) - 自选股"
 _MENUS = {
     "buy": "买入[F1]", "sell": "卖出[F2]", "withdraw": "撤单[F3]",
     "query": "查询[F4]",
     "position": "资金股票", "today_order": "当日委托", "today_trade": "当日成交",
 }
+
+
+def _set_clipboard(text):
+    """把文本写入系统剪贴板。"""
+    win32clipboard.OpenClipboard()
+    try:
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardText(str(text))
+    finally:
+        win32clipboard.CloseClipboard()
+
+
+def _vk_of(ch):
+    """把单个字符映射为虚拟键码。数字/字母的 VK 等于 ASCII;其余走小数/常用键。"""
+    if '0' <= ch <= '9' or 'a' <= ch.lower() <= 'z':
+        return ord(ch.lower())
+    return {'.': 0xBE, '-': 0xBD, ' ': 0x20, '\t': 0x09}.get(ch)
 
 
 class UiaThsBroker(Broker):
@@ -46,7 +66,8 @@ class UiaThsBroker(Broker):
         for _ in range(retries + 1):
             try:
                 for w in Desktop(backend="uia").windows():
-                    if (w.window_text() or "") == _TITLE:
+                    wt = (w.window_text() or "")
+                    if wt.startswith(_TITLE) and "自选" not in wt[:4]:
                         self._win = w
                         w.set_focus()
                         self._connected = True
@@ -98,19 +119,54 @@ class UiaThsBroker(Broker):
                 continue
         return None
 
-    def _fill_edit(self, ctrl, text):
-        """向 Edit 填值：优先 ValuePattern，否则点击+键入（先清空）。"""
+    def _type_keys(self, keys):
+        """模拟按键。^a=全选, '+v'=Ctrl+V, 其余逐字符 keybd_event。"""
         try:
-            ctrl.set_value(str(text))
-            return
+            if keys == "^a":  # Ctrl+A 全选
+                ctypes.windll.user32.keybd_event(0x11, 0, 0, 0)  # Ctrl down
+                ctypes.windll.user32.keybd_event(0x41, 0, 0, 0)  # A down
+                ctypes.windll.user32.keybd_event(0x41, 0, 2, 0)  # A up
+                ctypes.windll.user32.keybd_event(0x11, 0, 2, 0)  # Ctrl up
+            elif keys in ("^v", "+v", "ctrl+v"):
+                ctypes.windll.user32.keybd_event(0x11, 0, 0, 0)  # Ctrl down
+                ctypes.windll.user32.keybd_event(0x56, 0, 0, 0)  # V down
+                ctypes.windll.user32.keybd_event(0x56, 0, 2, 0)  # V up
+                ctypes.windll.user32.keybd_event(0x11, 0, 2, 0)  # Ctrl up
+            else:
+                for ch in str(keys):
+                    vk = _vk_of(ch)
+                    if vk is not None:
+                        ctypes.windll.user32.keybd_event(vk, ord(ch), 0, 0)
+                        ctypes.windll.user32.keybd_event(vk, ord(ch), 2, 0)
+            time.sleep(0.15)
+        except Exception as e:
+            raise RuntimeError("键盘输入失败: {}".format(e))
+
+    def _clear_edit(self, ctrl):
+        """聚焦编辑框并 Ctrl+A 全选。"""
+        try:
+            ctrl.set_focus()
+            time.sleep(0.25)
+        except Exception:
+            pass
+        self._type_keys("^a")
+
+    def _fill_edit(self, ctrl, text):
+        """向 Edit 填值:先 Ctrl+A 清空,再剪贴板粘贴整串(避免逐字符丢字)。"""
+        # 确保交易窗口在前台(键盘输入需要焦点)
+        try:
+            self._win_safe().set_focus()
+            time.sleep(0.2)
         except Exception:
             pass
         try:
-            ctrl.click_input()
-            ctrl.type_keys("^a")
-            ctrl.type_keys(str(text))
-        except Exception as e:
-            raise RuntimeError("填写输入框失败: {}".format(e))
+            ctrl.set_focus()
+            time.sleep(0.2)
+        except Exception:
+            pass
+        self._clear_edit(ctrl)
+        _set_clipboard(str(text))
+        self._type_keys("^v")
 
     def _read_text(self):
         """截图 + OCR 当前交易窗口内容。"""
@@ -164,17 +220,27 @@ class UiaThsBroker(Broker):
         return order
 
     def _accept_dialogs(self):
-        try:
+        """点掉确认/提示对话框的按钮:不做窗口标题过滤(自绘弹窗标题不可预测),
+        直接扫所有顶层窗口里以"是/确定/确认/OK"开头的按钮并点击。"""
+        for _ in range(6):
+            clicked = False
             for w in Desktop(backend="uia").windows():
-                t = (w.window_text() or "")
-                if "同花顺" in t or "确认" in t or "提示" in t:
-                    for c in w.descendants(control_type="Button"):
-                        if (c.window_text() or "").strip() in ("确定", "确认", "是", "OK"):
+                for c in w.descendants(control_type="Button"):
+                    btxt = (c.window_text() or "").strip()
+                    if not btxt:
+                        continue
+                    if btxt.startswith("是") or btxt.startswith("确定") \
+                            or btxt.startswith("确认") or btxt.startswith("OK") \
+                            or btxt.startswith("Yes"):
+                        try:
                             c.click_input()
-                            time.sleep(0.3)
-                            break
-        except Exception:
-            pass
+                            time.sleep(0.4)
+                            clicked = True
+                        except Exception:
+                            pass
+                        break
+            if not clicked:
+                break
 
     def submit(self, order: Order) -> Order:
         with self._lock:
