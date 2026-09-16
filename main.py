@@ -125,19 +125,37 @@ def cmd_ths_check(args):
 
 
 def cmd_simulate(args):
-    """模拟交易：选股 → 评估 → 下单（--ths 接同花顺模拟盘，默认本地模拟撮合）。"""
+    """模拟交易：选股 → 评估 → 下单（--ths 接同花顺模拟盘，默认本地模拟撮合）。
+
+    --dry：接入同花顺做只读试算（对账+算单），**不提交任何委托、不写本地账本**。
+    """
     from scheduler.runner import DailyRunner
     codes = _codes(args)
     broker = _make_broker(args)
+    dry = getattr(args, "dry", False)
+    if dry:
+        if broker is None:
+            print("[--dry] 未指定 --ths，无需试算；请加 --ths 以获得基于真实账户的试算。")
+            return
+        from trader.broker import DryRunBroker
+        broker = DryRunBroker(broker)
     runner = DailyRunner(codes, strategy=args.strategy, topk=args.topk,
-                         rebalance=args.rebalance, timing=args.timing, broker=broker)
+                         rebalance=args.rebalance, timing=args.timing, broker=broker,
+                         dry_run=dry)
     r = runner.run_once()
     if r.get("status") == "no_data":
         print("无有效数据")
         return
 
-    print("\n===== 模拟交易日 {} =====".format(r.get("date")))
+    print("\n===== {}交易日 {} =====".format("【试算·不提交】" if dry else "", r.get("date")))
     print("策略: {}   标的数: {}".format(r.get("strategy"), len(codes)))
+
+    if not r.get("rebalanced", True):
+        print("\n【本次非调仓日】不重新选股、不清仓，仅记录净值。")
+        acc0 = r.get("account", {})
+        print("账户：现金 {:.2f}  市值 {:.2f}  总资产 {:.2f}".format(
+            acc0.get("cash", 0), acc0.get("market_value", 0), acc0.get("total_equity", 0)))
+        return
 
     print("\n【① 选股】策略候选（按目标权重排序）：")
     if not r.get("selection"):
@@ -156,6 +174,12 @@ def cmd_simulate(args):
 
     print("\n【③ 下单】{}".format(
         "无合格标的 → 空仓" if r.get("empty") else "按风控后权重调仓"))
+    tw = r.get("target_weights") or {}
+    if tw:
+        print("  风控后目标权重：" + "  ".join(
+            "{} {:.2%}".format(c, w) for c, w in sorted(tw.items(), key=lambda x: -x[1])))
+    else:
+        print("  风控后目标权重：（空 → 空仓）")
     orders = r.get("orders", [])
     if not orders:
         print("  （无订单）")
@@ -175,6 +199,8 @@ def cmd_simulate(args):
             print("  {} {}股  成本 {:.3f}  现价 {:.3f}  浮盈 {:+.2%}".format(
                 p.get("code"), p.get("qty"), p.get("cost", 0),
                 p.get("price", 0), p.get("pct", 0)))
+    if dry:
+        print("\n[--dry] 以上为试算结果，未提交任何委托、未写本地账本。")
 
 
 def cmd_reset(args):
@@ -218,7 +244,8 @@ def main():
     def add_common(sp):
         sp.add_argument("--strategy", default=DEFAULT_STRATEGY,
                         choices=["momentum", "etf_rotation", "mean_reversion", "cross_moving",
-                                 "multifactor", "lianban_lead", "tech_offensive"])
+                                 "multifactor", "lianban_lead", "tech_offensive",
+                                 "bigorder_etf"])
         sp.add_argument("--codes", default="510300.SH,510500.SH,159915.SZ,510880.SH")
         sp.add_argument("--pool", default=None, help="推荐池名（覆盖 codes）")
         sp.add_argument("--topk", type=int, default=None)
@@ -250,7 +277,7 @@ def main():
     sp.add_argument("--strategy", default="etf_rotation",
                     choices=["momentum", "etf_rotation", "mean_reversion",
                              "cross_moving", "multifactor", "lianban_lead",
-                             "tech_offensive"])
+                             "tech_offensive", "bigorder_etf"])
     sp.add_argument("--pool", default="ETF全球", help="推荐池名（默认 ETF全球）")
     sp.add_argument("--codes", default="", help="自定义代码（覆盖 pool）")
     sp.add_argument("--topk", type=int, default=None)
@@ -258,6 +285,8 @@ def main():
     sp.add_argument("--timing", default=None, choices=[None, "ma20", "abs_mom", "rsrs", "bias"])
     sp.add_argument("--ths", action="store_true", help="接入同花顺模拟盘下单")
     sp.add_argument("--ths-exe", default=None, help="同花顺 xiadan.exe 路径")
+    sp.add_argument("--dry", action="store_true",
+                    help="只读试算：接同花顺对账+算单，但不提交委托、不写本地账本")
     sp.set_defaults(func=cmd_simulate)
 
     sp = sub.add_parser("daemon", help="每日定时自动运行")

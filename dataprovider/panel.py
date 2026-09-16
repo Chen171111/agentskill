@@ -40,13 +40,26 @@ class Panel:
 
 def build_panel(store: DataStore, codes, start=None, end=None,
                 fields: List[str] = None, align="close") -> Panel:
+    """构建面板。
+
+    align
+    -----
+    - `"close"`（默认，原行为）：只保留**所有标的都有收盘价**的日期（交集）。
+      适合标的数少（几只 ETF）、上市时间一致的场景。
+    - `"union"`：保留**任一标的有数据**的日期（并集），缺失处留 NaN。
+      **个股大票池必须用这个** —— 否则 5000 只标的的上市/退市时间不一致，
+      交集会塌缩成几乎空集。
+    """
     fields = fields or _OCCL_FIELDS
     frames = {}
     for code in codes:
         frames[code] = store.read(code, start=start, end=end)
 
     anchor = pd.DataFrame({c: f["close"] for c, f in frames.items()})
-    anchor = anchor.dropna().sort_index()
+    if align == "union":
+        anchor = anchor.dropna(how="all").sort_index()
+    else:
+        anchor = anchor.dropna().sort_index()
     common_dates = anchor.index
 
     tables = {}

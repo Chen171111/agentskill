@@ -107,6 +107,48 @@ class PaperBroker(Broker):
         return order
 
 
+class DryRunBroker(Broker):
+    """只读试算券商：查询/对账走真实券商，submit() 只记录、不真正下单。
+
+    用途：在真实账户上试算「今天会买卖什么」，不产生任何委托。
+        real = UiaThsBroker().connect()
+        broker = DryRunBroker(real)
+        # broker.fetch_balance() / fetch_position() / reconcile() 均转发给 real
+        # broker.submit(order)  -> 只把 order 记进 broker.placed，不提交
+    """
+
+    def __init__(self, real: Broker):
+        self.real = real
+        self.placed = []
+
+    def update_quotes(self, prices: dict):
+        return self.real.update_quotes(prices)
+
+    # ---- 查询转发 ----
+    def fetch_balance(self):
+        return self.real.fetch_balance()
+
+    def fetch_position(self):
+        return self.real.fetch_position()
+
+    def fetch_today_orders(self):
+        return self.real.fetch_today_orders()
+
+    def reconcile(self, account, prices=None) -> bool:
+        return self.real.reconcile(account, prices)
+
+    def sync_fill(self, order):
+        return None
+
+    # ---- 下单：只记录 ----
+    def submit(self, order: Order) -> Order:
+        order.status = "submitted"      # 语义与真实下单一致，但资金/持仓不动
+        order.filled_qty = 0
+        order.fee = 0.0
+        self.placed.append(order)
+        return order
+
+
 class ThsBroker(Broker):
     """同花顺客户端（ths）下单接口，基于 easytrader。
 

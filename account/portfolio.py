@@ -9,6 +9,10 @@ class PortfolioAccount:
     def __init__(self, init_cash: float = None):
         self.init_cash = float(init_cash if init_cash is not None else config.INIT_CASH)
         self.cash = self.init_cash
+        # 冻结资金：已报未成交委托占用的资金。仍属于账户资产，必须计入净值，
+        # 否则「下完单那一刻资产骤降」会被回撤熔断误判为亏损而清仓。
+        # 注意 cash（可用金额）才是下单时的真实购买力，两者不能混用。
+        self.frozen = 0.0
         # positions: {code: {"qty": int, "cost": float, "peak": float}}
         self.positions = {}
 
@@ -28,7 +32,8 @@ class PortfolioAccount:
         return mv
 
     def total_equity(self, prices: dict) -> float:
-        return self.cash + self.market_value(prices)
+        """总资产 = 可用资金 + 冻结资金 + 持仓市值。"""
+        return self.cash + self.frozen + self.market_value(prices)
 
     def _add_position(self, code: str, qty: int, price: float, fee: float):
         pos = self.positions.get(code, {"qty": 0, "cost": 0.0, "peak": 0.0})
@@ -66,6 +71,7 @@ class PortfolioAccount:
         """输出账户快照。"""
         return {
             "cash": self.cash,
+            "frozen": self.frozen,
             "market_value": self.market_value(prices),
             "total_equity": self.total_equity(prices),
             "positions": [

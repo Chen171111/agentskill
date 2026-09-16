@@ -5,6 +5,8 @@ import pandas as pd
 
 import config
 
+from .adjust import repair_frame          # 份额折算自动复权（读取时生效）
+
 # 指数代码 -> akshare symbol
 _AK_SYMBOL_MAP = {
     "000300.SH": "sh000300", "000905.SH": "sh000905", "000852.SH": "sh000852",
@@ -135,10 +137,13 @@ def _download_one(ak, code: str, kind: str) -> pd.DataFrame:
 class DataStore:
     """行情数据仓库（下载 + 缓存 + 读取）。"""
 
-    def __init__(self, force_download=False):
+    def __init__(self, force_download=False, repair_splits=True):
         self.index_dir = Path(config.INDEX_DIR)
         self.stock_dir = Path(config.STOCK_DIR)
         self.force_download = force_download
+        # 份额折算自动复权（默认开）。设为 False 可读**原始未复权**数据（诊断/对照用）。
+        self.repair_splits = repair_splits
+        self.split_log = Path(config.DATA_DIR).parent / "state" / "split_repairs.log"
         self._cache = {}
 
     def dir_for(self, kind: str) -> Path:
@@ -242,6 +247,17 @@ class DataStore:
             df["date"] = df["date"].astype(str)
             df.index = df["date"]
             df.sort_index(inplace=True)
+            # ⚠️ 份额折算自动复权 —— **必须在算 rate 之前**。
+            # 为什么放在读取时而不是下载后：`refresh()` 会用 akshare 的**原始未复权**
+            # 全量历史覆盖 CSV，一次性打补丁会被下次刷新静默回退
+            # （2026-09-16 真实事故：09-13 修好的 4 处，09-16 刷新后全部复发，
+            #   回测年化 3.47% → 2.35%，差 1.12pp/年）。
+            # 放在这里 → 无论文件被覆盖多少次，策略读到的永远连续；且**幂等**。
+            if self.repair_splits:
+                df, n_fix, _ = repair_frame(df, code, log_path=self.split_log)
+                if n_fix:
+                    print("[DataStore] {} 份额折算自动复权 {} 处"
+                          .format(code, n_fix), flush=True)
             df["rate"] = df["close"].pct_change()
             self._cache[code] = df.copy()
         if start:

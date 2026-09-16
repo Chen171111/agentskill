@@ -42,6 +42,19 @@ class TradeDB:
                     key TEXT PRIMARY KEY,
                     value TEXT
                 );
+                -- 并行验证（shadow）记录：同一调仓日记录多套目标权重，
+                -- 用于「实盘配置 vs 待验证配置」的真实前向对比。
+                -- 首个用途：Faber 趋势过滤 开/关（HANDOFF §三 第 2 项）。
+                CREATE TABLE IF NOT EXISTS shadow_weights (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT NOT NULL,
+                    variant TEXT NOT NULL,
+                    weights TEXT,
+                    note TEXT,
+                    ts TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_shadow_date
+                    ON shadow_weights (date, variant);
                 """
             )
             # 迁移：旧版 equity 以 date 为主键、无 id 列会被覆盖，检测到则重建为追加式（保留最后一条现金快照）
@@ -129,3 +142,43 @@ class TradeDB:
             rows = c.execute(
                 "SELECT * FROM orders ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
+
+    # ---------------- 并行验证（shadow） ----------------
+    def save_shadow_weights(self, date: str, variant: str, weights: dict,
+                            note: str = ""):
+        """记录某调仓日、某变体的目标权重。
+
+        ⚠️ 同一 (date, variant) **覆盖**写入 —— 一天内重复运行（如手动补跑）
+        不应产生多条记录，否则统计时会重复计数。
+        """
+        import json
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._conn() as c:
+            c.execute("DELETE FROM shadow_weights WHERE date=? AND variant=?",
+                      (date, variant))
+            c.execute(
+                "INSERT INTO shadow_weights (date, variant, weights, note, ts) "
+                "VALUES (?,?,?,?,?)",
+                (date, variant, json.dumps(weights, ensure_ascii=False,
+                                           sort_keys=True), note, ts))
+
+    def load_shadow_weights(self, variant: str = None) -> list:
+        """返回 [{'date','variant','weights'(dict),'note','ts'}]，按日期升序。"""
+        import json
+        with self._conn() as c:
+            if variant:
+                rows = c.execute(
+                    "SELECT * FROM shadow_weights WHERE variant=? ORDER BY date ASC",
+                    (variant,)).fetchall()
+            else:
+                rows = c.execute(
+                    "SELECT * FROM shadow_weights ORDER BY date ASC").fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["weights"] = json.loads(d.get("weights") or "{}")
+            except Exception:
+                d["weights"] = {}
+            out.append(d)
+        return out

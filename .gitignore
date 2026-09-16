@@ -1,12 +1,15 @@
 # 运行产物
+# 注意：tools/ 是**源码**（抓取脚本、回测脚本、扫描脚本），必须入库。
+# 2026-09-13 修正：原先误把 tools/ 一起忽略，导致新增脚本不进仓库、
+# 从 git 接手的人只能看到文档看不到代码。
 data/
 results/
 state/
-tools/
 __pycache__/
 *.pyc
 *.db
 *.sqlite3
+*.parquet.partial
 
 # 环境
 .venv/
@@ -20,3 +23,6 @@ venv/
 
 # 运行时日志
 debug.log
+# 同花顺下单测试的运行时产物（重跑 test_uia_order.py 即可复现，不入库）
+uia_order_run.log
+uia_order_submitted.png

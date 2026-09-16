@@ -1,15 +1,28 @@
 @echo off
+chcp 65001 >nul
 cd /d "%~dp0"
 echo ============================================
-echo   Install daily auto-trade at 14:50 (THS)
+echo   Register daily auto-trade task at 14:50 (Mon-Fri)
+echo   Task name: QuantPanorama_DailyRun
+echo   Target   : daily_run.bat  (refresh data -^> trade)
 echo ============================================
-echo This task controls Tonghuashun (THS) simulated trading,
-echo so it must run with admin and THS must be open at 14:50.
 echo.
-echo If it says access denied, right-click this file and
-echo choose "Run as administrator", then retry.
+echo NOTE 1: Normal user level is enough. The THS automation is
+echo         message-based (BM_CLICK / WM_CHAR), which does NOT
+echo         need the window to be focused, so elevation is not
+echo         required. If it ever reports access denied, right-click
+echo         this file and choose "Run as administrator".
+echo NOTE 2: THS client must be OPEN and LOGGED IN at 14:50.
+echo         Closing it (or the PC sleeping) makes the run fail.
 echo.
-schtasks /create /f /tn "QuantPanorama_DailyRun" /tr "%~dp0daily_run.bat" /sc weekly /d MON,TUE,WED,THU,FRI /st 14:50 /rl HIGHEST
-if %errorlevel%==0 (echo [OK] Registered with highest privileges.) else (echo [FAIL] See above. Try run-as-administrator.)
+schtasks /create /f /tn "QuantPanorama_DailyRun" /tr "\"%~dp0daily_run.bat\"" /sc weekly /d MON,TUE,WED,THU,FRI /st 14:50
+if %errorlevel%==0 (
+  echo [OK] Registered.
+  schtasks /query /tn "QuantPanorama_DailyRun"
+) else (
+  echo [FAIL] See message above. Try running this file as administrator.
+)
+echo.
+echo To remove the task:  schtasks /delete /tn "QuantPanorama_DailyRun" /f
 echo.
 pause

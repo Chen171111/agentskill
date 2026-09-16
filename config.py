@@ -60,13 +60,28 @@ ETF_NAMES = {
 }
 
 TRADING_COST = {
-    "commission_rate": 0.0003,
+    # 2026-09-13 修正：原为 0.0003（万3），主人实际费率是 **万5**。
+    # 只影响回测/研究口径的真实性；实盘走 UiaThsBroker，费率以同花顺为准。
+    # 实测影响：ETF 轮动线年化 −0.41pp（全区间 3.18%→2.77%）。
+    "commission_rate": 0.0005,
     "min_commission": 5.0,
     "sell_tax_rate": 0.001,
     "slippage_rate": 0.0005,
 }
 
-INIT_CASH = 200_000.0
+# ✅ 2026-09-16 已改：主人实际资金约 **10 万**，原先误写为 20 万。
+#
+# 改动安全性（已核对代码，不是猜的）：
+#   `scheduler/runner.py::__init__` 先 `PortfolioAccount(init_cash=...)`，
+#   紧接着用 `self.db.load_latest_equity()` **覆盖 cash**、用 `load_positions()` 恢复持仓。
+#   → **已有 `state/trading.db` 的账户完全不受影响**（现金/持仓从库里恢复，与 INIT_CASH 无关）。
+#   → INIT_CASH 只决定两件事：① **新建账户**的起始资金；② 未显式传 `init_cash` 的**回测**口径。
+#   ⚠️ 注意：现有模拟盘的历史净值仍是 **20 万量级**（起始 20 万、现值 <金额略>），
+#      这是历史事实，**不会被追溯改写**；想让它变成 10 万量级需要 `main.py reset` 重建账户。
+#
+# 对回测的影响：ETF 轮动线年化 **−0.28pp**（最低佣金惩罚随资金变小而变大）。
+# 大多数 `tools/` 脚本本来就显式传 `init_cash=100_000.0`，此次改动只影响漏传的路径。
+INIT_CASH = 100_000.0
 
 # 同花顺经典版客户端路径（模拟炒股下单用；需已登录、窗口保持打开不可最小化）
 THS_EXE_PATH = r"D:\同花顺软件\同花顺\xiadan.exe"
@@ -101,6 +116,17 @@ DEFAULT_REBALANCE = 5
 DEFAULT_TIMING = None        # 大盘择时：None / "ma20" / "abs_mom" / "rsrs"
 DEFAULT_DD_CIRCUIT = True    # 回撤熔断：默认开启（深阈值+滞回）
 DEFAULT_VOL_TARGET = 0.15    # 波动率目标仓位：默认 15% 年化波动
+
+# ---- Faber 趋势过滤（绝对趋势：只保留站上自身 MA(trend_window) 的标的）----
+# 实盘当前：**开启**（trend_window=60，2026-09 社区研究落地时开的）。
+# 待决项（HANDOFF §三 第 2 项）：修复份额折算数据后实测为**负贡献**
+#   （−1.81pp / 夏普 −0.27），但它只有一个 12 年样本，且与根 HANDOFF 记录矛盾
+#   → 采取「**并行验证**」：实盘配置不动，同时记录关闭版的**影子权重**，
+#     跑 ≥8 周后用**真实前向表现**（不是回测）比较，再决定是否切换。
+TREND_LIVE = 60              # 实盘生效值（None = 关闭 Faber）
+TREND_SHADOW = None          # 影子对照值（None = 关闭 Faber）
+SHADOW_ENABLED = True        # 是否记录影子权重（关掉可省一点算力）
+SHADOW_MIN_WEEKS = 8         # 建议的最短并行观察期（周），见 tools/faber_shadow_report.py
 
 
 def ensure_dirs():

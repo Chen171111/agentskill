@@ -10,6 +10,13 @@ _NEED_FIELDS = {
     "sma_gap": ["close"], "natr": ["high", "low", "close"], "boll_pos": ["close"],
     "momentum20": ["close"], "vol_ratio": ["volume"], "zt_daily": ["close"],
     "lianban": ["close"],
+    # 个股横截面因子（factors/stock_factors.py）
+    "rev5": ["close"], "rev10": ["close"],
+    "vol20": ["close"], "vol60": ["close"],
+    "max20": ["close"], "skew20": ["close"],
+    "turn20": ["volume"], "turn60": ["volume"],
+    "illiq20": ["close", "volume"], "amp20": ["high", "low", "close"],
+    "pv_corr20": ["close", "volume"],
 }
 
 

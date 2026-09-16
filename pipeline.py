@@ -50,6 +50,12 @@ def run_backtest(codes, strategy="momentum", start=None, end=None,
     kw.setdefault("rebalance_every", rebalance)
     strat = create_strategy(strategy, **kw)
 
+    # A 路线：策略声明需要另类数据时，注入精灵大单字段
+    # （见 dataprovider/altdata.py；精灵数据止于 2024-07-31，仅适用于回测）
+    if getattr(strat, "needs_alt", False):
+        from dataprovider.altdata import attach_bigorder
+        panel = attach_bigorder(panel)
+
     bench_code = benchmark or codes[0]
     bench_df = store.read(bench_code, start=start, end=end)
     bench_close = bench_df["close"].reindex(panel.dates)

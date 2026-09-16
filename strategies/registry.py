@@ -2,7 +2,7 @@
 from .base import Strategy
 from .builtin import (MomentumStrategy, MeanReversionStrategy, CrossMovingStrategy,
                       MultiFactorStrategy, LianbanLeadStrategy, EtfRotationStrategy,
-                      TechOffensiveStrategy)
+                      TechOffensiveStrategy, BigOrderEtfStrategy)
 
 STRATEGIES = {
     "momentum": MomentumStrategy,
@@ -12,6 +12,8 @@ STRATEGIES = {
     "multifactor": MultiFactorStrategy,
     "lianban_lead": LianbanLeadStrategy,
     "tech_offensive": TechOffensiveStrategy,
+    # A 路线：ETF 轮动 + 精灵大单资金流（需 dataprovider.altdata 注入字段）
+    "bigorder_etf": BigOrderEtfStrategy,
 }
 
 

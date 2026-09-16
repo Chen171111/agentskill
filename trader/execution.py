@@ -64,10 +64,14 @@ class ExecutionEngine:
                         orders.append(Order(code, "buy", buy_qty, px, reason="加仓/建仓"))
 
         # 提交执行
-        filled = []
+        placed = []
         for o in orders:
             self.broker.submit(o)
             if o.status == "filled":
+                # 本地撮合（PaperBroker）：立即计入账户
                 account.apply_fill(o, o.filled_price)
-                filled.append(o)
-        return filled
+            if o.status in ("filled", "submitted"):
+                # 真实券商（同花顺）返回 submitted，成交以 sync_fill/reconcile 回读为准，
+                # 但订单本身必须落库，否则台账会丢单
+                placed.append(o)
+        return placed
