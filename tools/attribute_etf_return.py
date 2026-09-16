@@ -95,12 +95,24 @@ def run(codes, sparams, eparams, s, e):
 
 
 def benchmark(s, e):
-    """等权买入持有整个池子。"""
+    """等权买入持有整个池子。
+
+    ⚠️ **必须做份额折算复权** —— 本函数直接读 CSV（不走 `DataStore`），
+    而 `data/stocks/*.csv` 是**未复权**的。不复权的话基准里会混进假跳变
+    （如 510500 在 2015-04-15 的 +248.6%），基准被抬高，归因结论就错了。
+    策略侧走 `pipeline.run_backtest` → `DataStore.read()` 已自动复权，
+    **两侧口径必须一致**，否则「策略 vs 基准」的差里会混进数据口径差。
+    """
+    from dataprovider.adjust import repair_frame
     fr = {}
     for c in config.RECOMMENDED_POOLS[POOL]:
         d = pd.read_csv(f"data/stocks/{c}.csv", dtype={"date": str},
                         usecols=["date", "close"])
-        fr[c] = d.set_index("date")["close"]
+        d = d.set_index("date").sort_index()
+        d, n_fix, _ = repair_frame(d, c)
+        if n_fix:
+            print(f"  [benchmark] {c} 份额折算自动复权 {n_fix} 处")
+        fr[c] = d["close"]
     px = pd.DataFrame(fr).sort_index()
     q = px[(px.index >= s) & (px.index <= e)].ffill().dropna()
     r = q.pct_change().mean(axis=1).dropna()
