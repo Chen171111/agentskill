@@ -37,7 +37,11 @@ STRATEGY = "etf_rotation"
 TOP_K = 5
 REBALANCE = 5
 CASH = 100_000.0
-THRESH = 0.20
+# 份额折算判据阈值。单一来源 = dataprovider/adjust.py，勿各自改。
+# 0.35 的依据：ETF 涨跌幅按板块分四档（主板 10% / 双创 20% / 北交所预留 30%），
+# 而本库实测真实份额折算最小 49.18%、21%~40% 区间完全空白。
+# 详见 docs/参考_A股ETF涨跌幅限制.md 与 tools/scan_return_bands.py。
+THRESH = 0.35
 
 
 def list_etfs(d='data/stocks'):
@@ -76,7 +80,7 @@ def main() -> int:
     print(f"data/stocks 里共 {len(info)} 只 ETF\n")
 
     # ---- 数据质量：复权跳变扫描 ----
-    print("=== 1. 数据质量：单日 |收益| > 20% 的复权跳变 ===")
+    print(f"=== 1. 数据质量：单日 |收益| > {THRESH:.0%} 的复权跳变 ===")
     bad = {}
     for c in sorted(info):
         hits = scan_anomalies(c)

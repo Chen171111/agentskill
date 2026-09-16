@@ -41,7 +41,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config                                            # noqa: E402
 
-THRESH = 0.20          # 单日 |收益| 超过此值即视为异常（ETF 无涨跌停，但 20% 已极罕见）
+THRESH = 0.35          # 单日 |收益| 超过此值即视为份额折算异常。
+                       # ⚠️ 为什么不是 0.20/0.25：ETF 涨跌幅限制按板块分四类 ——
+                       #    主板 10%、创业板/科创板 20%、北交所 30%、
+                       #    部分跨境/商品类**无限制**。阈值必须高于最高一档（30%），
+                       #    否则会把真实涨停误报成折算（159949 2024-10-08 即为此例）。
+                       #    真实折算幅度实测 ≥ 49.2%，21%~40% 区间全库空白。
+                       #    与 dataprovider/adjust.py 保持单一来源。
 
 
 def scan(path: str, thresh: float = THRESH):
