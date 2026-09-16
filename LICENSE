@@ -1,0 +1,32 @@
+MIT License
+
+Copyright (c) 2026 Chen171111
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+附加说明（不改变上述授权条款，仅作风险提示）
+
+本项目是量化策略的**研究与回测框架**，输出的一切回测指标均为历史模拟结果，
+**不构成投资建议，也不预示未来收益**。策略在真实市场中会受流动性、滑点、
+涨跌停、停牌、数据源误差等因素影响，实盘结果通常显著劣于回测。
+
+`trader/` 目录下的实盘/模拟盘下单相关代码仅供项目作者自用，**未做跨环境适配**，
+使用前请自行评估风险。因使用本软件产生的任何投资损失，作者不承担责任。
