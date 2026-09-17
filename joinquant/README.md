@@ -91,6 +91,53 @@
 
 ---
 
+## 四·补、⚠️ 聚宽**回测环境**是老 pandas（0.23 系）+ Python 2 系
+
+**2026-09-17 实跑报错证实**（第一次在聚宽跑就撞上）：
+
+```
+File "/tmp/strategy/user_code.py", line 347, in _select
+    ind = pd.Series('未分类', index=pool, dtype=object)
+File "pandas/core/series.py", line 275, in __init__  → raise_cast_failure=True)
+File "pandas/core/series.py", line 4132, in _sanitize_array
+File "pandas/core/dtypes/common.py", line 1872, in _get_dtype_type → np.dtype(arr_or_dtype)
+UnicodeEncodeError: 'ascii' codec can't encode characters in position 0-2
+```
+
+判读：`series.py:4132 _sanitize_array` 对应 **pandas 0.23 系**（2018 年）；
+`UnicodeEncodeError` 而非 `TypeError`（后者才是 Py3 下 `np.dtype` 对未知字符串的反应）
+→ **是 Python 2**。
+
+### 三条必须守住的写法约束
+
+| # | 约束 | 为什么 |
+|---|---|---|
+| ① | **不用 f-string / 类型注解 / nonlocal** | Py2 不支持 |
+| ② | **不把标量字符串传给 `pd.Series(x, index=...)`** | 老 pandas 会把它当 list-like 走 dtype 推断 → `np.dtype('未分类')` 崩。**必须给等长列表** |
+| ③ | **含非 ASCII 的 `.format()` 模板，参数必须全是 ASCII 或 byte str** | Py2 下「非 ASCII 字节模板 + unicode 参数」抛 `UnicodeDecodeError`。聚宽返回的行业名就是中文 unicode → **涉及它的模板一律保持纯 ASCII**；中文字面量统一加 `u` 前缀（哨兵 `UNKNOWN_IND = u'未分类'`） |
+
+这三条已写成**静态检查**，跑一次就能扫：
+
+```bash
+$PY joinquant/_verify_core.py    # 第四部分：聚宽环境兼容性
+```
+
+### 已经**实测跑通**的部分（绿区，可以信任）
+
+第一次跑到报错时，`initialize` 已完整跑完 —— 说明下面这些在聚宽真环境里是好的：
+
+- `finance.run_offset_query` + `STK_XR_XD` 的 6 个字段
+- `get_all_securities(types=['stock'], date=)`
+- `get_extras('is_st', ..., axis=1)` 的**分批 concat**
+- `get_price(..., fq='none', panel=False)` 的**长表**返回 + 分批 concat
+- `pd.to_numeric` / `groupby().transform()` + 反向 `cumprod`（整段 `_load_dividends`）
+- 中文 `log.info`（byte str 模板 + ASCII 参数没问题）
+
+**尚未在聚宽验证的**：`_select` 第 356 行之后（行业百分位分组、排序、下单）
+—— 正是这次修的区间。
+
+---
+
 ## 五、改动纪律（**两次踩过的坑，别再犯**）
 
 `jq_dividend_naked.py` 是**从主文件生成的**，不是手改的：

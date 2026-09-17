@@ -79,6 +79,15 @@
 4. 看的是聚宽回测页面的 年化 / 夏普 / 最大回撤 / 基准对比
 
 免责声明：研究与教学用途，不构成投资建议。所有回测数字均为历史模拟，不预示未来收益。
+
+⚠️ 聚宽**回测环境是老 pandas（0.23 系）+ Python 2 系**（2026-09-17 实跑报
+   `UnicodeEncodeError: 'ascii' codec can't encode` 证实）。改动本文件时请守住：
+   - **不要用 f-string**（Py2 不支持）、不要类型注解、不要 `nonlocal`
+   - **不要把标量字符串传给 `pd.Series(..., index=...)`** —— 老 pandas 会拿它去推 dtype
+   - **中文字面量一律加 `u` 前缀**（Py2 下 str/unicode 混比会 UnicodeDecodeError）
+   - 已实测跑通的部分：`finance.run_offset_query`、`get_extras`、`get_price(fq='none', panel=False)`
+     的**长表**返回、`get_all_securities(date=)`、`get_industry`、`pd.to_numeric`、
+     `groupby().transform()` + 反向 `cumprod`（所以 `_load_dividends` 整段是过的）
 """
 from jqdata import *                                        # noqa: F401,F403
 from jqdata import finance                                  # noqa: F401
@@ -110,6 +119,12 @@ TRADE_END = '2026-09-11'     # 与回测结束日一致（用于预取交易日�
 SECTOR = 'sw_l1'             # 行业分类口径：'sw_l1' 申万一级 / 'jq_l1' 聚宽一级 / 'zjw' 证监会
 BENCHMARK = '000852.XSHG'    # 中证1000（本地样本外超额就是跟它比的）
 LOG_PICKS = True             # 是否打印每次调仓的入选明细
+
+# ⚠️ 无行业标签的哨兵值 —— **必须用 unicode 字面量 `u'...'**
+#    聚宽回测环境是老 pandas（0.23 系）+ Python 2 系（实测 2026-09-17 的 UnicodeEncodeError 可证）。
+#    Py2 下 `u'银行' != '未分类'` 会拿 ascii 去 decode 那个 byte str → UnicodeDecodeError。
+#    统一用 unicode 哨兵即可彻底避开（Py3 下 `u''` 与 `''` 等价，无副作用）。
+UNKNOWN_IND = u'未分类'
 
 # ⚠️ 送转调整口径（**这是本次移植查出来的一个真问题，见 README §6.1**）
 #   'legacy'  = 复刻本地 `tools/test_dividend_factor.py`（保证与本地数字可比，**默认**）
@@ -255,7 +270,9 @@ def rebalance(context):
     if LOG_PICKS and len(picks):
         log.info('  入选明细（按股息率降序）：')
         for r in picks.sort_values('dy', ascending=False).itertuples(index=False):
-            log.info('    {:<12} dy={:>6.2f}%  行业={}'.format(r.code, r.dy, r.ind))
+            # ⚠️ 模板必须是**纯 ASCII**！`r.ind` 是聚宽返回的中文 unicode，
+            #    Py2 下「非 ASCII 字节模板 + unicode 参数」会抛 UnicodeDecodeError。
+            log.info('    {:<12} dy={:>6.2f}%  ind={}'.format(r.code, r.dy, r.ind))
 
 
 def _order_out(cd, security, value, tag, context):
@@ -266,7 +283,8 @@ def _order_out(cd, security, value, tag, context):
     try:
         o = order_target_value(security, value)
     except Exception as e:                       # 聚宽在异常标的上会抛错
-        log.info('    {} {} —— 下单异常：{}'.format(tag, security, e))
+        # ⚠️ 模板保持纯 ASCII —— 异常消息可能是中文 unicode（Py2 下会 UnicodeDecodeError）
+        log.info('    {} {} -- order error: {}'.format(tag, security, e))
         return False
     if o is None or getattr(o, 'filled', 0) == 0:
         return False
@@ -353,22 +371,29 @@ def _select(sel_date):
         ok &= (n_div3 >= MIN_DIV3)
 
     # ---- 7) 行业标签（只有 indpct 需要）----
-    ind = pd.Series('未分类', index=pool, dtype=object)
+    # ⚠️ 不能写 `pd.Series('未分类', index=pool, dtype=object)`！
+    #    老 pandas 会把**标量字符串**当 list-like 走 dtype 推断 →
+    #    `np.dtype('未分类')` → UnicodeEncodeError: 'ascii' codec can't encode ...
+    #    （2026-09-17 聚宽实跑就是这个栈：series.py:275 _sanitize_array → maybe_cast_to_datetime）
+    #    → 必须显式给**等长列表**。
+    ind = pd.Series([UNKNOWN_IND] * len(pool), index=pool, dtype=object)
     if FORM == 'indpct':
-        ind = pd.Series(_industries(pool, sel_date)).reindex(pool).fillna('未分类')
-        ok &= (ind != '未分类')       # 无行业标签无法中性化（与本地一致）
+        ind = pd.Series(_industries(pool, sel_date)).reindex(pool).fillna(UNKNOWN_IND)
+        ok &= (ind != UNKNOWN_IND)     # 无行业标签无法中性化（与本地一致）
     ok = ok.fillna(False).astype(bool)
 
     dy2 = dy[ok]
     diag['候选'] = len(dy2)
     if dy2.empty:
         return _empty_picks(), diag
-    ind2 = ind.reindex(dy2.index).fillna('未分类')
+    ind2 = ind.reindex(dy2.index).fillna(UNKNOWN_IND)
 
     # ---- 8) 排序取前 N ----
     if FORM == 'indpct':
         # 行业内百分位（每行业都是 [0,1] 均匀分布）→ 全局取前 N → 天然行业近似等权
-        score = dy2.groupby(ind2).rank(pct=True)
+        # ⚠️ 用 `ind2.values`（按位置分组）而不是传 Series（依赖索引对齐）——
+        #    `ind2` 本来就是 reindex 到 `dy2.index` 的，两者等价，但按位置在老 pandas 上更稳
+        score = dy2.groupby(ind2.values).rank(pct=True)
     else:
         # 'naked' / 'topn'：全局按 dy_ttm 排名
         score = dy2
@@ -397,7 +422,8 @@ def _batched(fn, items, axis=0):
         try:
             part = fn(chunk)
         except Exception as e:
-            log.warning('批 {}~{} 拉取失败：{}'.format(i, i + len(chunk), e))
+            # ⚠️ 模板保持纯 ASCII（异常消息可能是中文 unicode）
+            log.warning('batch {}~{} failed: {}'.format(i, i + len(chunk), e))
             continue
         if part is None or not len(part):
             continue
@@ -466,12 +492,13 @@ def _industries(codes, sel_date):
         try:
             info = get_industry(chunk, date=sel_date)
         except Exception as e:
-            log.warning('get_industry 批 {}~{} 失败（{}）→ 该批记为未分类'.format(
+            # ⚠️ 模板保持纯 ASCII（异常消息可能是中文 unicode）
+            log.warning('get_industry batch {}~{} failed ({}); -> unknown'.format(
                 i, i + len(chunk), e))
             continue
         for c in chunk:
             seg = (info.get(c) or {}).get(SECTOR) or {}
-            out[c] = seg.get('industry_name') or '未分类'
+            out[c] = seg.get('industry_name') or UNKNOWN_IND
     return out
 
 

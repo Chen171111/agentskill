@@ -372,7 +372,72 @@ def main() -> int:
     print('  ⚠️ 这不是「选股名单会变多少」—— 那要修完之后跑对照回测才算数。')
     print('     但可以确定：**`≤10%` 上限会挡掉一部分被放大到离谱的标的**（尤其是高送转股），')
     print('     所以实际影响 < 这里的比例；具体多大必须实测。')
+
+    # ============================== 四、聚宽环境兼容性静态检查 ==============================
+    print()
+    print('=' * 96)
+    print('  四、聚宽环境兼容性（实测：聚宽回测 = 老 pandas 0.23 系 + Python 2 系）')
+    print('=' * 96)
+    src = open(os.path.join(ROOT, 'joinquant', 'jq_dividend.py'),
+               encoding='utf-8').read()
+    bad = py2_compat_scan(src)
+    if not bad:
+        print('  ✅ 未发现 f-string / 类型注解 / 标量字符串 Series 这三类已知会炸的写法')
+    else:
+        for ln, why, code in bad:
+            print('  ❌ 第 {} 行：{}'.format(ln, why))
+            print('       {}'.format(code))
+    print()
+    print('  依据（2026-09-17 聚宽实跑报错）：')
+    print('    pandas/core/series.py:275 _sanitize_array -> maybe_cast_to_datetime')
+    print("    -> np.dtype('未分类') -> UnicodeEncodeError: 'ascii' codec can't encode")
+    print('  → 该栈只在 Py2 出现（Py3 下 np.dtype 对未知字符串抛 TypeError），')
+    print('    且 series.py 的行号对应 pandas 0.23 系（2018 年）。')
+    print()
+    print('  三条必须守住的写法约束：')
+    print('    ① 不用 f-string / 类型注解 / nonlocal（Py2 不支持）')
+    print('    ② 不把标量字符串传给 pd.Series(..., index=...)（老 pandas 会拿它推 dtype）')
+    print('    ③ 含非 ASCII 的 .format() 模板，参数必须是 ASCII 或 byte str ——')
+    print('       「非 ASCII 模板 + unicode 参数」在 Py2 下抛 UnicodeDecodeError。')
+    print('       聚宽返回的行业名就是中文 unicode → 涉及它的模板一律保持纯 ASCII。')
     return 0
+
+
+def py2_compat_scan(src: str):
+    """用 ast 精确扫三类「在聚宽老环境下会炸」的写法（比正则可靠）。
+
+    ① `ast.JoinedStr` → f-string（Py2 不支持）
+    ② 函数/参数上的 annotation、以及 `from __future__ import annotations`
+    ③ `pd.Series(<字符串字面量>, ...)` → 老 pandas 会把标量字符串当 list-like 推 dtype
+    """
+    import ast
+    out = []
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            out.append((getattr(node, 'lineno', 0), 'f-string（Py2 不支持）',
+                        '<f-string>'))
+        if isinstance(node, ast.ImportFrom) and node.module == '__future__':
+            for a in node.names:
+                if a.name == 'annotations':
+                    out.append((node.lineno, 'from __future__ import annotations',
+                                '（Py2 不需要也不支持）'))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.returns is not None:
+                out.append((node.lineno, '函数返回类型注解', 'def {}'.format(node.name)))
+            for a in list(getattr(node.args, 'args', [])) + \
+                    list(getattr(node.args, 'kwonlyargs', [])):
+                if getattr(a, 'annotation', None) is not None:
+                    out.append((node.lineno, '参数类型注解', 'def {}'.format(node.name)))
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            out.append((node.lineno, '变量类型注解', node.target.id))
+        if (isinstance(node, ast.Call)
+                and getattr(getattr(node, 'func', None), 'attr', '') == 'Series'
+                and node.args and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)):
+            out.append((node.lineno, 'pd.Series(标量字符串, ...) —— 老 pandas 会崩',
+                        repr(node.args[0].value)))
+    return sorted(set(out))
 
 
 if __name__ == '__main__':
