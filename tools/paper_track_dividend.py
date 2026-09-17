@@ -100,9 +100,9 @@ def _check_freshness(df) -> None:
         from dataprovider.calendar import latest_closed_trading_day
         want = latest_closed_trading_day(None)
         if last < want:
-            print("  ⚠️ 数据陈旧（应有 {}）→ 先重跑：".format(want))
-            print("     $PY tools/fetch_stock_history.py bars --out data/stockbars "
-                  "--start 2018-01-01 --end <今天>")
+            print("  ⚠️ 数据陈旧（应有 {}）→ 先重跑（**增量追加**，不要全量重抓）：".format(want))
+            print("     $PY tools/append_stock_bars.py --out data/stockbars --workers 8")
+            print("     $PY tools/fetch_stock_bfq.py merge --out data/stockbars")
             print("     $PY tools/fetch_dividend.py --out data/dividends")
             print("     $PY tools/rebuild_returns.py --bfq data/stockbars/bars_bfq.parquet "
                   "--dividends data/dividends/bonus_all.parquet --tax-rate 0.10 "
@@ -246,20 +246,41 @@ def main(argv=None) -> int:
         start = min([d for d in dates if d >= start] or [dates[-1]])
     i0, i1 = dates.index(start), dates.index(today)
     n = i1 - i0
-    due = args.force or (n >= 0 and n % HOLD == 0)
-    next_in = HOLD - (n % HOLD) if n % HOLD else 0
+
+    # 调仓日 = 距起点 HOLD 的整数倍。⚠️ 必须允许「越过」：
+    # 若数据一次跳过多天（按月/按周更新），n 会落在两个调仓日之间，
+    # 而旧逻辑要求 `n % HOLD == 0` 才算到期 → **会永远不生成名单**，静默失效。
+    # 现在取「距起点最大的、不超过 n 的 HOLD 整数倍」，且该日名单尚未生成。
+    # 副作用（正面的）：名单一旦生成过，同一调仓日就不再 due → 不会被重复覆盖。
+    target_n = (n // HOLD) * HOLD if n >= 0 else -1
+    target_date = dates[i0 + target_n] if target_n >= 0 else None
+    target_file = (TRACK_DIR / "selection_{}.csv".format(target_date)
+                   if target_date else None)
+
+    if args.force:
+        due, sel_date = True, today
+    elif target_date and target_file and not target_file.exists():
+        due, sel_date = True, target_date
+    else:
+        due, sel_date = False, None
+
+    next_in = HOLD - (n % HOLD) if n % HOLD else HOLD
 
     print("\n  跟踪起点 {} ｜ 数据最新 {} ｜ 距起点 {} 个交易日".format(start, today, n))
     if not due:
-        print("  ⏳ 今天不是调仓日（还差 {} 个交易日）→ 不生成名单".format(next_in))
+        print("  ⏳ 未到新的调仓日（距下一个还差 {} 个交易日）→ 不生成名单".format(next_in))
         print("     想看已记录的表现：--report")
         return 0
 
-    picks = _select_on(df, today, args)
+    if sel_date != today:
+        print("  ℹ️ 数据已越过调仓日 {} → 补生成该日名单（用当日数据，不用最新数据）"
+              .format(sel_date))
+
+    picks = _select_on(df, sel_date, args)
     if not picks:
-        print("\n  ⚠️ 今日无合格标的（候选池为空）→ 按方案应**空仓**，不硬凑。")
+        print("\n  ⚠️ 该日无合格标的（候选池为空）→ 按方案应**空仓**，不硬凑。")
         return 0
-    out = _record(today, picks, args)
+    out = _record(sel_date, picks, args)
     print("\n  ✅ 已记录 {} 只（每只 {:.1f}% ／ 单笔约 {:.0f} 元）".format(
         len(picks), 100.0 / len(picks), CAPITAL_WAN * 1e4 / len(picks)))
     print("  " + "{:<12}{:>9}{:>10}{:>14}".format("代码", "股息率%", "权重%", "所属行业"))
