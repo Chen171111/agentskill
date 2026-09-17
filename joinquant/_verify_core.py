@@ -339,6 +339,44 @@ def main() -> int:
     print('     · 若 L 的中位比值 ≈ (1+r) 而 C 的 ≈ 1 → **本地现行 adj 的方向是错的**')
     print('     · 本脚本只做检验，**不改任何研究口径**；是否修由主人决定')
 
+    # ---- 二·补：同一判据打在**本地 build_yield_panel** 上（确认修复落在 tools/ 里）----
+    print()
+    print('=' * 96)
+    print('  二·补、把中立性判据打在【本地 tools/test_dividend_factor.py】上')
+    print('=' * 96)
+    from tools.test_dividend_factor import build_yield_panel as local_panel
+    rows2 = []
+    for c, d, r_ in hits:
+        s = px.get(c)
+        if s is None or not len(s):
+            continue
+        dd = pd.Timestamp(d)
+        before = s.index[s.index < dd.strftime('%Y%m%d')]
+        after = s.index[s.index >= dd.strftime('%Y%m%d')]
+        if not len(before) or not len(after):
+            continue
+        rows2.append((c, float(s[before[-1]]), before[-1],
+                      float(s[after[0]]), after[0], r_))
+    grid2 = pd.DataFrame(
+        [(c, d, p) for c, p0, d0, p1, d1, _ in rows2 for d, p in ((d0, p0), (d1, p1))],
+        columns=['code', 'date', 'close'])
+    exp2 = pd.Series([1.0 + r_ for *_, r_ in rows2])
+    print('  样本 {} 个（本地函数，不依赖聚宽）'.format(len(rows2)))
+    for mode in ('legacy', 'correct'):
+        pan = local_panel(grid2.copy(), div, price_col='close', adj_mode=mode)
+        m = {(r.code, r.date): r.dy_ttm for r in pan.itertuples(index=False)}
+        ra = []
+        for c, p0, d0, p1, d1, _ in rows2:
+            a, b = m.get((c, d0)), m.get((c, d1))
+            if a and b and a > 0:
+                ra.append(b / a)
+        ra = pd.Series(ra)
+        print('  adj_mode={:<8} dy 在送转日的中位比值 {:.3f} ｜ 偏离 1 的中位 {:.3f} ｜ '
+              '偏离 (1+r) 的中位 {:.3f}'.format(
+                  mode, float(ra.median()), float((ra - 1).abs().median()),
+                  float((ra - exp2.reindex(ra.index)).abs().median())))
+    print('  → correct 应落在 **1 ± 0.1**，legacy 应贴合 (1+r)')
+
     # ============================== 三、影响面量化 ==============================
     print()
     print('=' * 96)

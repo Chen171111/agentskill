@@ -371,6 +371,9 @@ def main(argv=None) -> int:
     ap.add_argument("--min-price", type=float, default=2.0)
     ap.add_argument("--min-amount", type=float, default=3e7)
     ap.add_argument("--min-listed", type=int, default=120)
+    ap.add_argument("--adj-mode", default="legacy", choices=["legacy", "correct"],
+                    help="送转调整口径（透传给 build_yield_panel）："
+                         "legacy=旧实现（默认）；correct=价值中性口径")
     ap.add_argument("--hyst-entry", type=float, default=None,
                     help="滞回买入阈值（%）。给出后额外跑「hyst × 行业中性化」叠加配置")
     ap.add_argument("--hyst-exit", type=float, default=None,
@@ -385,7 +388,8 @@ def main(argv=None) -> int:
     # ---- 数据准备（复用 backtest_dividend.prepare，保证与股息率回测同一套口径）----
     ns = SimpleNamespace(bars=args.bars, bfq=args.bfq, dividends=args.dividends,
                          universe=args.universe, min_listed=args.min_listed,
-                         min_amount=args.min_amount, min_price=args.min_price)
+                         min_amount=args.min_amount, min_price=args.min_price,
+                         adj_mode=args.adj_mode)
     df = prepare_div(ns)
 
     ind = pd.read_parquet(args.industry)[["code_full", "ind_l1", "em2016"]]

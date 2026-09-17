@@ -55,7 +55,8 @@ def _num(x) -> float:
 
 
 def build_yield_panel(bars: pd.DataFrame, div: pd.DataFrame,
-                      price_col: str = "close") -> pd.DataFrame:
+                      price_col: str = "close",
+                      adj_mode: str = "legacy") -> pd.DataFrame:
     """给长表加上 dy_ttm / dy_fwd / dps_ttm 列。
 
     ⚠️ **`price_col` 必须是「真实市价」，不能用总收益指数**。
@@ -64,6 +65,20 @@ def build_yield_panel(bars: pd.DataFrame, div: pd.DataFrame,
     会**系统性高估历史股息率**，且高估幅度与股票的分红历史相关 ——
     等于把「长期分红多」混进「当前股息率高」。
     → 请传入 `bars_bfq.close`（不复权真实价）。
+
+    `adj_mode`：送转调整口径（**2026-09-17 新增，默认 `'legacy'` 保持既有全部结论不变**）
+
+    | 模式 | 公式 | 说明 |
+    |---|---|---|
+    | `'legacy'` | `dps_i(t) = D_i × Π_{j>i}(1+r_j)`（j 遍历**全部**历史） | 旧实现。**方向为乘、且不设时间上界** |
+    | `'correct'` | `dps_i(t) = D_i / Π_{i≤k≤t}(1+r_k)` | 价值中性口径：在 `i` 除权日持有 1 股、到 `t` 时变成 `Π(1+r)` 股，那笔现金摊到「当前每股」要**除**这个因子 |
+
+    ⚠️ **为什么 `'legacy'` 是错的**（判据见 `docs/个股线_送转调整口径缺陷.md`）：
+    **送转是价值中性的** —— 1 股变 2 股、股价腰斩、每股分红摊薄一半
+    → **纯送转除权日前后，股息率不应该跳变**。
+    实测（24 个纯送转样本）中位比值：legacy **1.446**（精确贴合 `1+r`，即跳变）／
+    correct **1.008**（连续）。聚宽侧独立复现：修正后全区间年化 13.15% → 10.29%（−2.86pp）。
+    → **`'correct'` 尚未替换任何既有结论**，要采纳需先过 6 条验收判据。
     """
     bars = bars.sort_values(["code", "date"]).reset_index(drop=True)
     if price_col not in bars.columns:
@@ -94,20 +109,31 @@ def build_yield_panel(bars: pd.DataFrame, div: pd.DataFrame,
         ex = g.EX_DIVIDEND_DATE.values
         D = g.D.values
         r = g.r.values
-        # 累计送转因子：把历史 DPS 换算到「当前股本口径」
-        # adj[i] = Π_{j>i} (1 + r_j)
-        adj = np.ones(len(D))
-        acc = 1.0
-        for i in range(len(D) - 1, -1, -1):
-            adj[i] = acc
-            acc *= (1.0 + r[i])
-        Dps = D * adj
+        # ---- 送转调整：把历史每股分红换算到 t 时刻的股本口径 ----
+        # ⚠️ 两种模式，默认 legacy（= 既有全部历史结论的口径，别在未授权时改）
+        cum_le = np.cumprod(1.0 + r)                  # Π_{k<=i}
+        cum_prev = cum_le / (1.0 + r)                 # Π_{k<i}
+        if adj_mode == "correct":
+            Dps = D * cum_prev                        # 分子（下面还要除以 P(t)）
+        else:
+            # legacy: adj[i] = Π_{j>i}(1 + r_j)，j 遍历全部历史（方向为乘、不设上界）
+            adj = np.ones(len(D))
+            acc = 1.0
+            for i in range(len(D) - 1, -1, -1):
+                adj[i] = acc
+                acc *= (1.0 + r[i])
+            Dps = D * adj
         cs = np.concatenate([[0.0], np.cumsum(Dps)])
 
         # --- dy_ttm：过去 365 天内已除权的分红 ---
         hi = np.searchsorted(ex, dates, side="right")           # ex <= t
         lo = np.searchsorted(ex, d365[idx], side="right")       # ex <= t-365
-        dps_ttm[idx] = cs[hi] - cs[lo]
+        num = cs[hi] - cs[lo]
+        if adj_mode == "correct":
+            # P(t) = Π_{k: ex_k <= t}(1+r_k)，**按股票分别取**（全市场一起乘会溢出）
+            P = np.where(hi > 0, cum_le[np.clip(hi - 1, 0, None)], 1.0)
+            num = num / P
+        dps_ttm[idx] = num
         # 持续性代理：过去 3 年内**现金分红**的次数（送转不算）
         cash = D > 0
         n_div3[idx] = (np.searchsorted(ex[cash], dates, side="right")
@@ -127,7 +153,14 @@ def build_yield_panel(bars: pd.DataFrame, div: pd.DataFrame,
             cs_nt = np.concatenate([[0.0], np.cumsum(Dps[order])])
             hi = np.searchsorted(nt_eff[order], dates, side="right")
             lo = np.searchsorted(nt_eff[order], d365[idx], side="right")
-            dps_fwd[idx] = cs_nt[hi] - cs_nt[lo]
+            numf = cs_nt[hi] - cs_nt[lo]
+            if adj_mode == "correct":
+                # ⚠️ 口径换算仍按**除权日**序（送转的股本口径与公告时点无关），
+                #    只有「信息在 t 时刻是否已知」才用 NOTICE_DATE
+                hie = np.searchsorted(ex, dates, side="right")
+                Pf = np.where(hie > 0, cum_le[np.clip(hie - 1, 0, None)], 1.0)
+                numf = numf / Pf
+            dps_fwd[idx] = numf
 
     out = bars.copy()
     out["dps_ttm"] = dps_ttm
@@ -189,6 +222,9 @@ def main(argv=None) -> int:
     ap.add_argument("--min-price", type=float, default=2.0)
     ap.add_argument("--min-amount", type=float, default=3e7)
     ap.add_argument("--min-listed", type=int, default=120)
+    ap.add_argument("--adj-mode", default="legacy", choices=["legacy", "correct"],
+                    help="送转调整口径：legacy=旧实现（默认，与既有结论一致）；"
+                         "correct=价值中性口径（除送转因子、只除到选股日）")
     ap.add_argument("--out", default="results/dividend_factor_ic.csv")
     args = ap.parse_args(argv)
 
@@ -225,8 +261,9 @@ def main(argv=None) -> int:
     else:
         print("  ⚠️ 未提供 --bfq，分母退回总收益指数（会高估股息率）")
 
-    print("  构建 point-in-time 股息率面板…", flush=True)
-    df = build_yield_panel(b, div, price_col=price_col)
+    print("  构建 point-in-time 股息率面板…（adj_mode = {}）".format(args.adj_mode),
+          flush=True)
+    df = build_yield_panel(b, div, price_col=price_col, adj_mode=args.adj_mode)
 
     # 池子掩码所需列（与引擎一致）
     g = df.groupby("code", sort=False)
