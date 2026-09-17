@@ -56,7 +56,7 @@ def _num(x) -> float:
 
 def build_yield_panel(bars: pd.DataFrame, div: pd.DataFrame,
                       price_col: str = "close",
-                      adj_mode: str = "legacy") -> pd.DataFrame:
+                      adj_mode: str = "correct") -> pd.DataFrame:
     """给长表加上 dy_ttm / dy_fwd / dps_ttm 列。
 
     ⚠️ **`price_col` 必须是「真实市价」，不能用总收益指数**。
@@ -66,19 +66,23 @@ def build_yield_panel(bars: pd.DataFrame, div: pd.DataFrame,
     等于把「长期分红多」混进「当前股息率高」。
     → 请传入 `bars_bfq.close`（不复权真实价）。
 
-    `adj_mode`：送转调整口径（**2026-09-17 新增，默认 `'legacy'` 保持既有全部结论不变**）
+    `adj_mode`：送转调整口径（2026-09-17 新增；**2026-09-17 晚采纳 `'correct'` 为默认**）
 
     | 模式 | 公式 | 说明 |
     |---|---|---|
-    | `'legacy'` | `dps_i(t) = D_i × Π_{j>i}(1+r_j)`（j 遍历**全部**历史） | 旧实现。**方向为乘、且不设时间上界** |
-    | `'correct'` | `dps_i(t) = D_i / Π_{i≤k≤t}(1+r_k)` | 价值中性口径：在 `i` 除权日持有 1 股、到 `t` 时变成 `Π(1+r)` 股，那笔现金摊到「当前每股」要**除**这个因子 |
+    | **`'correct'`（默认）** | `dps_i(t) = D_i / Π_{i≤k≤t}(1+r_k)` | 价值中性口径：在 `i` 除权日持有 1 股、到 `t` 时变成 `Π(1+r)` 股，那笔现金摊到「当前每股」要**除**这个因子。**只依赖 ≤ t 的事件 → 数字可复现** |
+    | `'legacy'`（已证伪） | `dps_i(t) = D_i × Π_{j>i}(1+r_j)`（j 遍历**全部**历史） | 旧实现。**方向为乘、且不设时间上界** → 历史数字会随数据刷新被"追改" |
 
     ⚠️ **为什么 `'legacy'` 是错的**（判据见 `docs/个股线_送转调整口径缺陷.md`）：
     **送转是价值中性的** —— 1 股变 2 股、股价腰斩、每股分红摊薄一半
     → **纯送转除权日前后，股息率不应该跳变**。
     实测（24 个纯送转样本）中位比值：legacy **1.446**（精确贴合 `1+r`，即跳变）／
-    correct **1.008**（连续）。聚宽侧独立复现：修正后全区间年化 13.15% → 10.29%（−2.86pp）。
-    → **`'correct'` 尚未替换任何既有结论**，要采纳需先过 6 条验收判据。
+    correct **1.008**（连续）。
+    **判据⑦（最硬）**：换数据截止日重算历史段 —— `correct` 差异 **恰好 0**、
+    `legacy` **16.54% 的组合会变**（最大绝对差 11.9 元/股）
+    → **legacy 的旧结论不是「偏高多少」，而是「不可复现」。**
+
+    ⚠️ **要复现 2026-09-17 之前的历史结论，必须显式传 `adj_mode='legacy'`。**
     """
     bars = bars.sort_values(["code", "date"]).reset_index(drop=True)
     if price_col not in bars.columns:
@@ -222,9 +226,9 @@ def main(argv=None) -> int:
     ap.add_argument("--min-price", type=float, default=2.0)
     ap.add_argument("--min-amount", type=float, default=3e7)
     ap.add_argument("--min-listed", type=int, default=120)
-    ap.add_argument("--adj-mode", default="legacy", choices=["legacy", "correct"],
-                    help="送转调整口径：legacy=旧实现（默认，与既有结论一致）；"
-                         "correct=价值中性口径（除送转因子、只除到选股日）")
+    ap.add_argument("--adj-mode", default="correct", choices=["legacy", "correct"],
+                    help="送转调整口径：correct=价值中性口径（**默认**，只除到选股日）；"
+                         "legacy=已证伪的旧实现（方向为乘、含未来送转，仅用于复现旧结论）")
     ap.add_argument("--out", default="results/dividend_factor_ic.csv")
     args = ap.parse_args(argv)
 

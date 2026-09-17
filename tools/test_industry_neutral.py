@@ -371,9 +371,9 @@ def main(argv=None) -> int:
     ap.add_argument("--min-price", type=float, default=2.0)
     ap.add_argument("--min-amount", type=float, default=3e7)
     ap.add_argument("--min-listed", type=int, default=120)
-    ap.add_argument("--adj-mode", default="legacy", choices=["legacy", "correct"],
+    ap.add_argument("--adj-mode", default="correct", choices=["legacy", "correct"],
                     help="送转调整口径（透传给 build_yield_panel）："
-                         "legacy=旧实现（默认）；correct=价值中性口径")
+                         "correct=价值中性口径（**默认**）；legacy=已证伪的旧实现")
     ap.add_argument("--hyst-entry", type=float, default=None,
                     help="滞回买入阈值（%）。给出后额外跑「hyst × 行业中性化」叠加配置")
     ap.add_argument("--hyst-exit", type=float, default=None,

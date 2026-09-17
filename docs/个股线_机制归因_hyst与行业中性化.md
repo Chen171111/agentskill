@@ -1,5 +1,12 @@
 # 个股线：机制归因 —— `hyst` 与「行业内选股」到底共享了什么
 
+> ## ⚠️ 2026-09-17 送转口径变更：**本文数字是旧口径（legacy），已作废**
+>
+> `build_yield_panel` 的送转调整原实现方向反了（且把未来送转算进了历史），
+> 已采纳 `adj_mode='correct'`。**本文尚未按新口径重跑**，引用时请以
+> `docs/个股线_送转调整口径缺陷.md` 为准。
+> 重跑命令见该文档 §五·补；**复现本文旧数字**：脚本加 `--adj-mode legacy`。
+
 > 2026-09-16 ｜ 脚本：`tools/diag_industry_hyst_overlap.py`（新增）
 > 数据：`bars_total_tax10.parquet`（税后 10%）+ `industry_all.parquet`
 > 配置：`N=20` / `hold=60` / `≤10%` + `≥2次`，逐调仓日对比

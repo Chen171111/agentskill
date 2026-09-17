@@ -13,6 +13,9 @@
 | **2** | `jq_dividend_naked.py` | `FORM='naked'`、`ADJ_MODE='legacy'` | **裸版对照** —— 本地全区间只有 6.82%、还跑输中证1000 |
 | **3**（推荐） | `jq_dividend.py` | `FORM='indpct'`、`ADJ_MODE='correct'` | 送转口径修正版 → 直接为「立项修」提供**外部交叉验证** |
 
+> ⚠️ **2026-09-17 晚：`ADJ_MODE` 默认已从 `'legacy'` 翻转为 `'correct'`**（定稿口径已切换到修正后的送转口径，见 `docs/个股线_送转调整口径缺陷.md`）。
+> 所以现在直接贴代码跑出来的就是 **`correct`**；**要复现上面配置 1/2 的 legacy 数字**，把 `ADJ_MODE` 改回 `'legacy'`。
+>
 **改哪几行**（用常量名搜更稳，行号会随改动漂移）：`jq_dividend.py` 顶部
 `FORM`（当前第 **93** 行）／`ADJ_MODE`（当前第 **123** 行）。
 `jq_dividend_naked.py` 的 `FORM` 已经是 `'naked'`，**不要手改它**（它是生成物，改逻辑只改主文件）。

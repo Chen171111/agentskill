@@ -92,9 +92,9 @@ def prepare(args) -> pd.DataFrame:
     print("  计算引擎特征…", flush=True)
     feat = build_features(b)
     print("  构建 point-in-time 股息率面板…（adj_mode = {}）".format(
-        getattr(args, "adj_mode", "legacy")), flush=True)
+        getattr(args, "adj_mode", "correct")), flush=True)
     dy = build_yield_panel(b, div, price_col="px_real" if "px_real" in b else "close",
-                           adj_mode=getattr(args, "adj_mode", "legacy"))[
+                           adj_mode=getattr(args, "adj_mode", "correct"))[
         ["code", "date", "dps_ttm", "dps_fwd", "dy_ttm", "dy_fwd", "n_div3"]]
     df = feat.merge(dy, on=["code", "date"], how="left")
     # 池子掩码（与 run() 内部口径一致），供 build_mask 用
@@ -197,9 +197,9 @@ def main(argv=None) -> int:
     ap.add_argument("--min-price", type=float, default=2.0)
     ap.add_argument("--min-amount", type=float, default=3e7)
     ap.add_argument("--min-listed", type=int, default=120)
-    ap.add_argument("--adj-mode", default="legacy", choices=["legacy", "correct"],
+    ap.add_argument("--adj-mode", default="correct", choices=["legacy", "correct"],
                     help="送转调整口径（透传给 build_yield_panel）："
-                         "legacy=旧实现（默认）；correct=价值中性口径")
+                         "correct=价值中性口径（**默认**）；legacy=已证伪的旧实现")
     ap.add_argument("--capitals", type=float, nargs="+",
                     default=[10, 20, 50, 100, 200])
     ap.add_argument("--out", default="results/dividend_backtest.csv")

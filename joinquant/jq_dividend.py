@@ -147,7 +147,7 @@ UNKNOWN_IND = u'未分类'
 #      correct → 中位比值 **1.008**，即**连续** ✓
 #   → 默认仍是 legacy，只为了「聚宽数字 vs 本地数字」可比；
 #     若主人要测修正口径，把这里改成 'correct' 再跑一次即可。
-ADJ_MODE = 'legacy'
+ADJ_MODE = 'correct'
 
 # 裸版对照：只保留「按股息率排序取前 20」，去掉两个过滤器（与本地 6.82% 那一行对齐）
 if FORM == 'naked':
