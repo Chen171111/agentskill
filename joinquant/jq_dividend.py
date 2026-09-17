@@ -187,7 +187,10 @@ def initialize(context):
         len(g.div), g.div.code.nunique() if len(g.div) else 0))
     log.info('=' * 78)
 
-    run_daily(rebalance, time='09:30')
+    # ⚠️ 必须是**开盘时刻**：聚宽文档「如果在开盘时刻运行，最新价格为开盘价」
+    #    → 用 'open' + reference_security（平台惯用法，见聚宽自带模板）
+    #    若某天 'open' 报错，可换成具体时间：run_daily(rebalance, time='09:30')
+    run_daily(rebalance, time='open', reference_security=BENCHMARK)
 
 
 # ==========================================================================
