@@ -376,30 +376,35 @@ def main() -> int:
     # ============================== 四、聚宽环境兼容性静态检查 ==============================
     print()
     print('=' * 96)
-    print('  四、聚宽环境兼容性（实测：聚宽回测 = 老 pandas 0.23 系 + Python 2 系）')
+    print('  四、聚宽环境兼容性（实测：聚宽回测 = Python 3 + 老 pandas/numpy）')
     print('=' * 96)
     src = open(os.path.join(ROOT, 'joinquant', 'jq_dividend.py'),
                encoding='utf-8').read()
     bad = py2_compat_scan(src)
     if not bad:
-        print('  ✅ 未发现 f-string / 类型注解 / 标量字符串 Series 这三类已知会炸的写法')
+        print('  ✅ 未发现 f-string / 类型注解 / 标量字符串 Series 这三类写法')
     else:
         for ln, why, code in bad:
             print('  ❌ 第 {} 行：{}'.format(ln, why))
             print('       {}'.format(code))
     print()
     print('  依据（2026-09-17 聚宽实跑报错）：')
-    print('    pandas/core/series.py:275 _sanitize_array -> maybe_cast_to_datetime')
+    print('    pandas/core/series.py:4132 _sanitize_array -> maybe_cast_to_datetime')
     print("    -> np.dtype('未分类') -> UnicodeEncodeError: 'ascii' codec can't encode")
-    print('  → 该栈只在 Py2 出现（Py3 下 np.dtype 对未知字符串抛 TypeError），')
-    print('    且 series.py 的行号对应 pandas 0.23 系（2018 年）。')
+    print('  ⚠️ 订正：初版据此判定「是 Python 2」，**错了** ——')
+    print('     真实原因是**老 numpy 的 dtype 解析器做 ascii 编码**，Py3 下同样会抛；')
+    print('     本机 numpy 2.5 抛 TypeError、老 numpy 抛 UnicodeEncodeError，')
+    print('     差异来自 numpy 版本而非 Python 版本。聚宽页面明确标注 Python3。')
+    print('     **教训：别拿本机库的行为推测线上环境。**')
     print()
-    print('  三条必须守住的写法约束：')
-    print('    ① 不用 f-string / 类型注解 / nonlocal（Py2 不支持）')
-    print('    ② 不把标量字符串传给 pd.Series(..., index=...)（老 pandas 会拿它推 dtype）')
-    print('    ③ 含非 ASCII 的 .format() 模板，参数必须是 ASCII 或 byte str ——')
-    print('       「非 ASCII 模板 + unicode 参数」在 Py2 下抛 UnicodeDecodeError。')
-    print('       聚宽返回的行业名就是中文 unicode → 涉及它的模板一律保持纯 ASCII。')
+    print('  两条必须守住的写法约束：')
+    print('    ① 不把标量字符串传给 pd.Series(x, index=...)')
+    print('       （老 pandas 拿它走 dtype 推断 -> np.dtype(中文) -> 崩；要给等长列表）')
+    print('    ② finance.run_offset_query 在聚宽平台上不存在（是 jqdatasdk 的函数）->')
+    print('       必须保留 _paged_query 兜底，否则分红数据整段拿不到')
+    print()
+    print('  （初版另写的「不用 f-string / 类型注解 / 中文字面量加 u」**不是必需的** ——')
+    print('    Py3 支持本文件全部语法，u\'\' 与 \'\' 等价。当时误判成 Py2 才加的。）')
     return 0
 
 

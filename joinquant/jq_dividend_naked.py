@@ -80,14 +80,26 @@
 
 免责声明：研究与教学用途，不构成投资建议。所有回测数字均为历史模拟，不预示未来收益。
 
-⚠️ 聚宽**回测环境是老 pandas（0.23 系）+ Python 2 系**（2026-09-17 实跑报
-   `UnicodeEncodeError: 'ascii' codec can't encode` 证实）。改动本文件时请守住：
-   - **不要用 f-string**（Py2 不支持）、不要类型注解、不要 `nonlocal`
-   - **不要把标量字符串传给 `pd.Series(..., index=...)`** —— 老 pandas 会拿它去推 dtype
-   - **中文字面量一律加 `u` 前缀**（Py2 下 str/unicode 混比会 UnicodeDecodeError）
-   - 已实测跑通的部分：`finance.run_offset_query`、`get_extras`、`get_price(fq='none', panel=False)`
-     的**长表**返回、`get_all_securities(date=)`、`get_industry`、`pd.to_numeric`、
-     `groupby().transform()` + 反向 `cumprod`（所以 `_load_dividends` 整段是过的）
+⚠️ 聚宽**回测环境 = Python 3 + 老 pandas/numpy**
+   （2026-09-17 实跑证实：页面明确标注 `Python3`，但 pandas 0.23 系 / numpy 也老）。
+   - 踩到的坑：`np.dtype(u'未分类')` 在**老 numpy** 里抛
+     `UnicodeEncodeError: 'ascii' codec can't encode`（它的 dtype 解析器做 ascii 编码）。
+     ⚠️ 本机 numpy 2.5 抛的是 `TypeError` —— **别拿本机行为推测线上**，这正是我一开始
+     误判成「Python 2」的原因。
+   - **必须守的**：不要把标量字符串传给 `pd.Series(..., index=...)`（老 pandas 会拿它走 dtype
+     推断 → 上面那个崩）。正确写法：`pd.Series([UNKNOWN_IND] * len(pool), index=pool, dtype=object)`
+   - 其余约束（不用 f-string / 类型注解 / 中文字面量加 `u`）**不是必需的**（Py3 支持本文件全部语法），
+     保留无害；`u''` 在 Py3 下与 `''` 等价
+   - ⚠️ **`finance.run_offset_query` 在聚宽平台上不存在**（它是 jqdatasdk 的函数）→
+     必须保留 `_paged_query` 兜底，否则分红数据整段拿不到。
+     实测：平台报 `'finance' object has no attribute 'run_offset_query'`，兜底接管后正常取到 **36345 条**
+   - **已实测跑通**：`get_all_securities(date=)`、`get_extras(is_st)` 分批、`get_price(fq='none',
+     panel=False)` 的**长表** + 分批、`get_industry` 分批、`pd.to_numeric`、
+     `groupby().transform()` + 反向 `cumprod`、`_paged_query` 分页、中文 `log.info`、
+     `run_daily(time='open', reference_security=...)`
+   - **实测结果**（全区间 2019-01-02~2026-09-11 / 10 万 / 基准中证1000 67.66%）=>
+     定稿 **158.86%**（Sharpe 0.52 / 回撤 19.04%）｜裸版 **60.45%**（跑输基准！）｜
+     修正送转口径 **112.50%**（Sharpe 0.37）—— 见 `RUNSHEET.md`
 """
 from jqdata import *                                        # noqa: F401,F403
 from jqdata import finance                                  # noqa: F401

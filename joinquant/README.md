@@ -91,32 +91,40 @@
 
 ---
 
-## 四·补、⚠️ 聚宽**回测环境**是老 pandas（0.23 系）+ Python 2 系
+## 四·补、⚠️ 聚宽**回测环境 = Python 3 + 老 pandas/numpy**（订正版）
 
-**2026-09-17 实跑报错证实**（第一次在聚宽跑就撞上）：
+> ⚠️ **本节的初版把环境判成了「Python 2」，那是错的 —— 2026-09-17 实跑看到页面明确标注
+> `Python3`，已订正。** 记下这个判读过程本身，比结论值钱。
+
+**聚宽报的错**（第一次跑就撞上，也是最终查明「跑的是旧代码」的关键证据）：
 
 ```
 File "/tmp/strategy/user_code.py", line 347, in _select
     ind = pd.Series('未分类', index=pool, dtype=object)
-File "pandas/core/series.py", line 275, in __init__  → raise_cast_failure=True)
 File "pandas/core/series.py", line 4132, in _sanitize_array
 File "pandas/core/dtypes/common.py", line 1872, in _get_dtype_type → np.dtype(arr_or_dtype)
 UnicodeEncodeError: 'ascii' codec can't encode characters in position 0-2
 ```
 
-判读：`series.py:4132 _sanitize_array` 对应 **pandas 0.23 系**（2018 年）；
-`UnicodeEncodeError` 而非 `TypeError`（后者才是 Py3 下 `np.dtype` 对未知字符串的反应）
-→ **是 Python 2**。
+**正确的判读**：
+- `series.py:4132 _sanitize_array` 这个行号 → **pandas 0.23 系**（2018 年）✓ 这一半判对了
+- ❌ 但「`UnicodeEncodeError` 而不是 `TypeError` → 说明是 Py2」**是错的**：
+  真实原因是**老 numpy 的 dtype 解析器会做 `ascii` 编码**，Py3 下一样会抛。
+  本机 numpy 2.5 抛 `TypeError`，老 numpy 抛 `UnicodeEncodeError` ——
+  **差异来自 numpy 版本，不是 Python 版本。**
+- **教训：别拿本机库的行为去推测线上环境；去页面上找「Python3」这种直接标注。**
 
-### 三条必须守住的写法约束
+### 必须守住的写法约束
 
 | # | 约束 | 为什么 |
 |---|---|---|
-| ① | **不用 f-string / 类型注解 / nonlocal** | Py2 不支持 |
-| ② | **不把标量字符串传给 `pd.Series(x, index=...)`** | 老 pandas 会把它当 list-like 走 dtype 推断 → `np.dtype('未分类')` 崩。**必须给等长列表** |
-| ③ | **含非 ASCII 的 `.format()` 模板，参数必须全是 ASCII 或 byte str** | Py2 下「非 ASCII 字节模板 + unicode 参数」抛 `UnicodeDecodeError`。聚宽返回的行业名就是中文 unicode → **涉及它的模板一律保持纯 ASCII**；中文字面量统一加 `u` 前缀（哨兵 `UNKNOWN_IND = u'未分类'`） |
+| ① | **不把标量字符串传给 `pd.Series(x, index=...)`** | 老 pandas 会把它当 list-like 走 dtype 推断 → `np.dtype('未分类')` 崩。**必须给等长列表** |
+| ② | **`finance.run_offset_query` 在聚宽平台上不存在** | 它是 **jqdatasdk（本地版）** 的函数。必须保留 `_paged_query` 兜底，否则分红数据整段拿不到 |
 
-这三条已写成**静态检查**，跑一次就能扫：
+> 初版写的「不用 f-string / 类型注解 / 中文字面量加 `u`」**不是必需的** ——
+> Py3 支持本文件全部语法，`u''` 与 `''` 等价。当时是误判成 Py2 才加的，留着无害，但别当成规则。
+
+这两条已写成**静态检查**，跑一次就能扫：
 
 ```bash
 $PY joinquant/_verify_core.py    # 第四部分：聚宽环境兼容性
@@ -124,17 +132,40 @@ $PY joinquant/_verify_core.py    # 第四部分：聚宽环境兼容性
 
 ### 已经**实测跑通**的部分（绿区，可以信任）
 
-第一次跑到报错时，`initialize` 已完整跑完 —— 说明下面这些在聚宽真环境里是好的：
-
-- `finance.run_offset_query` + `STK_XR_XD` 的 6 个字段
-- `get_all_securities(types=['stock'], date=)`
+- `STK_XR_XD` 的 6 个字段 + **`limit/offset` 分页兜底**（实测取到 36345 条 / 5144 只）
+- `get_all_securities(types=['stock'], date=)`（2019-01-02 返回 3564 只）
 - `get_extras('is_st', ..., axis=1)` 的**分批 concat**
 - `get_price(..., fq='none', panel=False)` 的**长表**返回 + 分批 concat
-- `pd.to_numeric` / `groupby().transform()` + 反向 `cumprod`（整段 `_load_dividends`）
-- 中文 `log.info`（byte str 模板 + ASCII 参数没问题）
+- `get_industry` 分批、`pd.to_numeric`、`groupby().transform()` + 反向 `cumprod`
+- `run_daily(rebalance, time='open', reference_security=...)` —— **聚宽惯例用法可用**
+- 中文 `log.info`、`order_target_value`（实测 `订单委托成功`）
 
-**尚未在聚宽验证的**：`_select` 第 356 行之后（行业百分位分组、排序、下单）
-—— 正是这次修的区间。
+**全流程实测结果**（见 §四·补·结果）：漏斗 `全A 3564 → 上市足 3530 → 非ST 3444 →
+合格池 1900 → 候选 1038 → 入选 20`，单次调仓墙钟 **1.7s**（31 次调仓 ≈ 1 分钟，
+**配额完全不用担心** —— 先前按 21 次接口调用估的 10~30s/次是高估）。
+
+### 四·补·结果：三个配置的聚宽实测（2026-09-17）
+
+回测设置：`2019-01-02 ~ 2026-09-11` / 日线 / 10 万 / 基准中证1000（**67.66%**）
+
+| 配置 | 策略收益 | 年化（算得） | Sharpe | 最大回撤 | vs 基准 |
+|---|---|---|---|---|---|
+| **定稿**（indpct + legacy） | **158.86%** | 13.15% | 0.52 | 19.04% | **+6.10pp/年** |
+| **裸版**（naked + legacy） | **60.45%** | 6.33% | 0.13 | 28.20% | **−0.72pp/年（跑输）** |
+| **修正送转口径**（indpct + correct） | **112.50%** | 10.29% | 0.37 | 19.08% | +3.24pp/年 |
+
+**三条结论**：
+
+1. ✅ **「裸版跑输基准」在聚宽独立复现了** —— 本地口径是全区间 6.82% vs 中证1000 7.05%
+   （−0.23pp）；聚宽是 6.33% vs 7.05%（−0.72pp）。**数据源、行业分类、实现全都不同，
+   方向却一致** → 这是本地那条「定稿的加成主要来自事后挑选的两条过滤器」结论的**外部证据**。
+2. ⚠️ **送转口径缺陷的代价 ≈ −2.86pp/年**（158.86% → 112.50%，Sharpe 0.52 → 0.37），
+   而**回撤几乎不变**（19.04% → 19.08%）—— 典型的「凭空多出收益、风险却没变」的 bug 特征。
+   → 支持 `docs/个股线_送转调整口径缺陷.md` 的立项：**修，且预期要下调**。
+3. ⚠️ 定稿在聚宽的超额（+6.10pp/年）**低于**本地全区间（+11.61pp/年）——
+   与 §四 列的分叉源（行业分类换成申万、分红口径、`min_price` 用真实价、**100 股整手**）方向一致，
+   但**差距比预期大**，值得后续归因。
+
 
 ---
 
