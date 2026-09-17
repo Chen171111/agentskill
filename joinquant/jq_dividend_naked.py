@@ -82,6 +82,7 @@
 """
 from jqdata import *                                        # noqa: F401,F403
 from jqdata import finance                                  # noqa: F401
+import time
 import numpy as np
 import pandas as pd
 
@@ -173,6 +174,8 @@ def initialize(context):
 
     g.n_reb = 0
     g.px_last = {}
+    g.t_start = time.time()          # 用于报「本次调仓耗时 / 累计耗时」（聚宽按 CPU 耗时分档计费）
+    g.t_last = g.t_start
     log.info('=' * 78)
     log.info('个股线·股息率策略（聚宽移植版）  形态 = {} ｜ 送转口径 = {}'.format(
         FORM, ADJ_MODE))
@@ -213,6 +216,12 @@ def rebalance(context):
     log.info('  全A {} → 上市足 {} → 非ST {} → 合格池 {} → 过滤后候选 {} → 入选 {}'.format(
         diag.get('全A', 0), diag.get('上市足', 0), diag.get('非ST', 0),
         diag.get('合格池', 0), diag.get('候选', 0), len(picks)))
+    # ⚠️ 聚宽按「CPU 占用耗时」算配额（免费 60 分钟/天）→ 必须能看到耗时，
+    #    否则跑到一半配额用光、连跑不完都说不清
+    _now = time.time()
+    log.info('  ⏱ 本次调仓耗时 {:.1f}s ｜ 累计 {:.1f}s（墙钟，非聚宽的 CPU 计费口径）'.format(
+        _now - g.t_last, _now - g.t_start))
+    g.t_last = _now
 
     if len(picks) < MIN_PICKS:
         # 定稿 7.2：候选 < 5 → 市场无高股息机会 → 空仓等待，不硬凑
