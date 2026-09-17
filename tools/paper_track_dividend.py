@@ -2,7 +2,8 @@
 
 为什么必须先纸面跟踪（`docs/个股线_股息率实盘方案.md` 第九节）
 --------------------------------------------------------------
-定稿形态的样本外表现（10 万真实税后 **10.10%**）**全部来自同一份历史数据**，
+定稿形态的样本外表现（10 万真实税后 **7.56%**；2026-09-17 已按修正后的送转口径重算）
+**全部来自同一份历史数据**，
 而「过滤器（`≤10%` + `≥2次`）是看过全区间结果后才挑的」这条偏差**无法在回测里消除**。
 唯一能补的是**真实前向数据**。
 
@@ -84,7 +85,8 @@ def _save_anchor(d: dict) -> None:
 def _build(args):
     ns = SimpleNamespace(bars=args.bars, bfq=args.bfq, dividends=args.dividends,
                          universe=args.universe, min_listed=MIN_LISTED,
-                         min_amount=MIN_AMOUNT, min_price=MIN_PRICE)
+                         min_amount=MIN_AMOUNT, min_price=MIN_PRICE,
+                         adj_mode=args.adj_mode)
     df = prepare_div(ns)
     ind = pd.read_parquet(args.industry)[["code_full", "ind_l1"]]
     ind = ind.rename(columns={"code_full": "code"})
@@ -202,7 +204,7 @@ def _report(args) -> int:
         print("\n  已完成 {} 期，累计 {:.2f}%".format(len(done), cum))
     else:
         print("\n  ⚠️ 还没有一个完整持有期（首次调仓后需等 {} 个交易日）".format(HOLD))
-    print("\n  ⚠️ 对比口径：回测样本外 10 万真实年化 **10.10%**"
+    print("\n  ⚠️ 对比口径：回测样本外 10 万真实年化 **7.56%**"
           "（`docs/个股线_股息率实盘方案.md`）。")
     print("     判据（第九节）：前向年化与回测样本外差距 **≤3pp** 才算通过。")
     return 0
@@ -215,6 +217,10 @@ def main(argv=None) -> int:
     ap.add_argument("--dividends", default="data/dividends/bonus_all.parquet")
     ap.add_argument("--industry", default="data/industry/industry_all.parquet")
     ap.add_argument("--universe", default="data/stockbars/universe_all.csv")
+    ap.add_argument("--adj-mode", default="correct", choices=["legacy", "correct"],
+                    help="送转调整口径（透传给 build_yield_panel）："
+                         "correct=价值中性口径（默认）；legacy=已证伪的旧实现")
+
     ap.add_argument("--date", default=None, help="指定调仓日（默认数据最新日）")
     ap.add_argument("--force", action="store_true", help="忽略日历，强制生成名单")
     ap.add_argument("--report", action="store_true", help="只出报告")

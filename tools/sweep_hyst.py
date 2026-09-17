@@ -83,6 +83,9 @@ def main(argv=None) -> int:
     ap.add_argument("--min-price", type=float, default=2.0)
     ap.add_argument("--min-amount", type=float, default=3e7)
     ap.add_argument("--min-listed", type=int, default=120)
+    ap.add_argument("--adj-mode", default="correct", choices=["legacy", "correct"],
+                    help="送转调整口径（透传给 build_yield_panel）："
+                         "correct=价值中性口径（默认）；legacy=已证伪的旧实现")
     ap.add_argument("--ctrl-only", action="store_true",
                     help="只跑「纯门槛 top-N」对照（不跑 hyst 网格），用于快速分离"
                          "「门槛效应」与「滞回效应」")
@@ -95,7 +98,8 @@ def main(argv=None) -> int:
 
     ns = SimpleNamespace(bars=args.bars, bfq=args.bfq, dividends=args.dividends,
                          universe=args.universe, min_listed=args.min_listed,
-                         min_amount=args.min_amount, min_price=args.min_price)
+                         min_amount=args.min_amount, min_price=args.min_price,
+                         adj_mode=args.adj_mode)
     df = prepare_div(ns)
 
     periods = [("全区间", "20190101", "20260911"),

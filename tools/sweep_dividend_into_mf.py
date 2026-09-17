@@ -89,7 +89,8 @@ def prepare(args) -> pd.DataFrame:
     print("  计算引擎特征…", flush=True)
     df = build_features(bars)
     print("  构建 point-in-time 股息率面板…", flush=True)
-    dy = build_yield_panel(bars, div, price_col="px_real")[
+    dy = build_yield_panel(bars, div, price_col="px_real",
+                           adj_mode=getattr(args, "adj_mode", "correct"))[
         ["code", "date", "dps_ttm", "dy_ttm", "n_div3"]]
     df = df.merge(dy, on=["code", "date"], how="left")
     df["dy_ttm"] = df.dy_ttm.fillna(0.0)          # 无分红 = 股息率 0（最低分位）
@@ -109,6 +110,9 @@ def main(argv=None) -> int:
     ap.add_argument("--min-price", type=float, default=2.0)
     ap.add_argument("--min-amount", type=float, default=3e7)
     ap.add_argument("--min-listed", type=int, default=120)
+    ap.add_argument("--adj-mode", default="correct", choices=["legacy", "correct"],
+                    help="送转调整口径（透传给 build_yield_panel）："
+                         "correct=价值中性口径（默认）；legacy=已证伪的旧实现")
     ap.add_argument("--out", default="results/dividend_into_mf.csv")
     args = ap.parse_args(argv)
 

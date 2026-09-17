@@ -9,7 +9,7 @@
 
 | # | 文件 | 关键参数 | 为什么跑 |
 |---|---|---|---|
-| **1** | `jq_dividend.py` | `FORM='indpct'`、`ADJ_MODE='legacy'` | **定稿形态**，与本地样本外 10.10% 比 |
+| **1** | `jq_dividend.py` | `FORM='indpct'`、`ADJ_MODE='legacy'` | 定稿形态的**旧口径**，与本地修正前样本外 10.10% 比（修正后为 7.56%，见下） |
 | **2** | `jq_dividend_naked.py` | `FORM='naked'`、`ADJ_MODE='legacy'` | **裸版对照** —— 本地全区间只有 6.82%、还跑输中证1000 |
 | **3**（推荐） | `jq_dividend.py` | `FORM='indpct'`、`ADJ_MODE='correct'` | 送转口径修正版 → 直接为「立项修」提供**外部交叉验证** |
 
