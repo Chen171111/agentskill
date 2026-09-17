@@ -528,7 +528,8 @@ def _load_dividends(anchor, trade_end):
     try:
         raw = finance.run_offset_query(q)        # 自动分页（上限 20 万行）
     except Exception as e:
-        log.warning('run_offset_query 不可用（{}）→ 退回 limit/offset 分页'.format(e))
+        # ⚠️ 模板保持纯 ASCII（异常消息可能是中文 unicode，Py2 下会 UnicodeDecodeError）
+        log.warning('run_offset_query unavailable ({}); fallback to limit/offset'.format(e))
         raw = _paged_query(q)
     if raw is None or not len(raw):
         log.warning('⚠️ 分红记录为空 —— 股息率会全为 0，请检查 STK_XR_XD 权限/区间')
