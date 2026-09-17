@@ -68,7 +68,7 @@ def main(argv=None) -> int:
         piv = piv.reindex(columns=["legacy", "correct"])
         piv["Δ(correct−legacy)"] = piv["correct"] - piv["legacy"]
         piv = piv.reset_index()
-        piv["_o"] = piv["区间"].map({r: i for i, r in enumerate(ORDER)})
+        piv["_o"] = piv["区间"].str[:3].map({r: i for i, r in enumerate(ORDER)})
         piv = piv.sort_values(["_o", "模式", "N"]).drop(columns="_o")
         print(piv.to_string(index=False, float_format=lambda x: "{:>8.2f}".format(x)))
 
@@ -83,7 +83,9 @@ def main(argv=None) -> int:
     piv = piv.reset_index()
 
     def d(mode, n, seg):
-        r = piv[(piv.模式 == mode) & (piv.N == n) & (piv.区间 == seg)]
+        # ⚠️ `区间` 的值是「样本外 2023~2026」这种**带日期范围**的字符串，
+        #    不能按 "样本外" 精确匹配（第一版就是这么错的 -> 全 nan）
+        r = piv[(piv.模式 == mode) & (piv.N == n) & (piv.区间.str.startswith(seg))]
         return float(r["Δ"].iloc[0]) if len(r) else float("nan")
 
     verdicts = []
@@ -99,19 +101,21 @@ def main(argv=None) -> int:
                      "样本内 Δ = {:+.2f}pp ／ 样本外 Δ = {:+.2f}pp".format(si, so),
                      "✅ 同号" if si * so > 0 else "⚠️ 异号（只有一边变化，需警惕）"))
 
-    # 判据⑤ N 邻域同向
-    ns = [d("indpct", n, "样本外") for n in sorted(piv.N.unique())]
-    ns_ok = all(x < 0 for x in ns) or all(x > 0 for x in ns)
+    # 判据⑤ N 邻域同向 —— ⚠️ 只取 **indpct 实际跑过的 N**（piv.N 里还有 indquota 的 N=50）
+    ns_n = sorted(piv[piv.模式 == "indpct"].N.unique())
+    ns = [d("indpct", n, "样本外") for n in ns_n]
+    ns_ok = bool(ns) and (all(x < 0 for x in ns) or all(x > 0 for x in ns))
     verdicts.append(("⑤ N 邻域同向",
                      "样本外 Δ by N: " + " ／ ".join(
-                         "N={} {:+.2f}".format(n, x)
-                         for n, x in zip(sorted(piv.N.unique()), ns)),
-                     "✅ 全部同向" if ns_ok else "⚠️ 方向不一致"))
+                         "N={} {:+.2f}".format(n, x) for n, x in zip(ns_n, ns)),
+                     "✅ 全部同向（均为负 = 一致地变差）" if ns_ok else "⚠️ 方向不一致"))
 
     # 机制：indpct 相对 topn 的优势是否仍成立
     def adv(seg, tag):
-        a = piv[(piv.模式 == "indpct") & (piv.N == 20) & (piv.区间 == seg)][tag].iloc[0]
-        b = piv[(piv.模式 == "topn") & (piv.N == 20) & (piv.区间 == seg)][tag].iloc[0]
+        a = piv[(piv.模式 == "indpct") & (piv.N == 20)
+                & (piv.区间.str.startswith(seg))][tag].iloc[0]
+        b = piv[(piv.模式 == "topn") & (piv.N == 20)
+                & (piv.区间.str.startswith(seg))][tag].iloc[0]
         return float(a), float(b), float(a - b)
     ok_mech = True
     mech_lines = []
