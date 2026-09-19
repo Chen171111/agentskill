@@ -217,7 +217,7 @@ def main(argv=None) -> int:
     ap.add_argument("--dividends", default="data/dividends/bonus_all.parquet")
     ap.add_argument("--industry", default="data/industry/industry_all.parquet")
     ap.add_argument("--universe", default="data/stockbars/universe_all.csv")
-    ap.add_argument("--adj-mode", default="correct", choices=["legacy", "correct"],
+    ap.add_argument("--adj-mode", default=None, choices=["legacy", "correct"],
                     help="送转调整口径（透传给 build_yield_panel）："
                          "correct=价值中性口径（默认）；legacy=已证伪的旧实现")
 

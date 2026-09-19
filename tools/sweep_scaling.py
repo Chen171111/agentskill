@@ -43,14 +43,9 @@ ALL8 = [("rev20", 1.0), ("rev60", 1.0), ("rev120", 1.0), ("rev5", 1.0),
 TOPKS = (30, 50, 100, 200, 300, 500, 1000)
 CAPITALS = (10, 20, 50, 100, 200, 300, 500, 1000, 3000)   # 万元
 
-MIN_COMMISSION = 5.0
-# ⚠️ 主人实际佣金 = 万5（2026-09-13 提供），不是引擎默认的万3。
-# 之前误用 0.0003 → 临界单笔算成 16,667 元，实际是 5/0.0005 = 10,000 元。
-NOMINAL_FEE = 0.0005
-SLIP = 0.0005
-STAMP = 0.001
-# 回测里已计的成本（每次完整换仓：买 0.03% + 卖 0.13% + 滑点 0.05%×2）
-MODELED_ROUND = NOMINAL_FEE + (NOMINAL_FEE + STAMP) + SLIP * 2
+# 成本模型统一到 tools/costs.py（**单一来源**，勿在此重定义 —— 铁律 14）
+from tools.costs import (MIN_COMMISSION, MODELED_ROUND, NOMINAL_FEE,  # noqa: E402
+                         SLIP, STAMP)
 
 
 def bench_index(path, sym, idx):

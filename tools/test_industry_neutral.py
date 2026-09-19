@@ -64,6 +64,7 @@ from tools.backtest_dividend import (MIN_COMMISSION, MODELED_ROUND,  # noqa: E40
                                      NOMINAL_FEE, SLIP, STAMP,
                                      prepare as prepare_div)
 from tools.backtest_stock import metrics, run  # noqa: E402
+from tools.progress import flush_partial  # noqa: E402
 
 TRADING_DAYS = 244.0
 
@@ -74,7 +75,9 @@ def plan_selections(df: pd.DataFrame, dates: list[str], by_date: dict, *,
                     min_dy: float, max_dy: float | None,
                     min_div3: int,
                     hyst_entry: float | None = None,
-                    hyst_exit: float | None = None) -> dict:
+                    hyst_exit: float | None = None,
+                    extra_ok: np.ndarray | None = None,
+                    extra_score: np.ndarray | None = None) -> dict:
     """返回 `{调仓日: [code, ...]}`。
 
     把「选股」与「建掩码」拆开，是为了让**行业暴露分析**与**Brinson 归因**
@@ -94,6 +97,17 @@ def plan_selections(df: pd.DataFrame, dates: list[str], by_date: dict, *,
 
     ⚠️ **`indquota` 的行业配额必须用「全体合格池」算，不能用候选集算** ——
     用候选集算的话，`hyst` 门槛会同时改变行业权重，行业中性就失效了。
+
+    `extra_ok` / `extra_score`（2026-09-18 新增，**可选扩展点**）
+    ------------------------------------------------------------
+    供 `tools/eval_candidate.py` 评估候选因子用，**默认 `None` → 行为与原来逐位一致**：
+    - `extra_ok`：长度 = `len(df)` 的布尔数组。为 False 的行**直接判为不合格**
+      （等价于再加一条过滤条件）；`usage=filter` 走这条。
+    - `extra_score`：长度 = `len(df)` 的浮点数组，**加在排序键上**（仅 `indpct` 模式生效）。
+      调用方须保证它与「行业内百分位」同量纲（即已在 [0,1] 上），例如 `weight × 候选横截面百分位`；
+      `usage=score` 走这条。
+    ⚠️ 加这两个参数**没有**改动任何既有调用方的行为（全部走默认值），
+      目的是**避免在 eval_candidate 里重写一遍选股逻辑**（铁律 14：同一判据多处实现＝迟早分叉）。
     """
     code_arr = df.code.values
     in_uni = df._in_uni.values
@@ -121,6 +135,8 @@ def plan_selections(df: pd.DataFrame, dates: list[str], by_date: dict, *,
             ok &= (nd3.fillna(0) >= min_div3)
         if mode in ("indpct", "indquota"):
             ok &= (ind != "未分类")          # 无行业标签无法中性化
+        if extra_ok is not None:             # ← 候选因子的附加过滤（默认 None 不生效）
+            ok &= pd.Series(extra_ok[rows], index=code_arr[rows]).fillna(False)
         dy, ind = dy[ok], ind[ok]
         if dy.empty:
             plan[t] = []
@@ -145,6 +161,9 @@ def plan_selections(df: pd.DataFrame, dates: list[str], by_date: dict, *,
             # 行业内百分位（0~1）→ 全局取前 N。
             # 每个行业的百分位都是均匀分布，故各行业入选数大致相等 → 行业等权。
             pct = dy.groupby(ind).rank(pct=True)
+            if extra_score is not None:      # ← 候选因子的附加打分（默认 None 不生效）
+                pct = pct + pd.Series(extra_score[rows],
+                                      index=code_arr[rows]).reindex(pct.index).fillna(0.0)
             sel = pct.nlargest(min(topn, len(pct))).index.tolist()
         elif mode == "indquota":
             # 行业配额 = 该行业在**全体合格池**里的股票数占比 × N
@@ -371,13 +390,13 @@ def main(argv=None) -> int:
     ap.add_argument("--min-price", type=float, default=2.0)
     ap.add_argument("--min-amount", type=float, default=3e7)
     ap.add_argument("--min-listed", type=int, default=120)
-    ap.add_argument("--adj-mode", default="correct", choices=["legacy", "correct"],
+    ap.add_argument("--adj-mode", default=None, choices=["legacy", "correct"],
                     help="送转调整口径（透传给 build_yield_panel）："
                          "correct=价值中性口径（**默认**）；legacy=已证伪的旧实现")
     ap.add_argument("--hyst-entry", type=float, default=None,
-                    help="滞回买入阈值（%）。给出后额外跑「hyst × 行业中性化」叠加配置")
+                    help="滞回买入阈值（%%）。给出后额外跑「hyst × 行业中性化」叠加配置")
     ap.add_argument("--hyst-exit", type=float, default=None,
-                    help="滞回卖出阈值（%）")
+                    help="滞回卖出阈值（%%）")
     ap.add_argument("--out-prefix", default="results/industry_neutral")
     args = ap.parse_args(argv)
 
@@ -537,6 +556,8 @@ def main(argv=None) -> int:
                          "年化%": m["年化收益"], "夏普": m["夏普比率"],
                          "回撤%": m["最大回撤"], "平均持仓": nh,
                          "年单边换手": turn, "交易笔数": ntr, "10万真实年化%": real})
+        # 增量落盘：跑完一个区间就把已完成的行写盘（被掐断也不丢 —— 见 tools/progress.py）
+        flush_partial(rows, f"{args.out_prefix}_backtest.csv", tag=ptag)
     r = pd.DataFrame(rows)
     r.to_csv(f"{args.out_prefix}_backtest.csv", index=False, encoding="utf-8-sig")
 

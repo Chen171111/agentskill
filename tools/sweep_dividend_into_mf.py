@@ -48,7 +48,8 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.backtest_stock import build_features, fmt, metrics, run  # noqa: E402
-from tools.test_dividend_factor import build_yield_panel  # noqa: E402
+from tools.progress import flush_partial  # noqa: E402
+from tools.test_dividend_factor import build_yield_panel, require_adj_mode  # noqa: E402
 
 ALL8 = [("rev20", 1.0), ("rev60", 1.0), ("rev120", 1.0), ("rev5", 1.0),
         ("vol20", 1.0), ("max20", 1.0), ("turn20", 1.0), ("illiq20", 1.0)]
@@ -90,7 +91,7 @@ def prepare(args) -> pd.DataFrame:
     df = build_features(bars)
     print("  构建 point-in-time 股息率面板…", flush=True)
     dy = build_yield_panel(bars, div, price_col="px_real",
-                           adj_mode=getattr(args, "adj_mode", "correct"))[
+                           adj_mode=require_adj_mode(args))[
         ["code", "date", "dps_ttm", "dy_ttm", "n_div3"]]
     df = df.merge(dy, on=["code", "date"], how="left")
     df["dy_ttm"] = df.dy_ttm.fillna(0.0)          # 无分红 = 股息率 0（最低分位）
@@ -110,7 +111,7 @@ def main(argv=None) -> int:
     ap.add_argument("--min-price", type=float, default=2.0)
     ap.add_argument("--min-amount", type=float, default=3e7)
     ap.add_argument("--min-listed", type=int, default=120)
-    ap.add_argument("--adj-mode", default="correct", choices=["legacy", "correct"],
+    ap.add_argument("--adj-mode", default=None, choices=["legacy", "correct"],
                     help="送转调整口径（透传给 build_yield_panel）："
                          "correct=价值中性口径（默认）；legacy=已证伪的旧实现")
     ap.add_argument("--out", default="results/dividend_into_mf.csv")
@@ -192,6 +193,8 @@ def main(argv=None) -> int:
                 print("  " + "{:<20}{:>+12.2f}{:>+10.2f}{:>+12.2f}".format(
                     x.配置, x["年化%"] - b["年化%"], x["夏普"] - b["夏普"],
                     x["回撤%"] - b["回撤%"]))
+        # 增量落盘：跑完一个区间就写盘（被掐断不丢 —— 见 tools/progress.py）
+        flush_partial(rows, args.out, tag=ptag)
 
     r = pd.DataFrame(rows)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)

@@ -83,7 +83,7 @@ def main(argv=None) -> int:
     ap.add_argument("--min-price", type=float, default=2.0)
     ap.add_argument("--min-amount", type=float, default=3e7)
     ap.add_argument("--min-listed", type=int, default=120)
-    ap.add_argument("--adj-mode", default="correct", choices=["legacy", "correct"],
+    ap.add_argument("--adj-mode", default=None, choices=["legacy", "correct"],
                     help="送转调整口径（透传给 build_yield_panel）："
                          "correct=价值中性口径（默认）；legacy=已证伪的旧实现")
     ap.add_argument("--out", default="results/diag_ind_hyst_overlap.csv")

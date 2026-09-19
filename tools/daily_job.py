@@ -5,6 +5,8 @@
     任务就"悄悄不跑了"。本脚本在 main.py 外面包一层，负责：
       · 把运行结果写成结构化状态 state/last_run.json
       · 失败时写显眼的 state/ALERT.txt（含原因 + 日志尾部），成功时自动清除
+      · 失败时**发告警邮件**（config/mail_alert.json；未配置则静默跳过）——
+        消息框只在人在电脑前有用，邮件是无人值守时唯一能到达的通道
       · 用非零退出码把失败向上传递（Task Scheduler 的 LastTaskResult 会体现）
 
 用法：
@@ -143,6 +145,24 @@ def main():
         print(text)
     except Exception:
         print(text)
+
+    # 邮件告警：消息框只在「人在电脑前」有用；人不在时**只有邮件能到达**。
+    # 未配置 config/mail_alert.json 时静默跳过（send 返回 False，不报错、不影响退出码）。
+    # 2026-09-14/15/16 三次失败都是「同花顺没开」，而当时人都不在电脑前 —— 加这条链路。
+    try:
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from tools.mail_alert import send as _send_mail
+        subject = "[agentskill] 自动交易失败 {}".format(status["date"])
+        mail_body = text + "\n\n本机: {}\n配置: config/mail_alert.json\n".format(
+            ROOT)
+        if _send_mail(subject, mail_body):
+            print("[daily_job] 告警邮件已发送")
+        else:
+            print("[daily_job] 邮件告警未启用/未发送（检查 config/mail_alert.json；"
+                  "模板见 config/mail_alert.example.json）")
+    except Exception as _e:
+        print("[daily_job] 邮件告警异常（已忽略，不影响交易）: {}".format(_e))
 
     # Windows 弹窗提醒（本机可见时最直观；失败不影响退出码）
     try:

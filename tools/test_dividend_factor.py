@@ -54,6 +54,27 @@ def _num(x) -> float:
     return 0.0 if pd.isna(x) else float(x)
 
 
+def require_adj_mode(args) -> str:
+    """从 argparse 命名空间**严格**取送转口径（缺了就报错，不给默认值）。
+
+    为什么不用 `getattr(args, "adj_mode", "correct")`
+    -------------------------------------------------
+    2026-09-17 查出 `tools/diag_dividend_into_mf.py` 因为**没定义** `--adj-mode`，
+    被那个默认值**静默**落到 `correct` → 它永远无法复现 legacy，
+    而 `docs/个股线_股息率并入多因子.md` 的横幅写着「加 `--adj-mode legacy` 可复现」
+    → **那句说明错了很久都没人发现**。
+    静默默认会把"忘记透传"变成"悄悄换口径"，所以这里改成缺了就 **raise**。
+    """
+    mode = getattr(args, "adj_mode", None)
+    if mode not in ("legacy", "correct"):
+        raise RuntimeError(
+            "args 缺少合法的 adj_mode（实得 {!r}）。本项目**不再为它提供默认值** ——\n"
+            "静默默认会造成『口径不可复现』（2026-09-17 BUG-3）。\n"
+            "请在该调用方的 argparse 里加 --adj-mode {{legacy,correct}} 并原样透传。"
+            .format(mode))
+    return mode
+
+
 def build_yield_panel(bars: pd.DataFrame, div: pd.DataFrame,
                       price_col: str = "close",
                       adj_mode: str = "correct") -> pd.DataFrame:
@@ -226,7 +247,7 @@ def main(argv=None) -> int:
     ap.add_argument("--min-price", type=float, default=2.0)
     ap.add_argument("--min-amount", type=float, default=3e7)
     ap.add_argument("--min-listed", type=int, default=120)
-    ap.add_argument("--adj-mode", default="correct", choices=["legacy", "correct"],
+    ap.add_argument("--adj-mode", default=None, choices=["legacy", "correct"],
                     help="送转调整口径：correct=价值中性口径（**默认**，只除到选股日）；"
                          "legacy=已证伪的旧实现（方向为乘、含未来送转，仅用于复现旧结论）")
     ap.add_argument("--out", default="results/dividend_factor_ic.csv")

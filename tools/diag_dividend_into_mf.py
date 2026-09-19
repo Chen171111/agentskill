@@ -43,6 +43,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.backtest_stock import metrics, run  # noqa: E402
+from tools.progress import flush_partial  # noqa: E402
 from tools.sweep_dividend_into_mf import (  # noqa: E402
     ALL8, TRADING_DAYS, bench_metrics, prepare)
 
@@ -110,6 +111,15 @@ def main(argv=None) -> int:
     ap.add_argument("--min-price", type=float, default=2.0)
     ap.add_argument("--min-amount", type=float, default=3e7)
     ap.add_argument("--min-listed", type=int, default=120)
+    # ⚠️ 2026-09-17 补：本脚本原先**没有** --adj-mode。
+    # 它走 `sweep_dividend_into_mf.prepare`，而那里是
+    # `adj_mode=getattr(args, "adj_mode", "correct")` —— args 没这个属性时
+    # **静默**落到 correct → 只能跑新口径，**无法复现 legacy 的旧数字**，
+    # 而 `docs/个股线_股息率并入多因子.md` 的横幅写着「加 --adj-mode legacy 可复现」。
+    # 加这个参数才让那句说明成立（纯透传，不改变任何默认行为）。
+    ap.add_argument("--adj-mode", default=None, choices=["legacy", "correct"],
+                    help="送转调整口径（透传给 build_yield_panel）："
+                         "correct=价值中性口径（默认）；legacy=已证伪的旧实现")
     ap.add_argument("--out", default="results/dividend_into_mf_diag.csv")
     ap.add_argument("--out-window", default="results/dividend_into_mf_windows.csv")
     args = ap.parse_args(argv)
@@ -172,6 +182,9 @@ def main(argv=None) -> int:
                              "胜率%": (d > 0).mean() * 100,
                              "最好pp": d.max() * 100, "最差pp": d.min() * 100,
                              "最差占比%": worst_share * 100})
+        # 增量落盘：跑完一个区间就把主配置 + 逐窗口诊断写盘（R8 要跑 40 分钟，最需要）
+        flush_partial(rows, args.out, tag=ptag)
+        flush_partial(win_rows, args.out_window, tag=ptag, quiet=True)
 
     # ================= 2) 邻域 =================
     print("\n" + "=" * 104)

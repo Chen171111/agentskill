@@ -1,0 +1,15 @@
+{
+  "_说明": "复制本文件为 config/mail_alert.json 并填入真实值即可启用失败告警邮件。mail_alert.json 已被 .gitignore 忽略，不会进仓库。",
+  "_授权码怎么拿_QQ": "QQ邮箱 → 设置 → 账户 → 开启「IMAP/SMTP服务」→ 生成授权码（16位）。注意：不是QQ登录密码。",
+  "_授权码怎么拿_163": "163邮箱 → 设置 → POP3/SMTP/IMAP → 开启服务 → 设置客户端授权密码。",
+  "_其他邮箱": "Gmail 用「应用专用密码」；Outlook/Office365 用 smtp.office365.com + 587 + use_ssl=false。",
+  "_更安全的做法": "把 password 留空，改用环境变量 AGENTSKILL_SMTP_PASSWORD 提供，避免明文落盘。",
+  "enabled": false,
+  "smtp_host": "smtp.qq.com",
+  "smtp_port": 465,
+  "use_ssl": true,
+  "username": "you@qq.com",
+  "password": "",
+  "sender": "you@qq.com",
+  "recipients": ["you@qq.com"]
+}

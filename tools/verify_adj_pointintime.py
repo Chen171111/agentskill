@@ -49,7 +49,7 @@ def main(argv=None) -> int:
     ap.add_argument("--dividends", default="data/dividends/bonus_all.parquet")
     ap.add_argument("--bfq", default="data/stockbars/bars_bfq.parquet")
     ap.add_argument("--universe", default="data/stockbars/universe_all.csv")
-    ap.add_argument("--n-price", type=int, default=800, help="量化 10% 上限效应时的抽样股票数")
+    ap.add_argument("--n-price", type=int, default=800, help="量化 10%% 上限效应时的抽样股票数")
     ap.add_argument("--seed", type=int, default=20260917)
     args = ap.parse_args(argv)
 

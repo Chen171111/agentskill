@@ -152,6 +152,17 @@ def cmd_simulate(args):
 
     if not r.get("rebalanced", True):
         print("\n【本次非调仓日】不重新选股、不清仓，仅记录净值。")
+        # 「下次调仓倒计时」：策略是每 N 次运行才调仓一次，其余日子只记净值。
+        # 没有这行提示时，很容易把「开着却不下单」误判成故障（2026-09-18 实际发生）。
+        try:
+            _s = runner.strategy
+            _every = int(_s.rebalance_every)
+            _since = int(_s._since)
+            _remain = _every - (_since % _every) if _since % _every else 0
+            print("  （策略每 {} 次成功运行调仓一次；本次为第 {} 次，"
+                  "下次调仓还需 {} 次运行）".format(_every, _since, _remain))
+        except Exception:
+            pass
         acc0 = r.get("account", {})
         print("账户：现金 {:.2f}  市值 {:.2f}  总资产 {:.2f}".format(
             acc0.get("cash", 0), acc0.get("market_value", 0), acc0.get("total_equity", 0)))

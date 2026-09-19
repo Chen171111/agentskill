@@ -37,9 +37,11 @@ ALL8 = [("rev20", 1.0), ("rev60", 1.0), ("rev120", 1.0), ("rev5", 1.0),
 TILT_MINS = (0.45, 0.50, 0.55, 0.60, 0.65, 0.70)
 MIN_AMOUNTS = (3e7, 1e8)
 
-MIN_COMMISSION = 5.0
-NOMINAL_FEE = 0.0003
-BREAK_EVEN_TICKET = MIN_COMMISSION / NOMINAL_FEE
+# 成本模型统一到 tools/costs.py（**单一来源**，勿在此重定义 —— 铁律 14）。
+# ⚠️ 本文件曾是**唯一的分叉点**：`NOMINAL_FEE` 停在 0.0003（万3），
+# 导致 `BREAK_EVEN_TICKET` 被算成 16,667 元（正确 10,000 元）。收敛后不会再复发。
+from tools.costs import (BREAK_EVEN_TICKET, MIN_COMMISSION,  # noqa: E402
+                         NOMINAL_FEE)
 
 
 def main(argv=None) -> int:

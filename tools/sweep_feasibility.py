@@ -32,13 +32,10 @@ from tools.backtest_stock import build_features, run, metrics  # noqa: E402
 ALL8 = [("rev20", 1.0), ("rev60", 1.0), ("rev120", 1.0), ("rev5", 1.0),
         ("vol20", 1.0), ("max20", 1.0), ("turn20", 1.0), ("illiq20", 1.0)]
 
-# 券商单笔最低佣金（元）；低于此金额时按该值收取
-MIN_COMMISSION = 5.0
-# 名义佣金率（主人实际：万5）
-NOMINAL_FEE = 0.0005
-# 临界单笔金额 = MIN_COMMISSION / NOMINAL_FEE  = 5 / 0.0005 = 10,000 元
-# 单笔低于此金额时，实际费率被最低收费抬高到 5/单笔金额
-BREAK_EVEN_TICKET = MIN_COMMISSION / NOMINAL_FEE
+# 成本模型统一到 tools/costs.py（**单一来源**，勿在此重定义 —— 铁律 14）。
+# `BREAK_EVEN_TICKET` = 最低佣金 / 名义费率 = 5 / 0.0005 = 10,000 元
+from tools.costs import (BREAK_EVEN_TICKET, MIN_COMMISSION,  # noqa: E402
+                         NOMINAL_FEE)
 
 VARIANTS = [
     ("tilt(>0.45)", "tilt", 50, 0.45),

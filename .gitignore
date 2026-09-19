@@ -16,6 +16,10 @@ __pycache__/
 venv/
 .env
 
+# 邮件告警配置（**含邮箱授权码，绝不入库**）
+# 模板见 config/mail_alert.example.json
+config/mail_alert.json
+
 # IDE
 .idea/
 .vscode/

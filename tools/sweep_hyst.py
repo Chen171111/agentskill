@@ -46,14 +46,13 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.backtest_dividend import build_mask, prepare as prepare_div  # noqa: E402
+from tools.progress import flush_partial  # noqa: E402
 from tools.backtest_stock import metrics, run  # noqa: E402
 
 TRADING_DAYS = 244.0
-MIN_COMMISSION = 5.0
-NOMINAL_FEE = 0.0005
-SLIP = 0.0005
-STAMP = 0.001
-MODELED_ROUND = NOMINAL_FEE + (NOMINAL_FEE + STAMP) + SLIP * 2
+# 成本模型统一到 tools/costs.py（**单一来源**，勿在此重定义 —— 铁律 14）
+from tools.costs import (MIN_COMMISSION, MODELED_ROUND, NOMINAL_FEE,  # noqa: E402
+                         SLIP, STAMP)
 
 
 def real_ann(ann_pct: float, turnover: float, avg_hold: float,
@@ -83,7 +82,7 @@ def main(argv=None) -> int:
     ap.add_argument("--min-price", type=float, default=2.0)
     ap.add_argument("--min-amount", type=float, default=3e7)
     ap.add_argument("--min-listed", type=int, default=120)
-    ap.add_argument("--adj-mode", default="correct", choices=["legacy", "correct"],
+    ap.add_argument("--adj-mode", default=None, choices=["legacy", "correct"],
                     help="送转调整口径（透传给 build_yield_panel）："
                          "correct=价值中性口径（默认）；legacy=已证伪的旧实现")
     ap.add_argument("--ctrl-only", action="store_true",
@@ -170,6 +169,8 @@ def main(argv=None) -> int:
                 tag, m["年化收益"], m["夏普比率"], m["最大回撤"], nh, turn, real),
                 flush=True)
         print()
+        # 增量落盘：跑完一个区间就写盘（被掐断不丢 —— 见 tools/progress.py）
+        flush_partial(rows, args.out, tag=ptag)
 
     r = pd.DataFrame(rows)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)

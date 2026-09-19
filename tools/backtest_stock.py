@@ -33,6 +33,8 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from tools.costs import COST_BUY, COST_SELL, ENGINE_SLIPPAGE  # noqa: E402
+
 TRADING_DAYS = 244.0
 
 # 调仓所需的**最低候选池规模**。候选池（池子过滤 + 因子非空后）少于该值时，
@@ -96,10 +98,45 @@ def build_features(bars: pd.DataFrame) -> pd.DataFrame:
     df["ma60"] = g.close.transform(lambda s: s.rolling(60).mean())
 
     df["prev_close"] = g.close.shift(1)
-    lim = np.where(df.code.str[2:5].str.startswith(("68", "30")), 0.20, 0.10)
+
+    # ── 涨跌停判定（2026-09-17 重写：原实现有两处缺陷）──────────────────────
+    # 缺陷① **分档不完整**。原为「68/30 前缀 → 20%，其余 10%」。实际制度：
+    #   · 科创板 688/689        → 20%（2019-07-22 起）
+    #   · 创业板 30x            → **2020-08-24 注册制起才是 20%**，之前是 10%
+    #   · 北交所 BJ43/83/87/88  → 30%
+    #   · 其余（沪深主板）      → 10%
+    #   （⚠️ ST 的 5% **未建模**：池子已按 `universe.is_st` 剔除，但那是**当前快照**、
+    #     非 point-in-time → 池内中途转 ST 的会漏判。已知残留，见重验报告 §六。）
+    # 缺陷② **`.round(2)` 打在"价格"上**。本数据是**总收益指数价**（含分红回放），
+    #   不是真实价；而「涨停价按分四舍五入到分」只对真实价成立。在指数价上 round
+    #   会让阈值有约一半概率偏高一格 → **实测漏判 40.6% 的一字涨停**
+    #   （主板判据从应捕获的 17,929 行掉到 10,721 行）。
+    #   → 改为**比例判据 + 半格容差**：真实涨停价的相对涨幅 ∈ [lim − 0.005/prev_real, …)，
+    #     故门槛取 `lim − 0.005/prev_real`。`prev_real` 由当日 `px_real / close`
+    #     换算（`prepare()` 会并入真实价；同一天同一比例，非除权日等价）。
+    dat = df.date.astype(str).str.replace("-", "", regex=False)
+    p2_5 = df.code.str[2:5]
+    board = np.where(df.code.str[:2] == "BJ", "北交",
+                     np.where(p2_5.str.startswith("68"), "科创",
+                              np.where(p2_5.str.startswith("30"), "创业", "主板")))
+    lim = np.select(
+        [board == "北交",
+         board == "科创",
+         (board == "创业") & (dat >= "20200824"),
+         board == "创业"],
+        [0.30, 0.20, 0.20, 0.10],
+        default=0.10,
+    ).astype(float)
+    # 半格容差（0.005 元 ÷ 昨日价格，折算成比例）。优先用真实价，缺失时退回指数价
+    ref = df["prev_close"].abs()
+    if "px_real" in df.columns:
+        cand = ref * (df["px_real"] / df["close"]).abs()
+        ref = cand.where(cand.notna() & (cand > 0), ref)
+    tol = (0.005 / ref.clip(lower=0.01)).clip(upper=0.05)
+    r_open = df["open"] / df["prev_close"] - 1.0
     df["limit"] = lim
-    df["buy_blocked"] = df.open >= (df.prev_close * (1 + lim)).round(2)
-    df["sell_blocked"] = df.open <= (df.prev_close * (1 - lim)).round(2)
+    df["buy_blocked"] = (r_open >= (lim - tol)).fillna(False)
+    df["sell_blocked"] = (r_open <= (-lim + tol)).fillna(False)
     df["suspended"] = df.volume.fillna(0) <= 0
     return df
 
@@ -131,9 +168,21 @@ def _date_view(cur: pd.DataFrame) -> dict:
     }
 
 
+# ⚠️ 成本口径（2026-09-17 修正，**改动会牵动全部个股线的绝对数字**）
+# ---------------------------------------------------------------------------
+# 默认值原为 `cost_buy=0.0003 / cost_sell=0.0013`（佣金**万3**），但
+# `tools/backtest_dividend.py::MODELED_ROUND` 与所有文档都按**万5**建模
+# （`config.TRADING_COST.commission_rate = 0.0005`，主人实际费率）。
+# 而 `cost_buy/cost_sell` 是 keyword-only，**全库没有任何调用方传过它**
+# （`grep -rn cost_buy tools/*.py | grep -v backtest_stock` 为空）
+# → 引擎实际 round-trip 0.0026，而事后调整式按 0.0030 扣 → 所有「10 万真实」
+#   数字**少扣 0.0004 × 年单边换手**（定稿 −0.11pp/年、多因子线 −0.33pp/年）。
+# 现改为与 MODELED_ROUND 自洽：
+#     (0.0005 + 0.0005) + (0.0015 + 0.0005) = 0.0030 = MODELED_ROUND ✓
+# 拆解：买入佣金 万5 + 卖出佣金 万5 + 卖出印花税 万10（法定）+ 滑点 单边 万5。
 def run(df, factor_specs, *, start, end, topk=50, hold=5, min_listed=120,
-        min_amount=3e7, min_price=2.0, cost_buy=0.0003, cost_sell=0.0013,
-        slippage=0.0005, trend_filter=False, weight_mode="equal",
+        min_amount=3e7, min_price=2.0, cost_buy=COST_BUY, cost_sell=COST_SELL,
+        slippage=ENGINE_SLIPPAGE, trend_filter=False, weight_mode="equal",
         tilt_min=0.55, buffer=0.0, writeoff_factor=1.0, cond_col=None,
         verbose=False):
     """调仓回测。

@@ -48,14 +48,11 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.backtest_stock import build_features, metrics, run
-from tools.test_dividend_factor import build_yield_panel
+from tools.test_dividend_factor import build_yield_panel, require_adj_mode
 
-# 与 tools/sweep_scaling.py 保持同一套成本模型（主人实际：佣金万5 / 单笔最低 5 元）
-MIN_COMMISSION = 5.0
-NOMINAL_FEE = 0.0005
-SLIP = 0.0005
-STAMP = 0.001
-MODELED_ROUND = NOMINAL_FEE + (NOMINAL_FEE + STAMP) + SLIP * 2
+# 成本模型统一到 tools/costs.py（**单一来源**，勿在此重定义 —— 铁律 14）
+from tools.costs import (MIN_COMMISSION, MODELED_ROUND, NOMINAL_FEE,  # noqa: E402
+                         SLIP, STAMP)
 
 
 def prepare(args) -> pd.DataFrame:
@@ -92,9 +89,9 @@ def prepare(args) -> pd.DataFrame:
     print("  计算引擎特征…", flush=True)
     feat = build_features(b)
     print("  构建 point-in-time 股息率面板…（adj_mode = {}）".format(
-        getattr(args, "adj_mode", "correct")), flush=True)
+        require_adj_mode(args)), flush=True)
     dy = build_yield_panel(b, div, price_col="px_real" if "px_real" in b else "close",
-                           adj_mode=getattr(args, "adj_mode", "correct"))[
+                           adj_mode=require_adj_mode(args))[
         ["code", "date", "dps_ttm", "dps_fwd", "dy_ttm", "dy_fwd", "n_div3"]]
     df = feat.merge(dy, on=["code", "date"], how="left")
     # 池子掩码（与 run() 内部口径一致），供 build_mask 用
@@ -184,20 +181,20 @@ def main(argv=None) -> int:
                     help="调仓周期（交易日）。60≈季度，20≈月度")
     ap.add_argument("--dy-col", default="dy_ttm", choices=["dy_ttm", "dy_fwd"])
     ap.add_argument("--entry", type=float, default=4.0,
-                    help="hyst 模式的买入阈值（股息率 %）")
+                    help="hyst 模式的买入阈值（股息率 %%）")
     ap.add_argument("--exit", type=float, default=3.0,
-                    help="hyst 模式的卖出阈值（股息率 %）")
+                    help="hyst 模式的卖出阈值（股息率 %%）")
     ap.add_argument("--min-dy", type=float, default=0.5,
-                    help="入选的最低股息率（%）——避免 0 分红股混入")
+                    help="入选的最低股息率（%%）——避免 0 分红股混入")
     ap.add_argument("--max-dy", type=float, default=None,
-                    help="股息率上限（%）——砍掉价值陷阱/一次性特别分红")
+                    help="股息率上限（%%）——砍掉价值陷阱/一次性特别分红")
     ap.add_argument("--min-div3", type=int, default=0,
                     help="过去 3 年现金分红次数下限（持续性过滤）")
     ap.add_argument("--modes", nargs="+", default=["topn", "hyst"])
     ap.add_argument("--min-price", type=float, default=2.0)
     ap.add_argument("--min-amount", type=float, default=3e7)
     ap.add_argument("--min-listed", type=int, default=120)
-    ap.add_argument("--adj-mode", default="correct", choices=["legacy", "correct"],
+    ap.add_argument("--adj-mode", default=None, choices=["legacy", "correct"],
                     help="送转调整口径（透传给 build_yield_panel）："
                          "correct=价值中性口径（**默认**）；legacy=已证伪的旧实现")
     ap.add_argument("--capitals", type=float, nargs="+",
