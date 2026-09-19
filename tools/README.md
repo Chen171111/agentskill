@@ -318,7 +318,7 @@ correct 口径下 `topk=800` 再降到 **15.45%**、夏普 **0.73**。
 | **`monitor_factors.py`** | **策略健康监控（M2）**：IC/ICIR/分年度/十分位/行业HHI/暴露/换手/合格池/前向偏离 → `results/monitor_<date>.csv`。越界写 `state/LEARN_ALERT.txt` + 退出码 3（`--strict`）★★★ 告警文件与 `ALERT.txt`/`DATA_ALERT.txt` **分开** |
 | **`walk_forward.py`** | **purged+embargo walk-forward + DSR/PBO（M3）**：消除 60 日标签重叠导致的信息泄露；把"搜过多少个配置"折算成夏普折扣。正态分布用 `math.erf` 自实现（**venv 无 scipy**）★★ |
 | **`daily_learn.py`** | **每日学习闭环（M4）**：①行情增量 ②特征增量（指纹缓存）③**标签回填** ④监控。**红线：不改策略规则、不写 trading.db、不下单** ★★ |
-| **`panel_cache.py`** | 特征面板构建 + **指纹缓存**（key = 数据 mtime+size＋参数 的 sha1）—— M1/M2/M3/M4 共用，避免"面板构建"多处实现 ★ |
+| **`panel_cache.py`** | 特征面板构建 + **指纹缓存**（key = 数据 mtime+size＋参数 的 sha1）—— M1/M2/M3/M4 共用，避免"面板构建"多处实现。⚠️ 2026-09-19 修：面板 **1.4GB**、写盘 30~60s，原来直接 `to_parquet` 被打断会留下**截断文件**（实测只写了 315MB），而**读缓存不校验** → 此后每次运行都抛 `ArrowInvalid` **永久崩**。→ 改为**原子写**（`.tmp` + `os.replace`）+ **读容错**（失败当未命中并重建）。`selftest` 已加断言防复发 ★★ |
 | **`run_reruns.py`** | **重跑驱动（断点续跑）**：**R1~R18** 分步执行、每步单独日志、产物比输入新则自动跳过、失败即停并打印续跑命令。**长任务被宿主掐断 / 机器死机后直接再跑一次即可** ★★ |
 
 ```bash

@@ -58,7 +58,18 @@ def attach_industry(df: "pd.DataFrame", path: str) -> "pd.DataFrame":
 
 
 def build_panel(args, *, use_cache: bool = True, verbose: bool = True):
-    """返回 `(df, dates, by_date, cache_hit)`。`df.date` 统一为 `YYYYMMDD` 字符串。"""
+    """返回 `(df, dates, by_date, cache_hit)`。`df.date` 统一为 `YYYYMMDD` 字符串。
+
+    ⚠️ 2026-09-19 修两处（踩过一次，**缓存被写坏后每次运行都直接崩**）：
+
+    ① **写盘改成原子替换**：原来直接 `df.to_parquet(cache)` —— 面板 1.4GB、写盘约 30~60 秒，
+       期间被 SIGTERM / 死机打断就会留下**截断的 parquet**（实测：只写了 315MB）。
+       改成先写 `cache + ".tmp"` 再 `os.replace()`（同目录 rename，POSIX/NTFS 上都原子）。
+
+    ② **读缓存容错**：原来 `pd.read_parquet(cache)` 不校验 —— 一个截断文件会让
+       **此后每次运行都抛 `ArrowInvalid` 直接崩**，且看不出是缓存的问题。
+       改成 try/except：读失败就**当作未命中**（删掉坏文件 + 重建），并打印告警。
+    """
     from tools.backtest_dividend import prepare as prepare_div
     from tools.test_dividend_factor import require_adj_mode
 
@@ -69,15 +80,26 @@ def build_panel(args, *, use_cache: bool = True, verbose: bool = True):
     cache = os.path.join(cache_dir, f"panel_{fp}.parquet")
 
     hit = False
+    df = None
     if use_cache and os.path.exists(cache):
-        df = pd.read_parquet(cache)
-        df["date"] = df.date.astype(str)
-        if "ind_l1" not in df.columns:        # 旧缓存（并入行业列之前生成的）→ 补上
-            df = attach_industry(df, ind_p)
-        hit = True
-        if verbose:
-            print(f"  [缓存命中] {os.path.relpath(cache, ROOT)}  {len(df):,} 行", flush=True)
-    else:
+        try:
+            df = pd.read_parquet(cache)
+            df["date"] = df.date.astype(str)
+            if "ind_l1" not in df.columns:    # 旧缓存（并入行业列之前生成的）→ 补上
+                df = attach_industry(df, ind_p)
+            hit = True
+            if verbose:
+                print(f"  [缓存命中] {os.path.relpath(cache, ROOT)}  {len(df):,} 行", flush=True)
+        except Exception as e:                # 截断/损坏 → 当未命中，别让它一直崩
+            print(f"  ⚠️ [缓存损坏] {os.path.relpath(cache, ROOT)} 读取失败"
+                  f"（{type(e).__name__}: {str(e)[:80]}）→ 删掉并重建", flush=True)
+            try:
+                os.remove(cache)
+            except OSError:
+                pass
+            df = None
+
+    if df is None:
         if verbose:
             print(f"  [缓存未命中] 指纹 {fp} → 构建面板（约 1~2 分钟）…", flush=True)
         t0 = time.time()
@@ -88,7 +110,10 @@ def build_panel(args, *, use_cache: bool = True, verbose: bool = True):
         df = prepare_div(ns)
         df["date"] = df.date.astype(str)
         df = attach_industry(df, ind_p)
-        df.to_parquet(cache, index=False)
+        # 原子写：先写 .tmp 再 rename → 被打断也只会留下 .tmp，不会污染正式缓存
+        tmp = cache + ".tmp"
+        df.to_parquet(tmp, index=False)
+        os.replace(tmp, cache)
         if verbose:
             print(f"  [缓存已写] {os.path.relpath(cache, ROOT)}  {len(df):,} 行"
                   f"  用时 {time.time()-t0:.0f}s", flush=True)

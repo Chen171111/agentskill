@@ -27,6 +27,7 @@
 | 复权 | `THRESH` 四处实现值一致（且等于 `dataprovider.adjust.THRESH`） |
 | 文档 | `audit_doc_commands` 四类问题全 0 |
 | CLI | `argparse` 的 `help`/`description` 里没有「裸 `%`」（否则 `--help` 直接崩，且是静默的） |
+| 稳定性 | 长循环脚本接入 `flush_partial` 增量落盘；**大文件缓存原子写 + 读容错**；**年化外推有最小样本守卫** |
 | 数据 | 关键数据文件存在、行数/末根交易日在合理范围 |
 | 数据 | 池内 `close<=0` / `amt<=0` = 0（个股线地基） |
 
@@ -294,6 +295,40 @@ def _incremental_flush_wired():
     # 单一来源：不许自己再造一个写盘函数
     src = open(os.path.join(ROOT, "tools", "progress.py"), encoding="utf-8").read()
     assert "def flush_partial(" in src, "tools/progress.py 缺少 flush_partial"
+
+
+@check("稳定性", "大文件缓存必须「原子写 + 读容错」；年化外推必须有样本守卫")
+def _panel_cache_atomic():
+    """⚠️ 2026-09-19 新增，起因是**两次真实事故**（同一类：守卫太弱 / 不校验）。
+
+    **事故 1 —— 缓存写坏就永久崩**：`panel_cache.build_panel` 原来直接
+    `df.to_parquet(cache)` —— 面板 **1.4GB**、写盘 30~60 秒，被 SIGTERM / 死机打断
+    就留下**截断的 parquet**（实测只写了 **315MB**，正式文件被覆盖）。
+    更糟的是**读缓存不校验** → 此后**每次运行都抛 `ArrowInvalid` 直接崩**，
+    而且报错完全看不出是缓存的问题（要翻到 `panel_cache.py:73` 才知道）。
+
+    **事故 2 —— 样本不足还硬算年化 → 假警报**：`monitor_factors.forward_dev`
+    原来只要求 `len(wide) >= 2`，于是锚点后**只有 3 行数据**时就算出
+    「前向年化 13.10% vs 回测 7.45%」→ `fwd_vs_bt_dev` 0.0565 > 阈值 0.05 → 越界。
+    2 个交易日的年化值方差极大（年化 = 日收益^244），**不具统计意义**。
+
+    本检查防止以后有人把这两处守卫删掉、退回"直接写 / 不校验 / 样本不足也外推"。
+    """
+    src = open(os.path.join(ROOT, "tools", "panel_cache.py"), encoding="utf-8").read()
+    assert "os.replace(" in src, \
+        "panel_cache.py 缺少原子替换 os.replace() → 写盘被打断会留下截断的 parquet"
+    assert ".tmp" in src, "panel_cache.py 没有先写 .tmp 临时文件"
+    assert "except Exception" in src, \
+        "panel_cache.py 读缓存没有容错 → 缓存写坏后每次运行都会直接崩"
+    # 缓存目录不许进版本库（1.4GB×N）
+    gi = open(os.path.join(ROOT, ".gitignore"), encoding="utf-8").read()
+    assert "data/" in gi, ".gitignore 里没有忽略 data/（缓存会进仓库）"
+
+    mon = open(os.path.join(ROOT, "tools", "monitor_factors.py"), encoding="utf-8").read()
+    assert "MIN_TRACK_DAYS" in mon, \
+        ("monitor_factors.py 的前向偏离缺少最小样本守卫 → "
+         "锚点后几天数据就会被年化，产出假警报")
+    assert "样本不足" in mon, "monitor_factors.py 缺少「样本不足」的显式提示"
 
 
 @check("稳定性", "run_reruns 的步骤产物路径与文档口径一致")

@@ -273,8 +273,15 @@ def forward_dev(args) -> tuple[float | None, str]:
         return None, f"名单 {anchor} 在市场数据里无匹配"
     wide = b.pivot_table(index="date", columns="code", values="close")
     wide = wide[wide.index >= anchor].ffill()
-    if len(wide) < 2:
-        return None, f"锚点 {anchor} 之后无行情（跟踪尚未开始）"
+    # ⚠️ 2026-09-19 修：原来只要求 `len(wide) >= 2` —— 即**锚点后只要有 1 个交易日**就年化，
+    #    再把年化值拿去和回测 7.45% 比。实测锚点 20260915、数据到 20260917（**3 行**）时
+    #    算出「前向年化 13.10%」→ dev 0.0565 > 阈值 0.05 → **假警报**。
+    #    2 个交易日的年化值方差极大（年化 = 日收益^244），**不具统计意义**。
+    #    → 要求**至少一个完整持有期**（`hold=60`，与定稿调仓周期一致）才判定。
+    MIN_TRACK_DAYS = 60
+    if len(wide) < MIN_TRACK_DAYS:
+        return None, (f"锚点 {anchor}，数据只到 {wide.index[-1]}（{len(wide)} 行）→ "
+                      f"**跟踪样本不足**（<{MIN_TRACK_DAYS} 个交易日），暂不判定前向偏离")
     ret = (wide.iloc[-1] / wide.iloc[0] - 1).mean()
     years = max(len(wide) / TRADING_DAYS, 1e-6)
     fwd_ann = ((1 + ret) ** (1 / years) - 1) * 100
