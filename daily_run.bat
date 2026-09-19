@@ -21,6 +21,13 @@ rem  Step 2/2  run one trading session (32-bit Python)
 rem  daily_job.py wraps main.py: records state/last_run.json and writes
 rem  state/ALERT.txt on failure, so an unattended failure is visible
 rem  instead of silently rotting in the log.
+rem
+rem  [!] MANUAL / DEBUG RERUNS -> add --manual :
+rem        "E:\Python32\python.exe" -u tools\daily_job.py --manual
+rem      It writes state/last_run_manual.json + state/ALERT_manual.txt and
+rem      will NOT overwrite last_run.json, so a failed extra run can no longer
+rem      make the next check_alerts.py report a false "auto-trade FAILED"
+rem      (that is exactly what happened on 2026-09-18 21:02).
 rem ---------------------------------------------------------------
 "E:\Python32\python.exe" -u tools\daily_job.py >> "%LOG%" 2>&1
 echo [done] exit=%errorlevel% >> "%LOG%"

@@ -4,6 +4,15 @@
   · 人工随时查看：E:\\Python32\\python.exe tools/check_alerts.py
   · 自动巡检（WorkBuddy 定时任务 / 计划任务）：读它的退出码，非 0 表示有问题
 
+判定口径（2026-09-19 澄清）
+--------------------------
+只看**计划运行**（每日自动交易）的健康：`state/last_run.json` + `state/ALERT.txt`。
+`tools/daily_job.py --manual` 写的是 `state/last_run_manual.json` /
+`state/ALERT_manual.txt`，**只作备注提示、不计入 problems** ——
+手动运行失败**不代表**「无人值守的自动交易」异常。
+（2026-09-18 21:02 一次额外的手动运行失败，曾把当天 14:50 计划任务的**成功**记录
+覆盖成 `ok:false`，导致本脚本次日误报「自动交易失败」。修法见 `tools/daily_job.py`。）
+
 退出码：0 = 一切正常；1 = 有问题（失败 / 到点没跑 / 存在告警文件）
 """
 import json
@@ -17,6 +26,9 @@ sys.path.insert(0, str(ROOT))
 STATE = ROOT / "state"
 STATUS = STATE / "last_run.json"
 ALERT = STATE / "ALERT.txt"
+# 手动运行（`daily_job.py --manual`）的记录与告警：**只提示、不计入问题**。
+STATUS_MANUAL = STATE / "last_run_manual.json"
+ALERT_MANUAL = STATE / "ALERT_manual.txt"
 # 数据体检告警（由 tools/refresh_data.py 写）。
 # ⚠️ 与 ALERT.txt **分开**：ALERT 会被 daily_job 的「成功」路径清除，
 #    而数据问题不该因为「下单成功」就被掩盖。
@@ -71,6 +83,19 @@ def main():
             notes.append(ALERT.read_text(encoding="utf-8", errors="ignore")[:1500])
         except Exception:
             pass
+
+    # 手动运行记录（daily_job.py --manual）：**只提示、不计入 problems** ——
+    # 手动运行失败不代表「无人值守的自动交易」异常。
+    if STATUS_MANUAL.exists():
+        try:
+            mj = json.loads(STATUS_MANUAL.read_text(encoding="utf-8"))
+            notes.append("另有一次**手动运行**（--manual）记录：{}  退出码={}  {}".format(
+                mj.get("ts"), mj.get("exit_code"), mj.get("summary") or ""))
+        except Exception:
+            pass
+    if ALERT_MANUAL.exists():
+        notes.append("另有**手动运行**失败记录 state/ALERT_manual.txt"
+                     "（不计入问题；自动交易自身状态见上）")
 
     if DATA_ALERT.exists():
         problems.append("存在**数据体检**告警 state/DATA_ALERT.txt")

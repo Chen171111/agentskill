@@ -297,6 +297,34 @@ def _incremental_flush_wired():
     assert "def flush_partial(" in src, "tools/progress.py 缺少 flush_partial"
 
 
+@check("稳定性", "会下单的脚本必须拒绝未知参数（防「--help 触发交易」）")
+def _trade_script_arg_guard():
+    """⚠️ 2026-09-19 新增，起因是一次**真实事故**。
+
+    `tools/daily_job.py` 会真的走下单链路（内部执行 `main.py simulate --ths`）。
+    它原本对参数**不做任何检查** —— 于是 `daily_job.py --help` **不会打印用法**，
+    而是**照常执行整条交易链路**：
+
+        2026-09-19 23:57 有人用 `--help` 试探 → 触发一次真实运行 →
+        失败在 broker 连接阶段（**未产生任何交易**，`trading.db` 未动），
+        但覆盖了 `state/last_run.json` 并写出 `state/ALERT.txt`
+        → `check_alerts.py` 误报「自动交易失败」。
+
+    这条检查要求：**未知参数必须被拒绝执行**（白名单 `_ALLOWED_ARGS`），
+    而且守卫必须出现在**构造下单命令之前** —— 否则等于没有守卫。
+    """
+    src = open(os.path.join(ROOT, "tools", "daily_job.py"), encoding="utf-8").read()
+    assert "_ALLOWED_ARGS" in src, "daily_job.py 缺少参数白名单 _ALLOWED_ARGS"
+    assert "--manual" in src and "--simulate-failure" in src, (
+        "daily_job.py 的白名单必须至少含 --manual 与 --simulate-failure")
+    i_guard = src.find("unknown = [a for a in sys.argv[1:]")
+    i_trade = src.find("argv = [sys.executable")
+    assert i_guard != -1, "daily_job.py 缺少未知参数守卫（unknown = ... 那一段）"
+    assert i_trade != -1, "daily_job.py 找不到下单 argv 的构造处"
+    assert i_guard < i_trade, (
+        "参数守卫必须写在构造下单命令**之前**（否则 --help 照样会触发真实交易）")
+
+
 @check("稳定性", "大文件缓存必须「原子写 + 读容错」；年化外推必须有样本守卫")
 def _panel_cache_atomic():
     """⚠️ 2026-09-19 新增，起因是**两次真实事故**（同一类：守卫太弱 / 不校验）。
