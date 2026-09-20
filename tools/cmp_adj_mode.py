@@ -15,9 +15,9 @@
     cd "E:/MyWorkAndProject/量化/agentskill"
 
     # 先各跑一遍（约 15 分钟/次）
-    $PY tools/test_industry_neutral.py --bars data/stockbars/bars_total_tax10.parquet \\
+    $PY tools/test_industry_neutral.py --bars data/stockbars/bars_total.parquet --tax-rate 0.1 \\
         --topn 15 20 30 --hold 60 --adj-mode legacy  --out-prefix results/adjfix_legacy
-    $PY tools/test_industry_neutral.py --bars data/stockbars/bars_total_tax10.parquet \\
+    $PY tools/test_industry_neutral.py --bars data/stockbars/bars_total.parquet --tax-rate 0.1 \\
         --topn 15 20 30 --hold 60 --adj-mode correct --out-prefix results/adjfix_correct
 
     # 再分析

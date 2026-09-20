@@ -182,7 +182,7 @@ def pbo_cscv(mat: np.ndarray, *, n_splits: int, max_combos: int = 2000,
 # ---------------------------------------------------------------- 主流程
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="purged+embargo walk-forward + DSR/PBO")
-    ap.add_argument("--bars", default="data/stockbars/bars_total_tax10.parquet")
+    ap.add_argument("--bars", default="data/stockbars/bars_total.parquet")
     ap.add_argument("--bfq", default="data/stockbars/bars_bfq.parquet")
     ap.add_argument("--dividends", default="data/dividends/bonus_all.parquet")
     ap.add_argument("--universe", default="data/stockbars/universe_all.csv")

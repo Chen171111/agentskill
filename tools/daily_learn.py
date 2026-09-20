@@ -48,6 +48,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.panel_cache import build_panel, fingerprint  # noqa: E402
 from tools.progress import flush_partial  # noqa: E402
 from tools.test_dividend_factor import require_adj_mode  # noqa: E402
+from tools.build_div_tax import DEFAULT_DIV_TAX  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEARN_DIR = os.path.join(ROOT, "state", "learn")
@@ -166,7 +167,8 @@ def step4_monitor(args, st: dict, force: bool) -> dict:
     cmd = [sys.executable, "-u", "tools/monitor_factors.py",
            "--adj-mode", args.adj_mode, "--strict",
            "--bars", args.bars, "--bfq", args.bfq,
-           "--dividends", args.dividends, "--universe", args.universe]
+           "--dividends", args.dividends, "--universe", args.universe,
+           "--tax-rate", str(args.tax_rate), "--div-tax", args.div_tax]
     t0 = time.time()
     log = os.path.join(ROOT, "results", f"_daily_learn_{args.date_tag}.log")
     with open(log, "a", encoding="utf-8") as fh:
@@ -183,7 +185,13 @@ def step4_monitor(args, st: dict, force: bool) -> dict:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="每日学习闭环（四步）")
-    ap.add_argument("--bars", default="data/stockbars/bars_total_tax10.parquet")
+    ap.add_argument("--bars", default="data/stockbars/bars_total.parquet")
+    ap.add_argument("--tax-rate", type=float, default=0.1,
+                    help="红利税率（0~0.2）。**默认 0.1 = 保持原有「税后」语义**；"
+                         "传 0 得无税。引擎内在**除权日**按持仓扣税、价格路径不变 → "
+                         "税后与无税**组合恒等**（D4）")
+    ap.add_argument("--div-tax", default=DEFAULT_DIV_TAX,
+                    help="引擎内扣税用的每股派现表（tools/build_div_tax.py 生成）")
     ap.add_argument("--bfq", default="data/stockbars/bars_bfq.parquet")
     ap.add_argument("--dividends", default="data/dividends/bonus_all.parquet")
     ap.add_argument("--universe", default="data/stockbars/universe_all.csv")

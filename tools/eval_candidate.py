@@ -50,6 +50,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.backtest_dividend import prepare as prepare_div  # noqa: E402
 from tools.backtest_stock import metrics, run  # noqa: E402
+from tools.build_div_tax import load_div_tax, DEFAULT_DIV_TAX  # noqa: E402
 from tools.panel_cache import build_panel  # noqa: E402
 from tools.stats_lite import spearman  # noqa: E402
 from tools.progress import flush_partial  # noqa: E402
@@ -118,7 +119,10 @@ def run_plan(df, by_date, plan, s: str, e: str, args) -> dict:
     df["_sig"] = mask_from_plan(df, plan, by_date)
     eq, tr, meta = run(df, [], start=s, end=e, hold=args.hold, cond_col="_sig",
                        min_price=args.min_price, min_amount=args.min_amount,
-                       min_listed=args.min_listed)
+                       min_listed=args.min_listed,
+                       div_tax=(load_div_tax(args.div_tax)
+                                if args.tax_rate else None),
+                       tax_rate=args.tax_rate)
     m = metrics(eq.equity)
     nh = meta.get("avg_hold", 0) or 1
     yrs = len(eq) / TRADING_DAYS
@@ -241,7 +245,13 @@ def main(argv=None) -> int:
     ap.add_argument("--weight", type=float, default=1.0,
                     help="usage=score：并入权重（0~1 建议，量纲与行业内百分位一致）")
     ap.add_argument("--na-fill", default="none", choices=["none", "zero", "median"])
-    ap.add_argument("--bars", default="data/stockbars/bars_total_tax10.parquet")
+    ap.add_argument("--bars", default="data/stockbars/bars_total.parquet")
+    ap.add_argument("--tax-rate", type=float, default=0.1,
+                    help="红利税率（0~0.2）。**默认 0.1 = 保持原有「税后」语义**；"
+                         "传 0 得无税。引擎内在**除权日**按持仓扣税、价格路径不变 → "
+                         "税后与无税**组合恒等**（D4）")
+    ap.add_argument("--div-tax", default=DEFAULT_DIV_TAX,
+                    help="引擎内扣税用的每股派现表（tools/build_div_tax.py 生成）")
     ap.add_argument("--bfq", default="data/stockbars/bars_bfq.parquet")
     ap.add_argument("--dividends", default="data/dividends/bonus_all.parquet")
     ap.add_argument("--universe", default="data/stockbars/universe_all.csv")

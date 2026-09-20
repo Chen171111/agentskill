@@ -60,7 +60,7 @@ def _panel(args, mode: str, ind: pd.DataFrame) -> pd.DataFrame:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="legacy vs correct 选股清单重叠度")
-    ap.add_argument("--bars", default="data/stockbars/bars_total_tax10.parquet")
+    ap.add_argument("--bars", default="data/stockbars/bars_total.parquet")
     ap.add_argument("--bfq", default="data/stockbars/bars_bfq.parquet")
     ap.add_argument("--dividends", default="data/dividends/bonus_all.parquet")
     ap.add_argument("--industry", default="data/industry/industry_all.parquet")

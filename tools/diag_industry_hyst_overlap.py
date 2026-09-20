@@ -25,7 +25,7 @@
 ----
     PY=.../python.exe
     $PY tools/diag_industry_hyst_overlap.py \
-        --bars data/stockbars/bars_total_tax10.parquet \
+        --bars data/stockbars/bars_total.parquet \
         --bfq  data/stockbars/bars_bfq.parquet \
         --dividends data/dividends/bonus_all.parquet \
         --industry data/industry/industry_all.parquet \
@@ -69,7 +69,7 @@ def jaccard(a, b):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="hyst × 行业内选股：机制归因")
-    ap.add_argument("--bars", default="data/stockbars/bars_total_tax10.parquet")
+    ap.add_argument("--bars", default="data/stockbars/bars_total.parquet")
     ap.add_argument("--bfq", default="data/stockbars/bars_bfq.parquet")
     ap.add_argument("--dividends", default="data/dividends/bonus_all.parquet")
     ap.add_argument("--industry", default="data/industry/industry_all.parquet")
