@@ -48,6 +48,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.backtest_dividend import build_mask, prepare as prepare_div  # noqa: E402
 from tools.progress import flush_partial  # noqa: E402
 from tools.backtest_stock import metrics, run  # noqa: E402
+from tools.build_div_tax import load_div_tax, DEFAULT_DIV_TAX  # noqa: E402
 
 TRADING_DAYS = 244.0
 # 成本模型统一到 tools/costs.py（**单一来源**，勿在此重定义 —— 铁律 14）
@@ -80,6 +81,12 @@ def main(argv=None) -> int:
     ap.add_argument("--exits", type=float, nargs="+",
                     default=[4, 5, 6, 7])
     ap.add_argument("--min-price", type=float, default=2.0)
+    ap.add_argument("--tax-rate", type=float, default=0.0,
+                    help="红利税率（0~0.2）。**0 = 不扣税 = 默认**。"
+                         "引擎内在**除权日**按持仓扣税、价格路径不变 → "
+                         "税后与无税**组合恒等**（D4）")
+    ap.add_argument("--div-tax", default=DEFAULT_DIV_TAX,
+                    help="引擎内扣税用的每股派现表（tools/build_div_tax.py 生成）")
     ap.add_argument("--min-amount", type=float, default=3e7)
     ap.add_argument("--min-listed", type=int, default=120)
     ap.add_argument("--adj-mode", default=None, choices=["legacy", "correct"],
@@ -154,7 +161,10 @@ def main(argv=None) -> int:
             eq, tr, meta = run(df, [], start=s, end=e_, hold=args.hold,
                                cond_col="_sig", min_price=args.min_price,
                                min_amount=args.min_amount,
-                               min_listed=args.min_listed)
+                               min_listed=args.min_listed,
+                               div_tax=(load_div_tax(args.div_tax)
+                                        if args.tax_rate else None),
+                               tax_rate=args.tax_rate)
             m = metrics(eq.equity)
             yrs = len(eq) / TRADING_DAYS
             nh = meta.get("avg_hold", 0) or 1

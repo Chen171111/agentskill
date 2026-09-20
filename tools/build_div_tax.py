@@ -48,12 +48,32 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from functools import lru_cache
 
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.rebuild_returns import load_events  # noqa: E402
+
+DEFAULT_DIV_TAX = "data/stockbars/div_tax_table.parquet"
+
+
+@lru_cache(maxsize=4)
+def load_div_tax(path: str = DEFAULT_DIV_TAX) -> pd.DataFrame:
+    """加载扣税表 —— **供各回测脚本统一调用**（避免每个脚本各写一份口径）。
+
+    返回 `DataFrame[date(str), code, dps_adj]`，直接喂给
+    `backtest_stock.run(..., div_tax=..., tax_rate=...)`。
+
+    ⚠️ 带 `lru_cache`（表只有 ~3.7 万行、只读）—— 所以调用方**就近加载**也不会重复读盘。
+    """
+    if not os.path.exists(path):
+        raise SystemExit(
+            "找不到扣税表 {} —— 先跑 `$PY tools/build_div_tax.py`".format(path))
+    df = pd.read_parquet(path)
+    df["date"] = df.date.astype(str)
+    return df
 
 
 def build(total_path: str, bfq_path: str, div_path: str) -> pd.DataFrame:

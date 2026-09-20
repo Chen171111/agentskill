@@ -49,6 +49,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.backtest_stock import build_features, metrics, run
 from tools.test_dividend_factor import build_yield_panel, require_adj_mode
+from tools.build_div_tax import load_div_tax, DEFAULT_DIV_TAX
 
 # 成本模型统一到 tools/costs.py（**单一来源**，勿在此重定义 —— 铁律 14）
 from tools.costs import (MIN_COMMISSION, MODELED_ROUND, NOMINAL_FEE,  # noqa: E402
@@ -197,6 +198,12 @@ def main(argv=None) -> int:
     ap.add_argument("--adj-mode", default=None, choices=["legacy", "correct"],
                     help="送转调整口径（透传给 build_yield_panel）："
                          "correct=价值中性口径（**默认**）；legacy=已证伪的旧实现")
+    ap.add_argument("--tax-rate", type=float, default=0.0,
+                    help="红利税率（0~0.2）。**0 = 不扣税 = 默认**。"
+                         "引擎内在**除权日**按持仓扣税，价格路径不变 → "
+                         "税后与无税**组合恒等**，Δ 才可读作税成本（D4）")
+    ap.add_argument("--div-tax", default=DEFAULT_DIV_TAX,
+                    help="引擎内扣税用的每股派现表（tools/build_div_tax.py 生成）")
     ap.add_argument("--capitals", type=float, nargs="+",
                     default=[10, 20, 50, 100, 200])
     ap.add_argument("--out", default="results/dividend_backtest.csv")
@@ -222,6 +229,9 @@ def main(argv=None) -> int:
         variants.append((f"≤{args.max_dy:g}%", args.max_dy, 0))
     if args.min_div3:
         variants.append((f"≥{args.min_div3}次", args.max_dy, args.min_div3))
+    # 引擎内扣税（D4）：**在嵌套循环外加载一次**，别在循环里重复读表
+    div_tax = load_div_tax(args.div_tax) if args.tax_rate else None
+
     for vtag, max_dy, min_div3 in variants:
         for mode in args.modes:
             for n in args.topn:
@@ -236,7 +246,8 @@ def main(argv=None) -> int:
                                    hold=args.hold, cond_col=col,
                                    min_price=args.min_price,
                                    min_amount=args.min_amount,
-                                   min_listed=args.min_listed)
+                                   min_listed=args.min_listed,
+                                   div_tax=div_tax, tax_rate=args.tax_rate)
                 m = metrics(eq.equity)
                 years = len(eq) / 244.0
                 n_hold = meta.get("avg_hold", 0) or 1

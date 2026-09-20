@@ -45,13 +45,17 @@ sys.path.insert(0, ROOT)
 BARS = "data/stockbars/bars_total.parquet"
 BARS_TAX10 = "data/stockbars/bars_total_tax10.parquet"
 BARS_TAX20 = "data/stockbars/bars_total_tax20.parquet"
+# ⚠️ 2026-09-20（D4）：「税后」不再靠**换一份税后价格文件**（那会连选股一起换掉），
+#   而是**引擎内扣税** → 步骤里传 `--tax-rate 0.1` / `0.2`，价格路径仍是 `BARS`（税前）。
+#   上面两个旧文件仅作历史对照保留，**不再是重跑输入**。
+DIV_TAX = "data/stockbars/div_tax_table.parquet"
 BFQ = "data/stockbars/bars_bfq.parquet"
 DIV = "data/dividends/bonus_all.parquet"
 UNI = "data/stockbars/universe_all.csv"
 IND = "data/industry/industry_all.parquet"
 
 # 输入数据的「新鲜度基准」：产物比它们新才算有效
-INPUTS = [BARS, BARS_TAX10, BARS_TAX20, BFQ, DIV, UNI, IND]
+INPUTS = [BARS, BFQ, DIV, UNI, IND, DIV_TAX]
 
 # id, 名称, argv, 产物, 供回灌的文档, 预计分钟
 STEPS: list[tuple[str, str, list[str], list[str], str, float]] = [
@@ -69,7 +73,7 @@ STEPS: list[tuple[str, str, list[str], list[str], str, float]] = [
      "个股线_行业中性化.md", 8),
 
     ("R3", "行业中性化（税后 10%）",
-     ["tools/test_industry_neutral.py", "--bars", BARS_TAX10, "--topn", "20", "30",
+     ["tools/test_industry_neutral.py", "--tax-rate", "0.1", "--topn", "20", "30",
       "--hold", "60", "--adj-mode", "correct",
       "--out-prefix", "results/adj_correct_tax10"],
      ["results/adj_correct_tax10_backtest.csv"],
@@ -91,7 +95,7 @@ STEPS: list[tuple[str, str, list[str], list[str], str, float]] = [
      "个股线_四进三出阈值检验.md", 7),    # 实测 6.8 min
 
     ("R6", "四进三出（税后 10%）",
-     ["tools/sweep_hyst.py", "--bars", BARS_TAX10,
+     ["tools/sweep_hyst.py", "--tax-rate", "0.1",
       "--entries", "8", "9", "--exits", "4", "5", "6", "7",
       "--topn", "20", "--hold", "60", "--max-dy", "10", "--min-div3", "2",
       "--adj-mode", "correct",
@@ -115,7 +119,7 @@ STEPS: list[tuple[str, str, list[str], list[str], str, float]] = [
      "个股线_股息率并入多因子.md", 40),
 
     ("R9", "股息率组合回测（税后 10%）",
-     ["tools/backtest_dividend.py", "--bars", BARS_TAX10,
+     ["tools/backtest_dividend.py", "--tax-rate", "0.1",
       "--topn", "10", "20", "30", "50", "--hold", "60", "--max-dy", "10",
       "--min-div3", "2", "--adj-mode", "correct",
       "--out", "results/adj_correct_tax10_dividend_backtest.csv"],
@@ -126,7 +130,7 @@ STEPS: list[tuple[str, str, list[str], list[str], str, float]] = [
     #    §四（hold 敏感性）/ §八（层层加码）在 R1~R9 里**没有对应步骤**，
     #    这三节此前一直是 legacy 数字 → 补 R10~R15 把缺口填上。
     ("R10", "N 敏感性（税后 10%）",
-     ["tools/test_industry_neutral.py", "--bars", BARS_TAX10,
+     ["tools/test_industry_neutral.py", "--tax-rate", "0.1",
       "--topn", "10", "15", "20", "30", "40", "50", "60", "--hold", "60",
       "--hyst-entry", "8", "--hyst-exit", "4", "--adj-mode", "correct",
       "--out-prefix", "results/adj_correct_n_sens"],
@@ -134,7 +138,7 @@ STEPS: list[tuple[str, str, list[str], list[str], str, float]] = [
      "个股线_股息率实盘方案.md", 35),
 
     ("R11", "hold 邻域 20 日（20% 税档）",
-     ["tools/test_industry_neutral.py", "--bars", BARS_TAX20,
+     ["tools/test_industry_neutral.py", "--tax-rate", "0.2",
       "--topn", "20", "--hold", "20",
       "--hyst-entry", "8", "--hyst-exit", "4", "--adj-mode", "correct",
       "--out-prefix", "results/adj_correct_hold20_tax20"],
@@ -142,7 +146,7 @@ STEPS: list[tuple[str, str, list[str], list[str], str, float]] = [
      "个股线_股息率实盘方案.md", 8),
 
     ("R12", "hold 邻域 30 日（10% 税档）",
-     ["tools/test_industry_neutral.py", "--bars", BARS_TAX10,
+     ["tools/test_industry_neutral.py", "--tax-rate", "0.1",
       "--topn", "20", "--hold", "30",
       "--hyst-entry", "8", "--hyst-exit", "4", "--adj-mode", "correct",
       "--out-prefix", "results/adj_correct_hold30_tax10"],
@@ -150,7 +154,7 @@ STEPS: list[tuple[str, str, list[str], list[str], str, float]] = [
      "个股线_股息率实盘方案.md", 8),
 
     ("R13", "hold 邻域 40 日（10% 税档）",
-     ["tools/test_industry_neutral.py", "--bars", BARS_TAX10,
+     ["tools/test_industry_neutral.py", "--tax-rate", "0.1",
       "--topn", "20", "--hold", "40",
       "--hyst-entry", "8", "--hyst-exit", "4", "--adj-mode", "correct",
       "--out-prefix", "results/adj_correct_hold40_tax10"],
@@ -257,7 +261,7 @@ STEPS: list[tuple[str, str, list[str], list[str], str, float]] = [
     #    无税那半 R16 已给（`adj_correct_combo_notax`），这里补**税后 10%** 那半，
     #    才能和 §六 的「样本外 10 万真实」口径对齐。
     ("R23", "hyst × 行业配额（税后 10%）",
-     ["tools/test_industry_neutral.py", "--bars", BARS_TAX10,
+     ["tools/test_industry_neutral.py", "--tax-rate", "0.1",
       "--topn", "20", "--hold", "60",
       "--hyst-entry", "8", "--hyst-exit", "4", "--adj-mode", "correct",
       "--out-prefix", "results/chk_hyst_indquota_tax10"],
@@ -269,7 +273,7 @@ STEPS: list[tuple[str, str, list[str], list[str], str, float]] = [
     #    「税后是否也反转」必须自己跑一次，不能靠 legacy 的结论外推。
     #    （参数与 R16 逐位相同，只换 `--bars`。）
     ("R24", "叠加测试（税后 10%）：hyst 8/4 × 行业中性化",
-     ["tools/test_industry_neutral.py", "--bars", BARS_TAX10,
+     ["tools/test_industry_neutral.py", "--tax-rate", "0.1",
       "--topn", "20", "--hold", "60", "--max-dy", "10", "--min-div3", "2",
       "--hyst-entry", "8", "--hyst-exit", "4", "--adj-mode", "correct",
       "--out-prefix", "results/adj_correct_combo_tax10"],

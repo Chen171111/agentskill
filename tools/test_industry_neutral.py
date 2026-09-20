@@ -64,6 +64,7 @@ from tools.backtest_dividend import (MIN_COMMISSION, MODELED_ROUND,  # noqa: E40
                                      NOMINAL_FEE, SLIP, STAMP,
                                      prepare as prepare_div)
 from tools.backtest_stock import metrics, run  # noqa: E402
+from tools.build_div_tax import load_div_tax, DEFAULT_DIV_TAX  # noqa: E402
 from tools.progress import flush_partial  # noqa: E402
 
 TRADING_DAYS = 244.0
@@ -397,6 +398,12 @@ def main(argv=None) -> int:
                     help="滞回买入阈值（%%）。给出后额外跑「hyst × 行业中性化」叠加配置")
     ap.add_argument("--hyst-exit", type=float, default=None,
                     help="滞回卖出阈值（%%）")
+    ap.add_argument("--tax-rate", type=float, default=0.0,
+                    help="红利税率（0~0.2）。**0 = 不扣税 = 默认**。"
+                         "引擎内在**除权日**按持仓扣税、价格路径不变 → "
+                         "税后与无税**组合恒等**，Δ 才可读作税成本（D4）")
+    ap.add_argument("--div-tax", default=DEFAULT_DIV_TAX,
+                    help="引擎内扣税用的每股派现表（tools/build_div_tax.py 生成）")
     ap.add_argument("--out-prefix", default="results/industry_neutral")
     args = ap.parse_args(argv)
 
@@ -437,6 +444,12 @@ def main(argv=None) -> int:
             if len(px) > 2:
                 benches[nm] = metrics(px)["年化收益"]
 
+    # 引擎内扣税（D4）：加载一次，供下面的嵌套函数 `run_cfg` 闭包访问
+    div_tax = load_div_tax(args.div_tax) if args.tax_rate else None
+    if div_tax is not None:
+        print("  引擎内扣红利税：税率 {:.0f}%（{}，{:,} 个除权日）".format(
+            args.tax_rate * 100, args.div_tax, len(div_tax)))
+
     def run_cfg(tag: str, mode: str, n: int, he, hx, s: str, e: str):
         dts = [t for t in dates if s <= t <= e]
         pl = plan_selections(df, dts, by_date, mode=mode, topn=n, hold=args.hold,
@@ -448,7 +461,8 @@ def main(argv=None) -> int:
         df[col] = mask
         eq, tr, meta = run(df, [], start=s, end=e, hold=args.hold, cond_col=col,
                            min_price=args.min_price, min_amount=args.min_amount,
-                           min_listed=args.min_listed)
+                           min_listed=args.min_listed,
+                           div_tax=div_tax, tax_rate=args.tax_rate)
         m = metrics(eq.equity)
         yrs = len(eq) / TRADING_DAYS
         nh = meta.get("avg_hold", 0) or 1
