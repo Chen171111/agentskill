@@ -324,13 +324,12 @@ agentskill/
 
 #### 4.7.4 D4 待重跑：其余 8 个**税后**重跑步骤
 
-`run_reruns.py` 里含 `--tax-rate` 的共 **9 步**，其中 **R3 已重跑完成**（即 §2.2 那张表）。
-其余 8 步的产物**仍是 D4 之前的口径**（对应各自的 `results/_bak_*_before_divtax.csv`）：
+`run_reruns.py` 里含 `--tax-rate` 的共 **9 步**，其中 **R3、R9 已重跑完成** ✅。
+其余 7 步的产物**仍是 D4 之前的口径**（对应各自的 `results/_bak_*_before_divtax.csv`）：
 
 | 步骤 | 名称 | 税率 | 预计 |
 |---|---|---|---|
 | R6 | 四进三出（税后 10%） | 0.1 | 19min |
-| R9 | 股息率组合回测（税后 10%） | 0.1 | 5min |
 | R10 | N 敏感性（税后 10%） | 0.1 | — |
 | R11 | hold 邻域 20 日（20% 档） | 0.2 | — |
 | R12 | hold 邻域 30 日（10% 档） | 0.1 | — |
@@ -339,8 +338,12 @@ agentskill/
 | R24 | 叠加测试（税后 10%） | 0.1 | — |
 
 ```bash
-$PY tools/run_reruns.py --only R6 R9 R10 R11 R12 R13 R23 R24 --force
+$PY tools/run_reruns.py --only R6 R10 R11 R12 R13 R23 R24 --force
 ```
+
+**R9 已重跑**（`adj_correct_tax10_dividend_backtest.csv`，24 行全部重算）：
+Δ 范围 **[−0.228, +0.102]pp**（均值 −0.059），量级与「税负计算方式改变」一致 ——
+说明改造在**组合回测**这条链路上也正常工作（不再只是 `test_industry_neutral` 那条）。
 
 ⚠️ **`--list` 的显示会误导**：`INPUTS` 新增了 `div_tax_table.parquet`（今天生成），
 mtime 判据会把**全部 31 步**都标成「待跑」—— 但**无税步骤（R2/R4/R5/R7/R8…）口径没变、
