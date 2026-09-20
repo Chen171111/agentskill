@@ -325,6 +325,54 @@ def _trade_script_arg_guard():
         "参数守卫必须写在构造下单命令**之前**（否则 --help 照样会触发真实交易）")
 
 
+@check("口径", "红利税必须在引擎内扣（换税后价格会静默改选股）")
+def _div_tax_in_engine():
+    """⚠️ 2026-09-20 新增（D4）。
+
+    原先的「税后」= 换 `bars_total_tax10.parquet`（税后总收益路径）。
+    那份 `close` 会进入**价格类过滤与动量因子**（`min_price` / `rev20` / 涨跌停判据）
+    → 税后与无税**选出来的股不同**，于是长窗口的 `税后 − 无税` Δ
+    **混杂了「换了组合」的成分**，不能读作税成本。
+
+    实测（topk=50/hold=5，2019~2026）：**旧口径** trades 29,702 笔 vs 无税 29,668 笔
+    （Δ 年化 −0.18pp）；**引擎内扣税**则 trades **逐位相同**（29,668 = 29,668）
+    → Δ = **−0.079pp**，干净地等于税负。
+
+    这条检查防止以后有人把税又挪回「换一份数据文件」那条路。
+    """
+    src = open(os.path.join(ROOT, "tools", "backtest_stock.py"), encoding="utf-8").read()
+    assert "div_tax=None" in src and "tax_rate=0.0" in src, (
+        "backtest_stock.run() 缺少引擎内扣税参数（div_tax / tax_rate），"
+        "或 tax_rate 的默认值不是 0.0（会静默改变既有回测结果）")
+    i_tax = src.find("除权日扣红利税")
+    i_exec = src.find("开盘执行上一交易日收盘产生的信号")
+    assert i_tax != -1 and i_exec != -1, "找不到「扣税段」或「开盘执行段」"
+    assert i_tax < i_exec, (
+        "扣税必须写在**开盘执行之前** —— 要用前一日收盘的持仓，"
+        "与「股权登记日 T−1 收盘持有者可分红」一致")
+    assert os.path.exists(os.path.join(ROOT, "tools", "build_div_tax.py")), (
+        "缺少 tools/build_div_tax.py —— 扣税输入表（dps_adj）的唯一来源")
+
+
+@check("稳定性", "daily_job 的连接重试必须限窗（收盘后不得重试）")
+def _daily_job_retry_window():
+    """⚠️ 2026-09-20 新增（D5）。
+
+    「同花顺没开」类失败会重试；但**收盘后重试毫无意义**（没法按当日价成交），
+    还平白增加「重复下单」的风险 → 必须有窗口上限；
+    且**只重试连接类失败**（别的失败重试不会变好，只会用重试掩盖真问题）。
+    """
+    src = open(os.path.join(ROOT, "tools", "daily_job.py"), encoding="utf-8").read()
+    assert "_RETRY_WINDOW_END" in src and "_in_retry_window" in src, (
+        "daily_job.py 缺少重试窗口上限（收盘后还会重试 = 危险）")
+    assert "_RETRY_KEYWORDS" in src and "_is_conn_failure" in src, (
+        "daily_job.py 缺少「只重试连接类失败」的判定")
+    m = re.search(r"_RETRY_WINDOW_END\s*=\s*\((\d+)\s*,\s*(\d+)\)", src)
+    assert m, "解析不出 _RETRY_WINDOW_END 的值"
+    assert (int(m.group(1)), int(m.group(2))) < (15, 0), (
+        "重试窗口上限 {}:{} 不得晚于 15:00 收盘".format(m.group(1), m.group(2)))
+
+
 @check("稳定性", "大文件缓存必须「原子写 + 读容错」；年化外推必须有样本守卫")
 def _panel_cache_atomic():
     """⚠️ 2026-09-19 新增，起因是**两次真实事故**（同一类：守卫太弱 / 不校验）。

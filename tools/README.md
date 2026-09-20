@@ -191,6 +191,8 @@ legacy 的「全区间三项全优（21.32 / 1.08 / −22.78）」**已作废**�
 | `verify_adj_consistency.py` | **判据②**：用「派现总额 ÷ 当前股本」独立路径核 `correct`（并确认 `TOTAL_SHARES` 是除权前基数） |
 | `verify_adj_pointintime.py` | **判据⑦（最硬）**：换数据截止日重算历史段 —— `correct` 差异 **恰好 0**、`legacy` 16.54% 会变 |
 | `cmp_selection_overlap.py` | **Δ 分解**：两口径选股名单的 Jaccard（实测 0.43~0.60，**每期都在换掉约一半持仓**） |
+| `build_div_tax.py` | **引擎内扣红利税的输入表**（D4，2026-09-20）→ `data/stockbars/div_tax_table.parquet`：除权日 `dps_adj = D × bars_total.close(t−1)/bars_bfq.close(t−1)`。**为什么需要**：原先的「税后」是换 `bars_total_tax10.parquet`，而那份 `close` 会进**价格类过滤与动量因子**（`min_price`/`rev20`/涨跌停）→ **税后与无税选出来的股不同**，长窗口 Δ 不能读作税成本。改成引擎内扣税（`backtest_stock.run(..., div_tax=, tax_rate=)`）后**组合恒等**，Δ 才干净。2026-09-20 实测：组合**逐位相同**、税负 −0.079pp/年；旧口径 trades 多 34 笔 ★ |
+| `verify_div_tax.py` | **D4 的验收脚本**：一次构建因子，跑「无税 / 引擎内扣税 10% / 旧 tax10 路径」三组，检验**组合是否恒等**、税负量级、旧口径是否真换了组合。2026-09-20 实测：引擎内扣税 `trades` **逐位相同**（29,668 笔），旧口径 **不同**（29,702 笔）|
 
 ### B4. 诊断
 
@@ -198,6 +200,7 @@ legacy 的「全区间三项全优（21.32 / 1.08 / −22.78）」**已作废**�
 |---|---|
 | `diag_vs_index.py` | **策略 vs 可投资指数**（关键：等权全池不可投资）★ |
 | `diag_stock_data.py` | **个股数据体检**（不可能收益 / 非正价格 / 因子 inf / 前复权 vs 不复权）★ |
+| `faber_binding_diag.py` | **Faber（MA60）门槛 binding 率**（D1，2026-09-20）：对每个调仓日比较「开/关 Faber」两套 top5。实测 **362 个调仓日里 170 天（47.0%）组合被改变**、平均每日剔除 **4.40/11 只**、**93.1%** 的日子至少剔 1 只 → **门槛很强，不能按"噪音"忽略**。产物 `results/faber_binding_diag.csv` |
 | `diag_stock_ret_clip.py` | **涨跌停截断对照**（把极端收益抹平，验证结论不翻转）⚠️ 会**低估**渐进偏差 |
 | `diag_qfq_adjust.py` | **复权口径诊断**（证明 qfq 是仿射 `bfq=k·qfq+m` + 放大倍数分布）★ |
 | `diag_qfq_impact.py` | **复权缺陷影响量化**（A现状/B只修收益/C全修正 三组对照）★ |

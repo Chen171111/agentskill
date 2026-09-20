@@ -184,7 +184,7 @@ def run(df, factor_specs, *, start, end, topk=50, hold=5, min_listed=120,
         min_amount=3e7, min_price=2.0, cost_buy=COST_BUY, cost_sell=COST_SELL,
         slippage=ENGINE_SLIPPAGE, trend_filter=False, weight_mode="equal",
         tilt_min=0.55, buffer=0.0, writeoff_factor=1.0, cond_col=None,
-        verbose=False):
+        div_tax=None, tax_rate=0.0, verbose=False):
     """调仓回测。
 
     cond_col（条件选股模式，社区策略用）
@@ -219,6 +219,24 @@ def run(df, factor_specs, *, start, end, topk=50, hold=5, min_listed=120,
     `0.0` = 假设血本无归（最保守）。真实情况介于两者之间：退市整理期已计入
     行情（跌幅已在最后收盘价里），但退市后转三板、流动性枯竭，实际变现价通常更低。
     本参数用于量化这个假设对结论的影响幅度。
+
+    div_tax / tax_rate（2026-09-20 新增，D4「引擎内扣红利税」）
+    ---------------------------------------------------------
+    **让「税后」不再需要换一份数据文件。**
+    - `div_tax`：DataFrame（列 `date, code, dps_adj`），由 `tools/build_div_tax.py` 生成 ——
+                 给出**除权日**该股「按本价格口径换算后的每股税前派现」（送转不计税）。
+    - `tax_rate`：现金分红的红利税率（0~0.2）。**`0` = 不扣税 = 默认 = 与旧版行为完全一致。**
+
+    ⚠️ **为什么必须做成「引擎内」，而不是「换一份税后价格」**：
+    原先的税后口径是 `--bars bars_total_tax10.parquet`，那份 `close` 已经按税后金额回放了分红。
+    而 `close` 会进入**价格类过滤与动量因子**（`min_price >= 2.0`、`rev20`/`rev60`、涨跌停判据）
+    → **税后版与无税版选出来的股票不一样**，于是长窗口 `税后 − 无税` 的 Δ
+    **混杂了「换了组合」的成分，不能读作「税成本」**（见 `docs/HANDOFF_项目总结与下一步.md` §5.1-7）。
+
+    引擎内扣税时**价格路径完全不变**（仍用 `bars_total`，税前）→ 两边**组合恒等**，
+    Δ 才干净地等于税负。扣税发生在**除权日**、用**该日开盘前的持仓**（= 前一日收盘持仓，
+    与「股权登记日 T−1 收盘持有者可分红」一致），直接从 `cash` 扣除。
+    口径换算（`dps_adj = D × bars_total.close(t−1)/bars_bfq.close(t−1)`）见 `tools/build_div_tax.py`。
     """
     d = df[(df.date >= start) & (df.date <= end)]
     dates = sorted(d.date.unique())
@@ -258,7 +276,15 @@ def run(df, factor_specs, *, start, end, topk=50, hold=5, min_listed=120,
     last_seen = {}
     n_writeoff = 0
     n_skip = 0                        # 因候选池过薄而未调仓的次数（原实现静默，现计数）
+    tax_paid = 0.0                    # 引擎内累计扣掉的红利税（占初始净值比）
+    n_tax_events = 0                  # 发生扣税的 (除权日 × 持仓股) 次数
     MAX_GAP = 60                      # 连续无数据超过该天数视为退市，了结头寸
+
+    # 引擎内扣税：把 div_tax 预处理成 {date: {code: dps_adj}}（tax_rate=0 时完全跳过）
+    div_by_date = {}
+    if tax_rate and div_tax is not None and len(div_tax):
+        for _dt, _g in div_tax.groupby("date", sort=False):
+            div_by_date[str(_dt)] = dict(zip(_g.code, _g.dps_adj))
 
     rebal_pos = set(range(0, len(dates) - 1, hold))
 
@@ -275,6 +301,21 @@ def run(df, factor_specs, *, start, end, topk=50, hold=5, min_listed=120,
                 cash += units.pop(c) * px * (1 - cost_sell - slippage)
                 trades.append((dt, c, "writeoff"))
                 n_writeoff += 1
+
+        # ---------- 0.5) 除权日扣红利税（引擎内；价格路径不变）----------
+        # 用**本日开盘前**的持仓（= 前一日收盘持仓），与「股权登记日 T−1 收盘持有者
+        # 才享受分红」的规则一致。只动 cash，不动 units —— 组合与无税版逐位相同。
+        if div_by_date:
+            _ev = div_by_date.get(dt)
+            if _ev:
+                for c in list(units):
+                    _dps = _ev.get(c)
+                    if _dps:
+                        _t = units[c] * _dps * tax_rate
+                        if _t > 0:
+                            cash -= _t
+                            tax_paid += _t
+                            n_tax_events += 1
 
         # ---------- 1) 开盘执行上一交易日收盘产生的信号 ----------
         if pending is not None:
@@ -373,6 +414,7 @@ def run(df, factor_specs, *, start, end, topk=50, hold=5, min_listed=120,
     eq["rate"] = eq.equity.pct_change().fillna(0.0)
     meta = {"n_writeoff": n_writeoff, "n_trades": len(trades),
             "n_skip": n_skip,
+            "tax_paid": tax_paid, "n_tax_events": n_tax_events,
             "avg_hold": float(np.mean(hold_sizes)) if hold_sizes else 0.0}
     return eq, pd.DataFrame(trades, columns=["date", "code", "side"]), meta
 
@@ -427,6 +469,12 @@ def main(argv=None) -> int:
     ap.add_argument("--with-bigorder", action="store_true",
                     help="把精灵大单因子加入组合（需 --bigorder）")
     ap.add_argument("--dump", default=None, help="把逐日净值写到该 parquet")
+    ap.add_argument("--tax-rate", type=float, default=0.0,
+                    help="现金分红红利税率（0~0.2）。**0 = 不扣税 = 默认**（与旧版行为一致）。"
+                         "引擎内扣税：价格路径不变，只在除权日从现金扣除 → "
+                         "税后与无税**组合恒等**，Δ 才可读作税成本")
+    ap.add_argument("--div-tax", default="data/stockbars/div_tax_table.parquet",
+                    help="引擎内扣税用的每股派现表（由 tools/build_div_tax.py 生成）")
     args = ap.parse_args(argv)
 
     bars = pd.read_parquet(args.bars)
@@ -461,16 +509,29 @@ def main(argv=None) -> int:
         factors = factors + list(BIGORDER_FACTORS)
     print(f"  因子: {', '.join(f for f, _ in factors)}")
 
+    div_tax = None
+    if args.tax_rate:
+        if not os.path.exists(args.div_tax):
+            raise SystemExit(
+                "--tax-rate 需要 --div-tax 指定的派现表，但未找到 {}："
+                "先跑 $PY tools/build_div_tax.py".format(args.div_tax))
+        div_tax = pd.read_parquet(args.div_tax)
+        div_tax["date"] = div_tax.date.astype(str)
+        print("引擎内扣红利税：税率 {:.0f}%，派现表 {}（{:,} 个除权日）".format(
+            args.tax_rate * 100, args.div_tax, len(div_tax)))
+
     common = dict(start=args.start, end=args.end, topk=args.topk, hold=args.hold,
                   min_listed=args.min_listed, min_amount=args.min_amount,
                   min_price=args.min_price, trend_filter=args.trend_filter,
                   weight_mode=args.weight_mode, tilt_min=args.tilt_min,
-                  buffer=args.buffer, writeoff_factor=args.writeoff_factor)
+                  buffer=args.buffer, writeoff_factor=args.writeoff_factor,
+                  div_tax=div_tax, tax_rate=args.tax_rate)
 
     print(f"\n回测 {args.start} ~ {args.end}  topk={args.topk}  "
           f"调仓({args.hold}日)  趋势过滤={args.trend_filter}  "
           f"权重={args.weight_mode}  tilt_min={args.tilt_min}  "
-          f"buffer={args.buffer}  退市处置价×{args.writeoff_factor}")
+          f"buffer={args.buffer}  退市处置价×{args.writeoff_factor}  "
+          f"红利税率={args.tax_rate*100:.0f}%")
     print("=" * 104)
 
     eq, tr, meta = run(df, factors, **common)

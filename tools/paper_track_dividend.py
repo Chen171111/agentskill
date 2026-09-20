@@ -83,6 +83,31 @@ def _save_anchor(d: dict) -> None:
     ANCHOR.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _check_anchor_mode(adj_mode: str) -> None:
+    """口径守卫（2026-09-20 新增）：已有 anchor 的口径必须与本次一致。
+
+    ⚠️ **必须在构建面板之前调用** —— 面板要跑 3 分钟，白跑一次代价太大。
+
+    为什么需要这道守卫：`--adj-mode` 必传（`require_adj_mode` 缺参即 raise）只能防
+    「忘记透传」，**防不了「产物没有溯源信息」**。首期名单恰恰就是 legacy、
+    而期间口径已切到 correct（2026-09-20 实测：legacy 20/20 命中，correct 仅 16/20），
+    于是整段「纸面跟踪」跟踪的是**另一个策略**。
+    详见 `state/paper_tracking/_legacy_20260915/README.md`。
+    """
+    a = _load_anchor()
+    a_mode = a.get("adj_mode") if a else None
+    if a and a_mode and a_mode != adj_mode:
+        raise SystemExit(
+            "❌ 口径不符：anchor 建立于 `{}`，本次传的是 `{}`。\n"
+            "   跟踪名单必须同口径，否则结论不可比。\n"
+            "   要换口径 → 先归档旧名单，再重设 anchor（见 docs/HANDOFF §4.7.1）。"
+            .format(a_mode, adj_mode))
+    if a and not a_mode:
+        print("  ⚠️ anchor 未记录口径（旧格式）→ 本次按 `{}` 继续，"
+              "但**无法确认历史名单的口径**（见 state/paper_tracking/_legacy_20260915/）"
+              .format(adj_mode))
+
+
 def _build(args):
     ns = SimpleNamespace(bars=args.bars, bfq=args.bfq, dividends=args.dividends,
                          universe=args.universe, min_listed=MIN_LISTED,
@@ -142,6 +167,7 @@ def _record(date: str, picks, args) -> Path:
     w = 1.0 / max(len(picks), 1)
     rows = [{"date": date, "code": c, "weight": round(w, 6),
              "dy_ttm": round(float(dy), 4), "ind_l1": ind,
+             "adj_mode": args.adj_mode,           # ← 口径写进产物（防不可溯源）
              "capital_wan": CAPITAL_WAN, "ticket": round(CAPITAL_WAN * 1e4 * w, 2)}
             for c, dy, ind in picks]
     out = TRACK_DIR / "selection_{}.csv".format(date)
@@ -237,6 +263,9 @@ def main(argv=None) -> int:
     if args.report:
         return _report(args)
 
+    # 口径守卫：**先于面板构建**（面板要跑 3 分钟，白跑代价太大）
+    _check_anchor_mode(args.adj_mode)
+
     df = _build(args)
     _check_freshness(df)
     dates = sorted(df.date.unique())
@@ -245,9 +274,11 @@ def main(argv=None) -> int:
     anchor = _load_anchor()
     if not anchor:
         anchor = {"start": today, "hold": HOLD,
+                  "adj_mode": args.adj_mode,        # ← 记录口径
                   "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         _save_anchor(anchor)
-        print("\n  📌 首次运行 → 建立跟踪起点 anchor = {}".format(today))
+        print("\n  📌 首次运行 → 建立跟踪起点 anchor = {}（口径 {}）".format(
+            today, args.adj_mode))
 
     start = anchor.get("start", today)
     if start not in dates:

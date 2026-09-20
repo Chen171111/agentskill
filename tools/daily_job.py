@@ -27,10 +27,26 @@
 用法：
     E:\\Python32\\python.exe tools/daily_job.py             # 计划运行（或手动补跑整条链路）
     E:\\Python32\\python.exe tools/daily_job.py --manual    # 调试 / 额外重跑
+
+**连接类失败的限窗重试**（2026-09-20 新增，D5）
+----------------------------------------------
+历史失败里最常见的一类就是「同花顺客户端没开 / 没登录 / 被最小化」
+（09-14 / 09-15 / 09-16 连续三天栽在这上面）。这类失败**是可自愈的**
+—— 人把窗口点出来就行 —— 但无人值守时没人点，于是白丢一个交易日。
+
+于是：这类失败会**在收盘前的窄窗口内自动重试**（`_RETRY_MAX` 次、`_RETRY_GAP_SEC` 间隔，
+14:50 起 → 14:52 / 14:54 / 14:56）。
+
+- **只重试「连接同花顺」这一类**：别的失败（选股报错 / 数据陈旧 / 对账失败）
+  重试也不会变好 → 立刻放弃，避免用重试掩盖真问题。
+- **收盘后绝不重试**（窗口上限 `_RETRY_WINDOW_END` = 14:56）：
+  15:00 之后既无法按当日价成交，又平白增加「重复下单」的风险。
+- 尝试次数写进 `last_run.json` 的 `attempts` 字段，事后可查。
 """
 import json
 import subprocess
 import sys
+import time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -56,6 +72,20 @@ _HINTS = {
 
 # ⚠️ 只认这两个参数。**任何别的参数一律拒绝执行** —— 见 main() 开头的守卫。
 _ALLOWED_ARGS = {"--manual", "--simulate-failure"}
+
+# ---- 连接类失败的「限窗重试」（2026-09-20 新增，D5）----
+# 历史失败里最常见的一类就是「同花顺客户端没开 / 没登录 / 被最小化」
+# （09-14 / 09-15 / 09-16 连续三天栽在这上面）。这类失败是**可自愈**的
+# —— 人把窗口点出来就行 —— 但无人值守时没人点，于是白丢一个交易日。
+#
+# 因此：在**收盘前**的窄窗口内自动重试。**收盘后绝不重试** ——
+# 15:00 之后重试既无法按当日价成交，又平白增加「重复下单」的风险。
+_RETRY_MAX = 3
+_RETRY_GAP_SEC = 120            # 每 2 分钟一次：14:50 起 → 14:52 / 14:54 / 14:56
+_RETRY_WINDOW_END = (14, 56)    # 当天该时刻之后不再重试
+# 只有这些字样才算「连接类失败」——别的失败（选股报错/数据陈旧/对账失败）
+# 重试也不会变好，直接放弃，避免掩盖真问题。
+_RETRY_KEYWORDS = ("同花顺连接失败", "网上股票交易系统", "交易窗口")
 
 
 def _log_offset():
@@ -86,6 +116,42 @@ def _hint_for(tail: str) -> str:
     return "查看 state/daily_run.log 尾部定位原因"
 
 
+def _in_retry_window(now=None) -> bool:
+    """现在是否还在「收盘前」的重试窗口内。
+
+    对**手动运行**同样适用 —— 收盘后重试一样无意义（没法按当日价成交）。
+    """
+    now = now or datetime.now()
+    return (now.hour, now.minute) < _RETRY_WINDOW_END
+
+
+def _is_conn_failure(tail: str) -> bool:
+    """失败是否属于「连接同花顺」这一类 —— **只有这类值得重试**。"""
+    return any(k in tail for k in _RETRY_KEYWORDS)
+
+
+def _run_once(argv, selftest: bool):
+    """执行一次 `main.py simulate --ths`。返回 (rc, captured_lines, err)。"""
+    rc, err, captured = 1, "", []
+    if selftest:
+        print("[daily_job] SELF-TEST 模拟失败（未执行真实交易）")
+        return rc, captured, "self-test: 模拟失败，用于验证告警链路"
+    try:
+        # 自己捕获子进程输出：既转发到 stdout（bat 会重定向进日志），
+        # 又留在内存里做结果摘要 —— 这样无论谁调用本脚本，摘要都可靠。
+        proc = subprocess.Popen(
+            argv, cwd=str(ROOT), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True,
+            encoding="utf-8", errors="ignore", bufsize=1)
+        for line in proc.stdout:
+            print(line, end="")
+            captured.append(line.rstrip("\n"))
+        rc = proc.wait()
+    except Exception:
+        err = traceback.format_exc(limit=3)
+    return rc, captured, err
+
+
 def main():
     STATE.mkdir(parents=True, exist_ok=True)
 
@@ -105,7 +171,6 @@ def main():
 
     argv = [sys.executable, str(ROOT / "main.py"), "simulate", "--ths"]
     started = datetime.now()
-    offset = _log_offset()
 
     # --manual：手动 / 额外运行 → 状态与告警写**独立文件**，
     # 不覆盖计划运行的健康记录（见模块 docstring 的「计划运行 vs 手动运行」）。
@@ -117,26 +182,33 @@ def main():
     # （报警器要定期按一下，否则坏掉了也不知道）
     selftest = "--simulate-failure" in sys.argv
 
-    rc = 1
-    err = ""
-    captured = []
-    if selftest:
-        err = "self-test: 模拟失败，用于验证告警链路"
-        print("[daily_job] SELF-TEST 模拟失败（未执行真实交易）")
-    else:
-        try:
-            # 自己捕获子进程输出：既转发到 stdout（bat 会重定向进日志），
-            # 又留在内存里做结果摘要 —— 这样无论谁调用本脚本，摘要都可靠。
-            proc = subprocess.Popen(
-                argv, cwd=str(ROOT), stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT, text=True,
-                encoding="utf-8", errors="ignore", bufsize=1)
-            for line in proc.stdout:
-                print(line, end="")
-                captured.append(line.rstrip("\n"))
-            rc = proc.wait()
-        except Exception:
-            err = traceback.format_exc(limit=3)
+    # ── 执行：连接类失败 → **收盘前限窗重试**（见文件顶部的 `_RETRY_*` 说明）──
+    rc, err, captured = 1, "", []
+    n_attempt = 0
+    for k in range(_RETRY_MAX + 1):
+        n_attempt = k + 1
+        if k:
+            print("\n[daily_job] ===== 重试 {}/{} =====".format(k, _RETRY_MAX))
+        offset = _log_offset()          # 每次都是新的一段日志
+        rc, captured, err = _run_once(argv, selftest)
+        if rc == 0 or selftest:
+            break
+        if k == _RETRY_MAX:
+            print("[daily_job] 已达最大尝试次数 {}，放弃重试".format(n_attempt))
+            break
+        _tail_k = ("\n".join([l for l in captured if l.strip()][-40:])
+                   or _read_since(offset))
+        if not _is_conn_failure(_tail_k):
+            print("[daily_job] 非「连接同花顺」类失败 → **不重试**（重试不会变好）")
+            break
+        if not _in_retry_window():
+            print("[daily_job] 已过重试窗口 {:02d}:{:02d} → **不重试**"
+                  "（收盘后重试无法按当日价成交，且有重复下单风险）".format(
+                      *_RETRY_WINDOW_END))
+            break
+        print("[daily_job] 连接类失败，{} 秒后重试（第 {} / {} 次）…".format(
+            _RETRY_GAP_SEC, k + 1, _RETRY_MAX))
+        time.sleep(_RETRY_GAP_SEC)
 
     tail = "\n".join([l for l in captured if l.strip()][-40:]) or _read_since(offset)
     ok = (rc == 0)
@@ -147,6 +219,7 @@ def main():
         "mode": "manual" if manual else "scheduled",
         "ok": ok,
         "exit_code": rc,
+        "attempts": n_attempt,          # 实际尝试次数（>1 说明发生过重试）
         "cmd": "main.py simulate --ths",
         "rebalanced": ("非调仓日" not in tail) if ok else None,
         "summary": next((l.strip() for l in reversed(tail.splitlines())
