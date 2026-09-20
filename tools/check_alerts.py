@@ -33,6 +33,9 @@ ALERT_MANUAL = STATE / "ALERT_manual.txt"
 # ⚠️ 与 ALERT.txt **分开**：ALERT 会被 daily_job 的「成功」路径清除，
 #    而数据问题不该因为「下单成功」就被掩盖。
 DATA_ALERT = STATE / "DATA_ALERT.txt"
+# 周度数据任务告警（由 tools/weekly_data.py 写；分红/行业/指数三份数据）。
+# 同样**独立** —— 周度任务成功也不该掩盖每日体检的问题，反之亦然。
+WEEKLY_ALERT = STATE / "WEEKLY_ALERT.txt"
 
 # 计划任务设定：周一~周五 14:50，留出运行时间，15:10 之后判定"今天还没跑"
 RUN_HHMM = (14, 50)
@@ -101,6 +104,14 @@ def main():
         problems.append("存在**数据体检**告警 state/DATA_ALERT.txt")
         try:
             notes.append(DATA_ALERT.read_text(encoding="utf-8", errors="ignore")[:1500])
+        except Exception:
+            pass
+
+    if WEEKLY_ALERT.exists():
+        problems.append("存在**周度数据任务**告警 state/WEEKLY_ALERT.txt"
+                        "（分红/行业/指数刷新失败 → 个股线数据会滞后）")
+        try:
+            notes.append(WEEKLY_ALERT.read_text(encoding="utf-8", errors="ignore")[:1500])
         except Exception:
             pass
 
