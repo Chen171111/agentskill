@@ -27,6 +27,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+import argparse  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
@@ -39,65 +40,87 @@ TREND_WINDOW = 60
 MOM_WINDOW = 20
 START, END = "20190101", "20260911"
 
-codes = config.RECOMMENDED_POOLS[POOL]
-fr = {}
-for c in codes:
-    p = os.path.join(ROOT, "data", "stocks", "{}.csv".format(c))
-    if not os.path.exists(p):
-        print("  ⚠️ 缺 {}", p)
-        continue
-    d = pd.read_csv(p, dtype={"date": str}, usecols=["date", "close"])
-    fr[c] = d.set_index("date")["close"].astype(float)
-px = pd.DataFrame(fr).sort_index()
-px = px[(px.index >= START) & (px.index <= END)]
-print("池 {} ｜ {} 只 ｜ {} ~ {} ｜ {} 个交易日".format(
-    POOL, px.shape[1], px.index.min(), px.index.max(), len(px)))
 
-ma = px.rolling(TREND_WINDOW).mean()
-mom = px.pct_change(MOM_WINDOW)
-valid = mom.notna() & ma.notna()
-below = (px <= ma) & valid                    # 被 Faber 剔除
-n_below = below.sum(axis=1)
+def main(argv=None) -> int:
+    # ⚠️ 2026-09-21 新增 argparse：原来本脚本**没有命令行接口** ——
+    #    传 `--help` 不会打帮助，而是**直接开跑完整诊断**（静默忽略该参数）。
+    #    参数默认值与原模块常量完全一致 → 不带参数运行时结果不变。
+    ap = argparse.ArgumentParser(
+        description="Faber 趋势门槛 binding 率诊断（开/关 MA60 门槛的两套 top-k 对比）")
+    ap.add_argument("--pool", default=POOL, help="config.RECOMMENDED_POOLS 里的池名")
+    ap.add_argument("--top-k", type=int, default=TOP_K)
+    ap.add_argument("--rebalance", type=int, default=REBALANCE)
+    ap.add_argument("--trend-window", type=int, default=TREND_WINDOW,
+                    help="趋势均线窗口（默认 60）")
+    ap.add_argument("--mom-window", type=int, default=MOM_WINDOW)
+    ap.add_argument("--start", default=START)
+    ap.add_argument("--end", default=END)
+    ap.add_argument("--out", default="results/faber_binding_diag.csv")
+    args = ap.parse_args(argv)
+    codes = config.RECOMMENDED_POOLS[args.pool]
+    fr = {}
+    for c in codes:
+        p = os.path.join(ROOT, "data", "stocks", "{}.csv".format(c))
+        if not os.path.exists(p):
+            print("  ⚠️ 缺 {}".format(p))
+            continue
+        d = pd.read_csv(p, dtype={"date": str}, usecols=["date", "close"])
+        fr[c] = d.set_index("date")["close"].astype(float)
+    px = pd.DataFrame(fr).sort_index()
+    px = px[(px.index >= args.start) & (px.index <= args.end)]
+    print("池 {} ｜ {} 只 ｜ {} ~ {} ｜ {} 个交易日".format(
+        args.pool, px.shape[1], px.index.min(), px.index.max(), len(px)))
 
-print("\n=== 每日被 MA60 剔除的标的数（池内 {} 只）===".format(px.shape[1]))
-vc = n_below[valid.any(axis=1)].value_counts().sort_index()
-for k, v in vc.items():
-    print("  剔除 {:>2} 只：{:>4} 天（{:>5.1f}%）".format(
-        k, v, v / vc.sum() * 100))
-print("  平均剔除 {:.2f} 只 ｜ 中位 {:.0f} 只 ｜ 至少剔 1 只的天数占 {:.1f}%".format(
-    n_below[valid.any(axis=1)].mean(), n_below[valid.any(axis=1)].median(),
-    (n_below[valid.any(axis=1)] >= 1).mean() * 100))
+    ma = px.rolling(args.trend_window).mean()
+    mom = px.pct_change(args.mom_window)
+    valid = mom.notna() & ma.notna()
+    below = (px <= ma) & valid                    # 被 Faber 剔除
+    n_below = below.sum(axis=1)
 
-# ── binding 率：只在调仓日比较两套 top5 ──
-idx = list(px.index[valid.any(axis=1)])
-rebal_days = idx[::REBALANCE]
-same = diff = n_filtered_top = 0
-rows = []
-for dt in rebal_days:
-    row = mom.loc[dt].where(valid.loc[dt]).dropna().sort_values(ascending=False)
-    if len(row) == 0:
-        continue
-    top_off = list(row.index[:TOP_K])
-    ok_codes = [c for c in row.index if not bool(below.loc[dt, c])]
-    top_on = ok_codes[:TOP_K]
-    eq = (top_off == top_on)
-    same += int(eq)
-    diff += int(not eq)
-    if set(top_off) - set(top_on):
-        n_filtered_top += 1
-    rows.append({"date": dt, "n_below": int(below.loc[dt].sum()),
-                 "n_cand_on": len(ok_codes), "same": eq})
-r = pd.DataFrame(rows)
-tot = len(r)
-print("\n=== binding 诊断（{} 个调仓日）===".format(tot))
-print("  两套 top5 **完全相同** : {:>4} 天（{:>5.1f}%）".format(same, same / tot * 100))
-print("  两套 top5 **不同**     : {:>4} 天（{:>5.1f}%）  ← 门槛真正生效".format(
-    diff, diff / tot * 100))
-print("  被剔的标的**落进了 top5**（真正改了组合）: {:>4} 天（{:>5.1f}%）".format(
-    n_filtered_top, n_filtered_top / tot * 100))
-print("\n  开 Faber 后候选数 < {} 的天数: {}".format(
-    TOP_K, int((r.n_cand_on < TOP_K).sum())))
-print("  开 Faber 后候选数 == 0 的天数: {}".format(int((r.n_cand_on == 0).sum())))
-r.to_csv(os.path.join(ROOT, "results", "faber_binding_diag.csv"),
-         index=False, encoding="utf-8-sig")
-print("\n  明细已写出 results/faber_binding_diag.csv")
+    print("\n=== 每日被 MA60 剔除的标的数（池内 {} 只）===".format(px.shape[1]))
+    vc = n_below[valid.any(axis=1)].value_counts().sort_index()
+    for k, v in vc.items():
+        print("  剔除 {:>2} 只：{:>4} 天（{:>5.1f}%）".format(
+            k, v, v / vc.sum() * 100))
+    print("  平均剔除 {:.2f} 只 ｜ 中位 {:.0f} 只 ｜ 至少剔 1 只的天数占 {:.1f}%".format(
+        n_below[valid.any(axis=1)].mean(), n_below[valid.any(axis=1)].median(),
+        (n_below[valid.any(axis=1)] >= 1).mean() * 100))
+
+    # ── binding 率：只在调仓日比较两套 top5 ──
+    idx = list(px.index[valid.any(axis=1)])
+    rebal_days = idx[::args.rebalance]
+    same = diff = n_filtered_top = 0
+    rows = []
+    for dt in rebal_days:
+        row = mom.loc[dt].where(valid.loc[dt]).dropna().sort_values(ascending=False)
+        if len(row) == 0:
+            continue
+        top_off = list(row.index[:args.top_k])
+        ok_codes = [c for c in row.index if not bool(below.loc[dt, c])]
+        top_on = ok_codes[:args.top_k]
+        eq = (top_off == top_on)
+        same += int(eq)
+        diff += int(not eq)
+        if set(top_off) - set(top_on):
+            n_filtered_top += 1
+        rows.append({"date": dt, "n_below": int(below.loc[dt].sum()),
+                     "n_cand_on": len(ok_codes), "same": eq})
+    r = pd.DataFrame(rows)
+    tot = len(r)
+    print("\n=== binding 诊断（{} 个调仓日）===".format(tot))
+    print("  两套 top5 **完全相同** : {:>4} 天（{:>5.1f}%）".format(same, same / tot * 100))
+    print("  两套 top5 **不同**     : {:>4} 天（{:>5.1f}%）  ← 门槛真正生效".format(
+        diff, diff / tot * 100))
+    print("  被剔的标的**落进了 top5**（真正改了组合）: {:>4} 天（{:>5.1f}%）".format(
+        n_filtered_top, n_filtered_top / tot * 100))
+    print("\n  开 Faber 后候选数 < {} 的天数: {}".format(
+        args.top_k, int((r.n_cand_on < args.top_k).sum())))
+    print("  开 Faber 后候选数 == 0 的天数: {}".format(int((r.n_cand_on == 0).sum())))
+    r.to_csv(os.path.join(ROOT, args.out),
+             index=False, encoding="utf-8-sig")
+    print("\n  明细已写出 " + args.out)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

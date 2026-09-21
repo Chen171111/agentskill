@@ -51,6 +51,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -62,33 +63,58 @@ import config  # noqa: E402
 import dataprovider.adjust as adjust  # noqa: E402
 import dataprovider.store as store_mod  # noqa: E402
 
-if len(sys.argv) < 2:
-    print(__doc__)
-    print("用法: python tools/probe_split_thresh.py <thresh>   （如 0.25）")
-    sys.exit(2)
 
-thresh = float(sys.argv[1])
-
-
-def _patched_repair_frame(d, code="", log_path=None):
+def _make_patched_repair_frame(thresh):
     """绕开 `adjust.repair_frame` 的默认参数绑定。
 
     ⚠️ Python 的默认参数在**函数定义时**求值，所以改 `adjust.THRESH` 不会影响
     `repair_frame(d, code, thresh=THRESH, ...)` 的默认值；必须替换
     `store` 命名空间里绑定的那个函数对象。
+
+    ⚠️ 2026-09-21：原来是个**闭包**，直接捕获模块全局的 `thresh` —— 那要求
+    `thresh` 必须存在于模块层，也就逼着整个脚本写在模块层（`--help` 会直接开跑）。
+    改成**工厂函数**：`thresh` 显式传入，闭包捕获的是参数，模块层不再需要 `thresh`。
     """
-    return adjust.repair_frame(d, code, thresh=thresh, log_path=None)
+    def _patched_repair_frame(d, code="", log_path=None):
+        return adjust.repair_frame(d, code, thresh=thresh, log_path=None)
+    return _patched_repair_frame
 
 
-store_mod.repair_frame = _patched_repair_frame
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(
+        description="复权阈值对照探针（同一份文件、只切换判定阈值 THRESH）")
+    # ⚠️ **位置参数保持可用** —— `docs/ETF线_复权阈值缺陷.md` 里有两条现成命令：
+    #     `$PY -u tools/probe_split_thresh.py 0.35` / `... 0.1995`
+    #     所以用 `nargs="?"`，不改成 `--thresh`。
+    ap.add_argument("thresh", nargs="?", type=float, default=None,
+                    help="判定阈值（如 0.35 / 0.1995 / 0.25）")
+    ap.add_argument("--start", default="20190101")
+    ap.add_argument("--end", default="20260911")
+    ap.add_argument("--topk", type=int, default=5)
+    ap.add_argument("--rebalance", type=int, default=5)
+    args = ap.parse_args(argv)
 
-from pipeline import run_backtest  # noqa: E402
+    # ⚠️ 保留原行为：**不给阈值**时打用法并退出 2（不是拿默认值跑）
+    if args.thresh is None:
+        print(__doc__)
+        print("用法: python tools/probe_split_thresh.py <thresh>   （如 0.25）")
+        return 2
 
-codes = list(config.RECOMMENDED_POOLS["ETF全球"])
-out = run_backtest(codes, strategy="etf_rotation", start="20190101",
-                   end="20260911", topk=5, rebalance=5)
-m = out["metrics"]
-print("RESULT " + json.dumps(
-    {"thresh": thresh,
-     **{k: (float(v) if isinstance(v, (int, float)) else v) for k, v in m.items()}},
-    ensure_ascii=False))
+    store_mod.repair_frame = _make_patched_repair_frame(args.thresh)
+
+    from pipeline import run_backtest  # noqa: E402  （必须在 monkey-patch 之后）
+
+    codes = list(config.RECOMMENDED_POOLS["ETF全球"])
+    out = run_backtest(codes, strategy="etf_rotation", start=args.start,
+                       end=args.end, topk=args.topk, rebalance=args.rebalance)
+    m = out["metrics"]
+    print("RESULT " + json.dumps(
+        {"thresh": args.thresh,
+         **{k: (float(v) if isinstance(v, (int, float)) else v)
+            for k, v in m.items()}},
+        ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
