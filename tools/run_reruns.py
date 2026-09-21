@@ -386,9 +386,28 @@ def main(argv=None) -> int:
                     verified = []
             if verified:
                 allok = all(r["verdict"] == "OK_NO_RERUN" for _, r in verified)
+                # ⚠️ 2026-09-21 修：凭证**只覆盖它比对过的那些输入**，
+                #    不能拿它给**全部** INPUTS 背书。
+                #    实测踩过：另一会话给 INPUTS 加了 `DIV_TAX`（引擎内扣税表），
+                #    凭证只覆盖 3 个 bars 文件 → 却打出「不必重跑」的**总担保**，
+                #    而实际上有 273 分钟的步骤是因为 `DIV_TAX` 才显示待跑的。
+                covered: set[str] = set()
+                for _k, r in verified:
+                    # ⚠️ 必须**归一化路径分隔符**：凭证里存的是 `os.path.relpath` 的
+                    #    Windows 反斜杠（`data\stockbars\x.parquet`），而 `INPUTS` 用的是
+                    #    正斜杠 → 直接比集合会**全部判为未覆盖**（2026-09-21 实测踩过）。
+                    for c in r.get("covers", [r["new"]]):
+                        covered.add(str(c).replace("\\", "/"))
+                uncovered = [p for p in INPUTS if p.replace("\\", "/") not in covered]
                 print()
-                if allok:
+                if allok and not uncovered:
                     print("  ✅ **已复核：窗口内收益率逐位一致 → 这些「待跑」是 mtime 误报，不必重跑**")
+                elif allok:
+                    print("  ⚠️ **部分覆盖** —— 已复核的输入窗口内收益率未变，"
+                          "但 `INPUTS` 里还有**未被凭证覆盖**的：")
+                    for p in uncovered:
+                        print(f"       · {p}")
+                    print("     → 上面这些输入的变更**凭证管不着**，所以「待跑」**未必**全是误报，需自行判断。")
                 else:
                     print("  ⚠️ **已复核：窗口内历史被改写 → 必须整批重跑**")
                 for kind, r in verified:

@@ -407,6 +407,65 @@ def _panel_cache_atomic():
     assert "样本不足" in mon, "monitor_factors.py 缺少「样本不足」的显式提示"
 
 
+@check("稳定性", "代码里不许硬编码【本仓库】的绝对路径（公开仓库的可复现性）")
+def _no_hardcoded_repo_path():
+    """⚠️ 2026-09-21 新增。
+
+    仓库是**公开**的、且对外承诺「clone 下来能跑」。代码里写死
+    `ROOT = r"E:\\MyWorkAndProject\\量化\\agentskill"` 在本机能跑，
+    换台机器就指向不存在的目录 —— 而且**比"报错"更糟**：
+    它通常表现为「静默用了错误的路径」或「明明算了 ROOT 又被覆盖」。
+
+    实测踩过（2026-09-21 自检发现 **2 个文件**）：
+    `tools/verify_div_tax.py` / `tools/faber_binding_diag.py` —— 两份都是
+    先算好了 `ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))`，
+    **后面又被一行 `ROOT = r"E:\\..."` 覆盖掉**，还附带重复的 `import os/sys`。
+
+    ⚠️ **只查代码，不查 docstring** —— 用法示例里写作者机器的路径是**说明性**的，
+    不参与运行（`tools/README.md` 顶部也明说了 PY 是作者环境）。
+    做法：AST 里把「模块/函数/类的首条字符串语句」（即 docstring）排除掉。
+    ⚠️ **放行解释器路径**（`E:\\Python` / `E:\\Python32`）—— 那是**运维说明**，
+    本项目的三 Python 分工是硬约束，不属"仓库位置"。
+    """
+    import ast
+    import re
+
+    repo = os.path.basename(ROOT)                       # 例：agentskill
+    pat = re.compile(r"(?:[A-Za-z]:[\\/]|/)[^\s'\"]*" + re.escape(repo), re.I)
+    allow = re.compile(r"[A-Za-z]:[\\/](?:Python|Python32|Python3\d*)[\\/]", re.I)
+
+    def docstring_ids(tree):
+        ids = set()
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.Module, ast.FunctionDef,
+                              ast.AsyncFunctionDef, ast.ClassDef)):
+                body = getattr(n, "body", None)
+                if body and isinstance(body[0], ast.Expr) \
+                        and isinstance(body[0].value, ast.Constant) \
+                        and isinstance(body[0].value.value, str):
+                    ids.add(id(body[0].value))
+        return ids
+
+    bad = []
+    for fn in sorted(os.listdir(os.path.join(ROOT, "tools"))):
+        if not fn.endswith(".py"):
+            continue
+        path = os.path.join(ROOT, "tools", fn)
+        try:
+            tree = ast.parse(open(path, encoding="utf-8").read())
+        except SyntaxError as e:
+            bad.append(f"tools/{fn}: 语法错误 {e}")
+            continue
+        ds = docstring_ids(tree)
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Constant) and isinstance(n.value, str) \
+                    and id(n) not in ds:
+                if pat.search(n.value) and not allow.search(n.value):
+                    bad.append(f"tools/{fn}:{n.lineno}  {n.value[:60]!r}")
+    assert not bad, ("以下代码里硬编码了本仓库的绝对路径（换机器即失效；"
+                     "用法示例请放进 docstring）：\n  " + "\n  ".join(bad))
+
+
 @check("稳定性", "run_reruns 的步骤产物路径与文档口径一致")
 def _reruns_consistent():
     from tools.run_reruns import STEPS

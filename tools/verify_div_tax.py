@@ -12,16 +12,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-import os
-import sys
-
-sys.path.insert(0, r"E:\MyWorkAndProject\量化\agentskill")
 
 import pandas as pd  # noqa: E402
 
 from tools.backtest_stock import build_features, run, metrics  # noqa: E402
 
-ROOT = r"E:\MyWorkAndProject\量化\agentskill"
 BARS = os.path.join(ROOT, "data/stockbars/bars_total.parquet")
 BARS_TAX = os.path.join(ROOT, "data/stockbars/bars_total_tax10.parquet")
 UNI = os.path.join(ROOT, "data/stockbars/universe_all.csv")

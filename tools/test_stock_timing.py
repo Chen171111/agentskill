@@ -110,7 +110,8 @@ def main(argv=None) -> int:
     ap.add_argument("--bars", required=True)
     ap.add_argument("--universe", default=None)
     ap.add_argument("--etf-dir",
-                    default="E:/MyWorkAndProject/量化/agentskill/data/stocks")
+                    default="data/stocks",
+                    help="ETF 日线目录（仓库内相对路径；原来硬编码了作者机器的绝对路径）")
     ap.add_argument("--out", default="results/stock_timing.csv")
     args = ap.parse_args(argv)
 

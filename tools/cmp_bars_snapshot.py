@@ -159,6 +159,11 @@ def main(argv=None) -> int:
         "until": until,
         "old": os.path.relpath(args.old, ROOT),
         "new": os.path.relpath(new, ROOT),
+        # ⚠️ 2026-09-21 新增：**本凭证只覆盖它比对过的这些输入**。
+        #    别拿它给 `run_reruns.py` 的**全部** `INPUTS` 背书 ——
+        #    实测踩过：`INPUTS` 后来加了 `DIV_TAX`，凭证管不着它，
+        #    但 `--list` 当时仍打出「不必重跑」的总担保（已修）。
+        "covers": [os.path.relpath(new, ROOT)],
         "new_size": os.path.getsize(new),
         "new_mtime": int(os.path.getmtime(new)),
         "rows_compared": int(len(both)),
