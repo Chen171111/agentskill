@@ -25,10 +25,28 @@ class PortfolioAccount:
         pos = self.positions.get(code)
         return pos["cost"] if pos else 0.0
 
+    def position_price(self, code: str, prices: dict) -> float:
+        """该标的的计价用价：本地行情价 → 持仓自带 mark → 0。
+
+        ⚠️ 为什么需要「mark」兜底（2026-09-21 修复）
+        -------------------------------------------
+        策略池只有 11 只 ETF，`prices` 里不含账户中**人工买入的个股**。
+        原实现 `prices.get(code, 0.0)` 会把这类持仓按 **0 元**计价 →
+        总资产虚低（实测真实 190,912.44 vs 算出 102,904.44，虚低 46%），
+        进而污染净值序列、缩小按 equity 计算的仓位、并让回撤熔断把
+        「净值腰斩」误判成巨亏而清仓。
+        mark 由 `UiaThsBroker.reconcile()` 用同花顺持仓表的「市价」列写入。
+        """
+        px = prices.get(code)
+        if px:
+            return float(px)
+        pos = self.positions.get(code)
+        return float(pos.get("mark") or 0.0) if pos else 0.0
+
     def market_value(self, prices: dict) -> float:
         mv = 0.0
         for code, pos in self.positions.items():
-            mv += pos["qty"] * prices.get(code, 0.0)
+            mv += pos["qty"] * self.position_price(code, prices)
         return mv
 
     def total_equity(self, prices: dict) -> float:
@@ -49,6 +67,8 @@ class PortfolioAccount:
             "qty": new_qty,
             "cost": new_cost,
             "peak": max(pos["peak"], price),
+            # mark 保留（成交价即最新价；无成交价时沿用旧值，留给 reconcile 刷新）
+            "mark": float(price or pos.get("mark") or 0.0),
         }
         if new_qty <= 0:
             del self.positions[code]
@@ -69,6 +89,8 @@ class PortfolioAccount:
 
     def snapshot(self, prices: dict) -> dict:
         """输出账户快照。"""
+        def _px(c):
+            return self.position_price(c, prices)
         return {
             "cash": self.cash,
             "frozen": self.frozen,
@@ -77,8 +99,8 @@ class PortfolioAccount:
             "positions": [
                 {"code": c, "qty": p["qty"], "cost": round(p["cost"], 4),
                  "peak": round(p["peak"], 4),
-                 "price": prices.get(c, 0.0),
-                 "pct": (prices.get(c, 0.0) / p["cost"] - 1.0) if p["cost"] > 0 else 0.0}
+                 "price": _px(c),
+                 "pct": (_px(c) / p["cost"] - 1.0) if p["cost"] > 0 else 0.0}
                 for c, p in self.positions.items() if p["qty"] > 0
             ],
         }
