@@ -466,6 +466,56 @@ def _no_hardcoded_repo_path():
                      "用法示例请放进 docstring）：\n  " + "\n  ".join(bad))
 
 
+@check("稳定性", "可执行脚本必须有 `if __name__ == \"__main__\"` 守卫")
+def _exec_scripts_have_main_guard():
+    """⚠️ 2026-09-21 新增，起因是一次实测（见 HANDOFF §5.1 第 21 条）。
+
+    `tools/` 下有脚本把**全部工作写在模块层**，既没有 `main()` 也没有 `__main__` 守卫。
+    后果有两条，都是静默的：
+    1. **`--help` 不会打帮助，而是直接开跑**（实测 `verify_div_tax.py` 27 秒仍未返回）；
+    2. **`import tools.xxx` 会触发一次完整回测**（隐性副作用）。
+
+    **怎么区分"可执行脚本"与"库模块"**：用**是否被别人 import** 自动推导 ——
+    被 `from tools.X import ...` / `import tools.X` 引用过的是库模块（如
+    `costs` / `panel_cache` / `progress` / `stats_lite`），**不要求**守卫；
+    其余一律视为可执行脚本，**必须有**守卫。这样白名单不用手工维护。
+    """
+    import ast
+    import re
+
+    tdir = os.path.join(ROOT, "tools")
+    names = [f for f in os.listdir(tdir) if f.endswith(".py")]
+    # 全仓库扫「谁被 import 了」——范围含仓库根、dataprovider/、trader/，避免漏判
+    roots = [ROOT, os.path.join(ROOT, "tools"),
+             os.path.join(ROOT, "dataprovider"), os.path.join(ROOT, "trader")]
+    imported = set()
+    for d in roots:
+        if not os.path.isdir(d):
+            continue
+        for f in os.listdir(d):
+            if not f.endswith(".py"):
+                continue
+            try:
+                s = open(os.path.join(d, f), encoding="utf-8").read()
+            except OSError:
+                continue
+            imported.update(re.findall(
+                r"(?:from|import)\s+tools\.([A-Za-z_][A-Za-z0-9_]*)", s))
+
+    bad = []
+    for fn in sorted(names):
+        if fn[:-3] in imported:                 # 库模块，豁免
+            continue
+        tree = ast.parse(open(os.path.join(tdir, fn), encoding="utf-8").read())
+        guard = any(isinstance(n, ast.If) and "main" in ast.dump(n.test)
+                    for n in tree.body)
+        if not guard:
+            bad.append(fn)
+    assert not bad, (
+        "这些可执行脚本没有 `if __name__ == \"__main__\":` 守卫"
+        "（`--help` 会直接开跑、`import` 有副作用）：\n  " + "\n  ".join(bad))
+
+
 @check("稳定性", "run_reruns 的步骤产物路径与文档口径一致")
 def _reruns_consistent():
     from tools.run_reruns import STEPS
@@ -662,6 +712,115 @@ def _data_sane():
     assert int((b.close <= 0).sum()) == 0, "存在非正收盘价"
     if "amount" in b.columns:
         assert int((b.amount.fillna(0) < 0).sum()) == 0, "存在负成交额"
+
+
+# ============================ 券商读取（同花顺） ============================
+# 2026-09-21 事故复盘：14:50 自动交易被拒单（持仓/资金读取未通过校验，全天零成交）。
+# 拆开看是**三个互相耦合的静默缺陷**同时发作，因此这里三个方向各留一条常驻断言。
+@check("券商读取", "持仓/成交行解析：名称被 OCR 读成拉丁串时不得丢行")
+def _ths_parse_fixture():
+    """真实夹具回归（`tools/test_ths_parse.py`，纯离线、无 win32 依赖）。
+
+    事故：601091「C沈鼓」（新股『C』前缀）被 OCR 读成 'Cit'，旧守卫
+    「行内必须含汉字」把整行持仓静默丢弃 → 只读到 1 只 → 偏差 95.61% 拒单。
+    """
+    from tools.test_ths_parse import regression_all
+    n = regression_all()
+    print(f"      {n} 项真实 OCR 夹具断言通过（含 601091 2400 股 / 90,528 元那行）")
+
+
+@check("券商读取", "判据 4：市值自洽 <2% 时本地多余持仓按幽灵放行（防小幽灵死锁）")
+def _pos_ok_ghost_branch():
+    """事故（2026-09-23~28，交易线锁死 4 个交易日）：判据 4 原用固定
+    `mv×1.05` 容差区分漏读/真清仓，本地幽灵 510880 占 mv 的 4.7% < 5%
+    → `calc+missing <= mv×1.05` 恒成立 → 永远判「漏读」→ 永久死锁，
+    且重试无效（确定性坏帧，4 连拍得到 4 次相同拒单）。
+    修订（2026-09-28，主人拍板）：calc 与 mv 自洽（<2%）即认定券商侧读全
+    → 本地多余持仓按幽灵处理、允许覆盖；差额 ≥2% 才回到市值反证。
+    ⚠️ 数值回归（真数字 7 场景）在 `tools/test_pos_ok.py`，需 32 位 Python
+    （import trader.ths_uia 依赖 win32）；这里只做 64 位可跑的结构断言，
+    防有人把幽灵分支回退掉、把死锁带回来。
+    """
+    src = open(os.path.join(ROOT, "trader", "ths_uia.py"), encoding="utf-8").read()
+    assert "def _pos_calc(" in src and "def _missing_positions(" in src, \
+        "calc/missing 必须有共用 helper（铁律 14：同一判据不允许两处实现）"
+    m = re.search(r"def _pos_ok\(self.*?\n(.*?)\n    def ", src, re.S)
+    assert m, "找不到 _pos_ok 定义（是否被改名/移动？）"
+    body = m.group(1)
+    assert "0.02" in body, \
+        "判据 4 必须有「calc 与 mv 自洽 <2% → 幽灵放行」分支（否则小幽灵死锁复发）"
+    assert "mv * 1.05" in body, \
+        "差额 ≥2% 时必须保留市值反证兜底（calc+missing <= mv×1.05 判漏读拒单）"
+    assert "_missing_positions(pos, old, prices)" in body, \
+        "判据 4 必须走 _missing_positions helper"
+
+
+@check("券商读取", "资金栏控件按「当前显示页」过滤（防读隐藏页陈旧值）")
+def _ths_balance_ctrl_scope():
+    """事故：`_read_static` 取 `vals[-1]`（枚举顺序最后一个同名 ID 实例），
+    读到隐藏页陈旧值 —— 总资产 219,157.24（真实 190,912.44）、
+    股票市值 121,595.20（真实 93,350.40），对账偏差 95.61% 直接拒单。
+    真实值可由持仓表自证：95,944.00 / 190,912.44 = 50.26% == 表格「仓位占比」汇总。
+    """
+    src = open(os.path.join(ROOT, "trader", "ths_uia.py"), encoding="utf-8").read()
+    m = re.search(r"def _read_static\(self, cid([^)]*)\)", src)
+    assert m, "找不到 _read_static 定义（是否被改名？）"
+    assert "prefer_page" in m.group(1), \
+        "_read_static 必须带 prefer_page（否则会读到隐藏页同名控件的陈旧值）"
+    assert "_page_label_of" in src and "on_page" in src, \
+        "_read_static 必须按「所属页面」把当前显示页的实例排到最前"
+    assert "prefer_page=page" in src, "fetch_balance 必须把当前页标签传给 _read_static"
+
+
+@check("券商读取", "池外持仓可被定价（mark 兜底，防总资产虚低）")
+def _pool_out_position_priced():
+    """事故：`prices` 只有策略池 11 只 ETF，账户里**人工买入的个股**按 0 元计价 →
+    总资产 190,912.44 被算成 102,904.44（虚低 46%）→ 净值序列被污染、
+    仓位按虚低的 equity 计算、回撤熔断会把「净值腰斩」误判成巨亏而清仓。
+    """
+    from account.portfolio import PortfolioAccount
+    acc = PortfolioAccount(init_cash=97562.04)
+    acc.positions = {
+        "510880.SH": {"qty": 1600, "cost": 3.424, "peak": 3.5, "mark": 3.385},
+        "601091.SH": {"qty": 2400, "cost": 41.673, "peak": 41.7, "mark": 37.720},
+    }
+    prices = {"510880.SH": 3.339}          # 池内有行情价；601091 是池外人工持仓
+    mv = acc.market_value(prices)
+    exp = 1600 * 3.339 + 2400 * 37.720
+    assert abs(mv - exp) < 1e-6, f"持仓市值错：{mv} vs 期望 {exp}"
+    eq = acc.total_equity(prices)
+    assert eq > 150000.0, f"总资产被低估为 {eq}（应约 193,432）"
+    snap = acc.snapshot(prices)
+    got = {p["code"]: p["price"] for p in snap["positions"]}
+    assert abs(got["601091.SH"] - 37.720) < 1e-9, f"快照里池外标的价错：{got}"
+
+
+@check("券商读取", "positions.mark 可持久化（新库建列 + 旧库自动迁移）")
+def _positions_mark_roundtrip():
+    """mark 必须能跨运行存活：否则重启后池外持仓又变 0 元，总资产再次虚低。"""
+    import tempfile
+    import sqlite3
+    from storage.db import TradeDB
+    with tempfile.TemporaryDirectory() as d:
+        db = TradeDB(db_path=os.path.join(d, "new.db"))
+        db.save_positions({"601091.SH": {"qty": 2400, "cost": 41.673,
+                                         "peak": 41.7, "mark": 37.72}})
+        got = db.load_positions()
+        assert abs(got["601091.SH"]["mark"] - 37.72) < 1e-9, got
+        # 旧库（positions 无 mark 列）→ 自动 ALTER 迁移后仍可读写
+        p = os.path.join(d, "old.db")
+        c = sqlite3.connect(p)
+        c.execute("CREATE TABLE positions (code TEXT PRIMARY KEY, qty INTEGER, "
+                  "cost REAL, peak REAL)")
+        c.execute("INSERT INTO positions VALUES ('510880.SH', 1600, 3.424, 3.5)")
+        c.commit()
+        c.close()
+        db2 = TradeDB(db_path=p)
+        got2 = db2.load_positions()
+        assert got2["510880.SH"]["qty"] == 1600, got2
+        assert got2["510880.SH"]["mark"] == 0.0, f"旧行 mark 应为 0：{got2}"
+        db2.save_positions(got2)
+        assert db2.load_positions()["510880.SH"]["qty"] == 1600
 
 
 # ============================ 主流程 ============================

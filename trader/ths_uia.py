@@ -26,6 +26,7 @@ from threading import Lock
 
 import win32gui
 import win32con
+import win32process
 from pywinauto import Desktop
 
 logging.disable(logging.CRITICAL)
@@ -71,6 +72,10 @@ _BAL_MKTVAL = 1014  # 股票市值
 
 _CONFIRM_YES = ("是", "确定", "确认", "OK", "Yes", "是(&Y)")
 _CONFIRM_NO = ("否", "取消", "Cancel", "否(&N)")
+
+# 弹窗关闭按钮的关键词（公告/提示/到期提醒类；区别于下单流程的 是/否 确认框）
+_POPUP_CLOSE_WORDS = ("确定", "知道了", "知道了(&K)", "关闭", "关闭(&C)", "不再提醒",
+                      "不再提示", "OK", "Cancel", "取消")
 
 
 class UiaThsBroker(Broker):
@@ -321,6 +326,11 @@ class UiaThsBroker(Broker):
                     return True
 
         # ② 回退：UIA 定位左侧树节点并真实点击
+        # ⚠️ 点击前先清弹窗（2026-09-24 教训）：真实鼠标点击会被盖在上面的
+        # 公告/提示弹窗截走 → 页面根本没切过去；且旧实现点击后**无条件
+        # return True**，切页失败被吞掉 → 后续 OCR 读到的是别的页面的表格，
+        # 列结构不同 → 整帧错位 → 对账失败拒单。
+        self._dismiss_popups()
         self._raise()
         try:
             win = None
@@ -347,7 +357,10 @@ class UiaThsBroker(Broker):
                             pass
                         self._click_real(cx, cy)
                         time.sleep(0.6)
-                        return True
+                        # 点击后校验：真的切过去了才算成功（不再无条件 return True）
+                        if label[:2] in self._page_label():
+                            return True
+                        break               # 没切过去 → 重找/重试
                 time.sleep(0.4)
         except Exception:
             pass
@@ -488,6 +501,99 @@ class UiaThsBroker(Broker):
             time.sleep(0.2)
         return False
 
+    # ================= 弹窗清理（读表前） =================
+    def _same_pid_top_windows(self):
+        """与交易窗口**同进程**的可见顶层窗口（同花顺公告/提醒弹窗常挂在这里，
+        不一定是交易窗口 owned 的 —— 2026-09-24 的遮挡弹窗即属此类，
+        原来的 `_owned_top_windows` 枚举不到）。"""
+        out = []
+        try:
+            _, pid = win32process.GetWindowThreadProcessId(self._win())
+        except Exception:
+            return out
+        h = u32.GetTopWindow(0)
+        n = 0
+        while h and n < 1200:
+            try:
+                _, hp = win32process.GetWindowThreadProcessId(h)
+                if hp == pid and u32.IsWindowVisible(h):
+                    out.append(h)
+            except Exception:
+                pass
+            h = u32.GetWindow(h, 2)
+            n += 1
+        return out
+
+    def _dismiss_popups(self, tries=2):
+        """读表前清理同花顺的公告/提示/到期提醒等弹窗。
+
+        为什么需要（2026-09-24 教训）：这些弹窗会**持续**盖住持仓表格 →
+        `fetch_position` 连拍 4 帧全部乱码/丢行（510880 整行丢失、513500 串列、
+        513100 读到负价）→ 对账失败、拒单一整天。原 `_dismiss_info` 只在
+        **下单后**调用、且只认「确定/好的/OK」按钮，公告类弹窗（知道了/关闭）
+        和独立顶层弹窗都处理不了。
+
+        安全边界（绝不误伤）：
+          · 不碰交易窗口本身 / 大尺寸主窗口（>900×600）；
+          · 不碰含「是+否」按钮的对话框 —— 那是委托确认框，只能由下单流程处理；
+          · 非 #32770 类的窗口只在标题命中 公告/提示/提醒/通知/风险 时才动；
+          · 只处理与交易窗口同进程的窗口。
+        """
+        closed = []
+        for _ in range(tries):
+            hit = False
+            targets = []
+            try:
+                targets.extend(self._owned_top_windows())
+            except Exception:
+                pass
+            targets.extend(self._same_pid_top_windows())
+            for h in targets:
+                if h == self._win():
+                    continue
+                try:
+                    cls = win32gui.GetClassName(h)
+                    title = (win32gui.GetWindowText(h) or "").strip()
+                except Exception:
+                    continue
+                if cls == "#32770":
+                    pass                      # 标准对话框，进入按钮判断
+                elif any(k in title for k in ("公告", "提示", "提醒", "通知", "风险")):
+                    pass                      # 自定义类的公告窗，按标题兜底
+                else:
+                    continue                  # 其余一律不碰
+                # 委托确认框（是/否）绝不能在这里点 —— 防止误提交/误取消委托
+                btns = [(b, win32gui.GetWindowText(b) or "")
+                        for b in self._find_class("Button", root=h)]
+                joined = " ".join(t for _, t in btns)
+                if "是" in joined and "否" in joined:
+                    continue
+                # 大窗口（主窗体）跳过，只关小弹窗
+                try:
+                    rc = win32gui.GetWindowRect(h)
+                    if (rc[2] - rc[0]) > 900 and (rc[3] - rc[1]) > 600:
+                        continue
+                except Exception:
+                    continue
+                if self._click_dialog_button(h, _POPUP_CLOSE_WORDS):
+                    closed.append(title or cls)
+                    hit = True
+                    time.sleep(0.4)
+                    continue
+                # 没有可点按钮 → WM_CLOSE（纯展示型公告窗通常响应）
+                try:
+                    u32.PostMessageW(h, win32con.WM_CLOSE, 0, 0)
+                    closed.append(title or cls)
+                    hit = True
+                    time.sleep(0.4)
+                except Exception:
+                    pass
+            if not hit:
+                break
+        if closed:
+            print("[ths] 读表前清理了 {} 个弹窗：{}".format(len(closed), closed))
+        return closed
+
     def _submit_page(self, order, key):
         page = "买入股票" if key == "buy" else "卖出股票"
         self._switch(key)
@@ -562,14 +668,36 @@ class UiaThsBroker(Broker):
         return True, txt
 
     # ================= 查询 =================
-    def _read_static(self, cid):
-        """按 ID 读 Static 文本；多个实例时优先取非空且不等于 '?' 的。"""
-        vals = []
+    def _read_static(self, cid, prefer_page=None):
+        """按 ID 读 Static 文本，**所属页面优先**排序后返回。
+
+        ⚠️ 必须按「所属页面」过滤（2026-09-21 修复，与 `_grid_rect` 同一类坑）
+        ---------------------------------------------------------------------
+        同名控件 ID 在**多个页面上同时存在**（买入 / 卖出 / 资金股票的顶栏资金栏
+        各有一套 1012~1017），且隐藏实例的 `GetWindowText` **照样返回旧值**。
+        原实现收集所有非空实例后取 `vals[-1]`（枚举顺序的最后一个）→ 读到隐藏页的
+        陈旧数字：
+            总资产   219,157.24（隐藏页）  vs  190,912.44（真实当前页）
+            股票市值 121,595.20（隐藏页）  vs   93,350.40（真实当前页）
+        而真实当前页的值可由持仓表自证：95944.00 / 190912.44 = 50.26%，与表格
+        「仓位占比」汇总 50.26% 完全吻合。读错值直接导致下单前对账偏差 95.61% 拒单
+        （2026-09-21 14:50 实际发生）。
+
+        返回顺序：当前显示页的实例 → 其它可见实例 → 其余（保持旧兜底行为）。
+        """
+        cur = prefer_page if prefer_page is not None else self._page_label()
+        on_page, visible, others = [], [], []
         for h in self._find_id(cid):
             t = (win32gui.GetWindowText(h) or "").strip()
-            if t:
-                vals.append(t)
-        return vals
+            if not t:
+                continue
+            if cur and cur in self._page_label_of(h):
+                on_page.append(t)
+            elif u32.IsWindowVisible(h):
+                visible.append(t)
+            else:
+                others.append(t)
+        return on_page + visible + others
 
     @staticmethod
     def _f(s):
@@ -579,13 +707,18 @@ class UiaThsBroker(Broker):
             return None
 
     def fetch_balance(self) -> dict:
+        # 先清弹窗：切页走「真实点击」分支时，弹窗会截走点击导致切页失败
+        # （2026-09-24 教训，详见 _dismiss_popups）
+        self._dismiss_popups()
         self._switch("query")
         time.sleep(0.6)
         self._switch("position")     # 资金股票页，含完整资金字段
         time.sleep(0.8)
+        # 记录当前显示页，供 _read_static 过滤掉「隐藏页上的同名陈旧控件」
+        page = self._page_label() or _MENUS["position"]
 
         def pick(cid):
-            vs = self._read_static(cid)
+            vs = self._read_static(cid, prefer_page=page)
             return self._f(vs[-1]) if vs else None
 
         return {
@@ -681,26 +814,95 @@ class UiaThsBroker(Broker):
         except Exception:
             return ""
 
+    @staticmethod
+    def _mk_price(code6, p, prices) -> float:
+        """给一行 OCR 持仓定价：本地行情价 → OCR 市价 → OCR 成本价。
+
+        ⚠️ 顺序不能颠倒（2026-09-21 修复）
+        ---------------------------------
+        原实现只有「行情价 → 成本价」。策略池只有 11 只 ETF，账户里**人工买入的
+        个股永远取不到行情价**（601091 不在池内）→ 回退成**成本价** → 等于拿
+        「成本」去核对「资金栏市值」，只当日涨跌就必然偏离：
+            2400 股 × 成本 41.673 = 100,015  vs  资金栏市值口径 ~93,350（偏差 7.1%）
+            → 超过 5% 闸门 → 拒单打不出来，即使持仓行已能正确解析。
+        正确顺序：池外标的应用 OCR 读到的「市价」列 —— 2026-09-21 实测该列读得准
+        （2400 × 37.720 = 90,528.000，与表格「市值」列 90528.000 逐位一致）。
+        """
+        px = prices.get(UiaThsBroker._guess_full_code(code6))
+        if px:
+            return float(px)
+        return float(p.get("price") or p.get("cost") or 0.0)
+
+    def _pos_calc(self, pos, prices) -> float:
+        """Σ(行情价×数量) —— 判据 3 与 `_dump_pos_failure` 共用的**单一来源**。
+
+        ⚠️ 铁律 14（同一判据多处实现＝迟早分叉）：两边都调这里，不得各写循环。
+        """
+        return sum(p["qty"] * self._mk_price(code, p, prices)
+                   for code, p in pos.items())
+
+    def _missing_positions(self, pos, old, prices):
+        """本地有、本帧没读到的持仓 → (市值合计, [(code, qty, px), ...])。
+
+        ⚠️ `old` 是全代码 dict（DB 口径），`pos` 是 6 位代码 dict（OCR 口径），
+        比较前必须补后缀，否则永远判「全部消失」。
+        """
+        held = {self._guess_full_code(c) for c in pos}
+        total, items = 0.0, []
+        for code, v in (old or {}).items():
+            if v.get("qty", 0) > 0 and code not in held:
+                px = (prices.get(code) or v.get("mark")
+                      or v.get("cost") or 0.0)
+                total += v["qty"] * px
+                items.append((code, v["qty"], px))
+        return total, items
+
     def _pos_ok(self, pos, bal, prices, old=None) -> bool:
         """校验一次持仓读取是否可信（防止 OCR 坏数据污染账本）。
 
         判据（任一不满足即判读取失败）：
           1. 有持仓市值却读不到任何明细；
           2. 任一行数量 ≤ 0；
+          2.5 帧级行内自洽（2026-09-24 新增）：任一行 price<0（盈亏列被读成市价）
+              或 available+frozen != qty（串列）→ 整帧判坏。当天实际坏帧：
+              513500 读成 qty=500/available=21200/frozen=21200，4 连拍全坏拒单；
           3. 用**行情价**×数量 与资金栏「股票市值」偏差 > 5%
-             （行情价来自数据层，可靠；OCR 的价列不可用于此校验）；
-          4. 本地原有持仓在新读结果里消失 —— 用**市值反证**区分「真清仓」与「OCR 漏读」。
+             （行情价来自数据层，可靠；OCR 的价列**仅**在取不到行情价时兜底
+              —— 见 `_mk_price`：池外标的必须用 OCR 市价，不能用成本价）；
+          4. 本地原有持仓在新读结果里消失 —— 用**市值反证**区分「真清仓」与「OCR 漏读」；
+             读到的持仓已能解释市值（<2%）时，本地多余持仓按**幽灵**处理、允许覆盖
+             （2026-09-28 修订，见下）。
 
-        判据 4 的原理（2026-09-14 修正）
-        --------------------------------
+        判据 4 的原理（2026-09-14 建立，2026-09-28 修订）
+        --------------------------------------------------
         原实现直接判「消失 = 漏读 → 拒单」，其注释假设「真清仓会让股票市值归零」，
         **该假设是错的**：真清仓后市值栏只剩**剩余**持仓的市值，并不为零，
         因此卖出后会走到这条并被误判 → 整套流程被卡死一整天（14:54 实际发生）。
 
-        正确判据（把消失的持仓按行情价加回去，与资金栏市值比）：
+        2026-09-14 修正为「市值反证」（把消失的持仓按行情价加回去，与资金栏市值比）：
           - **漏读**：真实持仓 = 读到的 + 漏掉的 → `calc + missing ≈ mv` → 加回去**不超出** mv
           - **真清仓**：漏掉的那些其实已不在券商账上 → 加回去**会显著超出** mv
         故：仅当 `calc + missing <= mv × 1.05` 时才判为漏读并拒单。
+
+        2026-09-28 再修订：固定 5% 容差是**结构性缺陷**
+        ----------------------------------------------
+        幽灵持仓（本地有、券商无 —— 如 09-22 卖出未落账）占比 < 5% 时，
+        `calc + missing` 永远落在 `mv×1.05` 内 → 永远判「漏读」→ **永久死锁**，
+        且重试救不了（同一帧是确定性结果，4 连拍只会得到 4 次相同的拒单）。
+        实况（09-23~09-28 交易线锁死 4 个交易日）：510880 市值 5,371 占 mv 的
+        4.7% < 5% → `120,072 <= 120,225.84` 恒成立 → 每天必失败。
+
+        新规则（先问「读到的持仓」能否解释市值，再追究差额）：
+          ① `calc ≈ mv`（偏差 < 2%）→ 券商侧已读全 → 本地多出的必是幽灵
+             → **允许覆盖**（用券商真值盖掉本地账本正是 reconcile 的职责；
+             此处拒单只会重蹈死锁，而让幽灵继续躺在账本里没有任何好处）；
+          ② 差额 ≥ 2%（确有东西没读到）→ 回到市值反证：
+             `calc + missing <= mv × 1.05` 判漏读并拒单。
+        2% 阈值依据：实测 calc vs mv 噪声底 0.06%~0.53%（行情源一致时），
+        2% ≈ 4 倍余量，且判据 3 的 5% 闸门仍在前置把关。**已知代价**：漏读
+        < 2% 的小仓位会按幽灵放过（账本少记一天、下次读取自愈，幅度被 2%
+        天然封顶）—— 用这个有界且自愈的代价，换消除结构性死锁。
+        数值回归：`tools/test_pos_ok.py`（真数字 7 场景，需 32 位 Python）。
         """
         try:
             mv = float(bal.get("market_value") or 0.0)
@@ -708,29 +910,30 @@ class UiaThsBroker(Broker):
             mv = 0.0
         if not pos:
             return mv <= 1.0 and bal.get("cash") is not None
+        # 判据 2.5：帧级行内自洽（负价/串列帧直接判坏，见 pos_frame_sane 注释）
+        if not pos_frame_sane(pos):
+            return False
         for p in pos.values():
             if int(p.get("qty") or 0) <= 0:
                 return False
         if mv > 1.0:
-            calc = 0.0
-            for code, p in pos.items():
-                px = prices.get(self._guess_full_code(code))
-                if px is None:
-                    px = p.get("cost") or 0.0
-                calc += p["qty"] * px
+            calc = self._pos_calc(pos, prices)
             if calc <= 0 or abs(calc - mv) / mv > 0.05:
                 return False
-            # 判据 4：消失的持仓按行情价加回去，看是否与资金栏市值自洽
-            held = {self._guess_full_code(c) for c in pos}
-            missing = 0.0
-            for code, v in (old or {}).items():
-                if v.get("qty", 0) > 0 and code not in held:
-                    px = prices.get(code)
-                    if px is None:
-                        px = v.get("cost") or 0.0
-                    missing += v["qty"] * px
-            if missing > 0 and calc + missing <= mv * 1.05:
-                return False
+            # 判据 4：本地持仓消失 → 「幽灵放行」与「市值反证」两级（原理见 docstring）
+            missing, ghosts = self._missing_positions(pos, old, prices)
+            if missing > 0:
+                if abs(calc - mv) / mv < 0.02:
+                    # 读到的持仓已能解释资金栏市值（偏差 <2%）→ 券商侧读全，
+                    # 本地多出的必是幽灵 → 允许覆盖（reconcile 会用券商真值
+                    # 重写 positions，幽灵自然出账；拒单只会重蹈死锁）。
+                    print("[reconcile] ⚠️ 本地持仓在券商侧不存在（calc 与 mv 自洽 "
+                          "{:.2f}% < 2%），按幽灵处理、允许覆盖：{}".format(
+                              abs(calc - mv) / mv * 100,
+                              "; ".join("{} {}股@{:.3f}".format(c, q, px)
+                                        for c, q, px in ghosts)))
+                elif calc + missing <= mv * 1.05:
+                    return False
         return True
 
     def _dump_pos_failure(self, pos, bal, prices, old) -> None:
@@ -743,30 +946,31 @@ class UiaThsBroker(Broker):
         """
         try:
             mv = float(bal.get("market_value") or 0.0)
-            calc = 0.0
+            calc = self._pos_calc(pos, prices)
+            detail = []
             for code, p in pos.items():
-                px = prices.get(self._guess_full_code(code))
-                if px is None:
-                    px = p.get("cost") or 0.0
-                calc += p["qty"] * px
-            held = {self._guess_full_code(c) for c in pos}
-            missing, items = 0.0, []
-            for code, v in (old or {}).items():
-                if v.get("qty", 0) > 0 and code not in held:
-                    px = prices.get(code) or v.get("cost") or 0.0
-                    missing += v["qty"] * px
-                    items.append("{} qty={} px={:.3f}".format(code, v["qty"], px))
+                px = self._mk_price(code, p, prices)
+                detail.append("{} qty={} px={:.3f}{}".format(
+                    code, p["qty"], px,
+                    "" if prices.get(self._guess_full_code(code)) else "(池外/无行情价)"))
+            missing, items = self._missing_positions(pos, old, prices)
             dev = abs(calc - mv) / mv * 100 if mv else 0.0
             print("[reconcile] ⚠️ 持仓校验未通过，诊断数字：")
             print("   读到 pos   =", pos)
             print("   资金栏 bal =", bal)
-            print("   全池行情价 =", {k: prices.get(k) for k in
-                                     ("510880.SH", "511010.SH", "518880.SH") if k in prices})
+            # 打印**全部**行情价池（原先硬编码 3 只，池子改版后已失效）
+            print("   行情价池   =", {k: round(float(v), 4)
+                                      for k, v in sorted(prices.items())})
+            print("   计价明细   = " + ("; ".join(detail) if detail else "(无持仓)"))
             print("   calc(行情价×数量) = {:,.2f}   mv(资金栏市值) = {:,.2f}   偏差 = {:.2f}%".format(
                 calc, mv, dev))
-            print("   本地消失的持仓 = " + ("; ".join(items) if items else "(无)"))
+            print("   本地消失的持仓 = " + ("; ".join(
+                "{} qty={} px={:.3f}".format(c, q, px) for c, q, px in items) if items else "(无)"))
             print("   calc+missing = {:,.2f}   vs   mv×1.05 = {:,.2f}".format(
                 calc + missing, mv * 1.05))
+            if missing > 0 and dev < 2.0:
+                print("   → calc 与 mv 自洽 {:.2f}% < 2%：本地多余持仓按幽灵处理"
+                      "（允许覆盖，不因此拒单）".format(dev))
         except Exception as e:                       # 诊断本身绝不能影响主流程
             print("[reconcile] (诊断打印失败: {})".format(e))
 
@@ -775,12 +979,28 @@ class UiaThsBroker(Broker):
 
         OCR 单次拍摄会漏行/读串列，因此连拍多次，并以 validator 作为「这一帧够不够可信」
         的停止条件；validator 给定时返回首个通过校验的结果，否则返回行数最多的那一帧。
+
+        2026-09-24 教训后的三重加固（当天 4 连拍全部乱码/丢行 → 对账失败拒单）：
+        ① 每帧先清弹窗 —— 公告/提示弹窗持续盖住表格，不清则帧帧皆坏；
+        ② 切页后校验页标题（必须是「资金股票」页）—— 切页失败会 OCR 到别的
+           页面的表格，列结构不同 → 整帧错位；
+        ③ 页标题对了才拍，坏帧（串列/负价/未过校验）自动进入下一帧重拍。
         """
         best = {}
-        for _ in range(tries):
+        for i in range(tries):
+            self._dismiss_popups()
             self._switch("query")
-            time.sleep(0.5)
-            self._switch("position")
+            time.sleep(0.3)
+            if not self._switch("position"):
+                print("[ths] 持仓第 {}/{} 帧：切页失败，跳过重试".format(i + 1, tries))
+                time.sleep(0.5)
+                continue
+            page = self._page_label() or ""
+            if "资金股票" not in page:
+                print("[ths] 持仓第 {}/{} 帧：页面停在 {!r}（非资金股票页），跳过重试".format(
+                    i + 1, tries, page))
+                time.sleep(0.5)
+                continue
             time.sleep(1.0)
             cur = parse_position(self._read_grid_text())
             if len(cur) > len(best):
@@ -800,9 +1020,12 @@ class UiaThsBroker(Broker):
         """回读当日委托（连拍取行数最多的那一帧）。"""
         best = []
         for _ in range(tries):
+            self._dismiss_popups()
             self._switch("query")
-            time.sleep(0.5)
-            self._switch("today_order")
+            time.sleep(0.3)
+            if not self._switch("today_order"):
+                time.sleep(0.5)
+                continue
             time.sleep(1.0)
             cur = parse_trades(self._read_grid_text())
             if len(cur) > len(best):
@@ -848,6 +1071,17 @@ class UiaThsBroker(Broker):
         bal = self.fetch_balance()
         old = getattr(account, "positions", {}) or {}
 
+        # 资金栏是交叉核对的「锚」：读不到市值/现金时（资金控件也读坏），
+        # _pos_ok 的判据 3/4 全部静默跳过、只剩弱判据 —— 坏帧可能混过校验。
+        # 直接判对账失败，让人工介入（2026-09-24 加固：宁可拒单，不要脏账本）。
+        try:
+            _mv = float(bal.get("market_value") or 0.0)
+        except (TypeError, ValueError):
+            _mv = 0.0
+        if bal.get("cash") is None or _mv <= 0:
+            print("[reconcile] ⚠️ 资金栏读取异常（bal={}），无法交叉核对 → 判对账失败".format(bal))
+            return False
+
         # 连拍持仓，以「市值自洽」作为停止条件：读到可信的那一帧为止
         pos = self.fetch_position(validator=lambda p: self._pos_ok(p, bal, prices, old))
         if not self._pos_ok(pos, bal, prices, old):
@@ -867,8 +1101,19 @@ class UiaThsBroker(Broker):
             elif not cost and ref:
                 cost = float(ref)
             old_peak = old.get(full, {}).get("peak", 0.0) if old.get(full) else 0.0
+            # mark：该标的的「最后已知价」，池外标的靠它才能被正确定价
+            # ⚠️ 为什么必须存（2026-09-21 修复）
+            # --------------------------------
+            # `PortfolioAccount.market_value()` 用 `prices.get(code, 0.0)` 计价，
+            # 而 prices 只有策略池（11 只 ETF）。账号里人工买入的个股（601091）
+            # 因此**市值为 0** → 总资产少算 9 万（真实 190,912 vs 算出 102,904，
+            # 虚低 46%）→ ①净值序列被污染、②仓位按虚低的 equity 计算、
+            # ③回撤熔断会把「净值腰斩」误判成巨亏而清仓。存下 mark 即可让
+            # market_value 用 OCR 市价兜底，口径立刻自洽。
+            mark = self._mk_price(code, p, prices)
             new_pos[full] = {"qty": qty, "cost": round(cost, 4),
-                             "peak": max(cost, old_peak)}
+                             "peak": max(cost, old_peak),
+                             "mark": round(mark, 4)}
 
         # 校验通过，落账
         account.positions = new_pos
@@ -896,127 +1141,13 @@ class UiaThsBroker(Broker):
 
 
 # ================= OCR 文本解析（表格兜底） =================
-
-_BAN_WORDS = ("资产", "可用", "当日", "总资产", "股票市值", "资金", "证券代码",
-              "证券名称", "操作", "成交", "委托", "撤", "市场", "代码", "入", "出",
-              "合同编号", "委托时间", "交易市场")
-
-
-def _to_float(s):
-    try:
-        return float(str(s).replace(",", ""))
-    except (TypeError, ValueError):
-        return None
-
-
-def _clean_code(raw):
-    code = str(raw).zfill(6)
-    return code if code.startswith(("5", "6", "0", "1", "3")) else None
-
-
-def parse_confirm_text(text) -> dict:
-    """解析「委托确认」弹窗正文 → {code, name, price, qty, amount}。
-
-    弹窗样本（富文本剥标签后）：
-        证券代码：510880(红利ETF华泰柏瑞)
-        买入价格：3.427 (卖一)
-        买入数量：100
-        预估金额：347.700
-    """
-    import re
-    out = {}
-    m = re.search(r"证券代码[：:]\s*(\d{6})(?:\s*[（(]([^）)]*)[）)])?", text or "")
-    if m:
-        out["code"] = m.group(1)
-        if m.group(2):
-            out["name"] = m.group(2).strip()
-    m = re.search(r"(?:买入|卖出)价格[：:]\s*([\d.]+)", text or "")
-    if m:
-        out["price"] = _to_float(m.group(1))
-    m = re.search(r"(?:买入|卖出)数量[：:]\s*([\d,]+)", text or "")
-    if m:
-        out["qty"] = int(m.group(1).replace(",", ""))
-    m = re.search(r"预估金额[：:]\s*([\d,.]+)", text or "")
-    if m:
-        out["amount"] = _to_float(m.group(1))
-    return out
-
-
-def parse_position(text) -> dict:
-    """OCR 持仓表 → {code: {qty, cost, price}}。
-
-    持仓列序：证券代码 证券名称 股票余额 可用余额 冻结数量 成本价 市价 盈亏 ...
-    取「股票余额」为 qty、「成本价」为 cost。
-    """
-    import re
-    out = {}
-    for ln in text.splitlines():
-        m = re.search(r"\b\d{6}\b", ln)
-        if not m or not re.search(r"[\u4e00-\u9fff]", ln):
-            continue
-        if any(b in ln for b in _BAN_WORDS):
-            continue
-        code = _clean_code(m.group(0))
-        if not code:
-            continue
-        nums = re.findall(r"[-+]?\d[\d,]*(?:\.\d+)?", ln.split(code)[-1])
-        # 持仓行至少要有「股票余额/可用/冻结/成本价」4 个数；数量必须为正。
-        # OCR 抖动会产生 1~2 个数字的碎片行（实测出现过 qty=1/cost=0 的假持仓），
-        # 这类行一旦被当成持仓，会让引擎严重误判仓位。
-        if len(nums) < 4:
-            continue
-        qty = int(float(nums[0].replace(",", "")))
-        if qty <= 0:
-            continue
-        out[code] = {
-            "qty": qty,                                                # 股票余额
-            "available": int(float(nums[1].replace(",", ""))),
-            "frozen": int(float(nums[2].replace(",", ""))),
-            "cost": _to_float(nums[3]),                                # 成本价
-            "price": _to_float(nums[4]) if len(nums) > 4 else None,    # 市价
-        }
-    return out
-
-
-def parse_trades(text) -> list:
-    """OCR 当日委托/成交表 → [{code, name, side, status, qty, filled_qty, price, avg_price, deal_id}]。
-
-    列序：委托时间 证券代码 证券名称 操作 状态 委托数量 成交数量 委托价格 成交均价 撤消数量 合同编号 交易市场
-    """
-    import re
-    rows = []
-    for ln in text.splitlines():
-        m = re.search(r"\b\d{6}\b", ln)
-        if not m or not re.search(r"[\u4e00-\u9fff]", ln):
-            continue
-        code = _clean_code(m.group(0))
-        if not code:
-            continue
-        tail = ln.split(code, 1)[-1]
-        nums = re.findall(r"\d[\d,]*(?:\.\d+)?", tail)
-        nums_f = [_to_float(x) for x in nums]
-
-        def g(i):
-            return nums_f[i] if i < len(nums_f) else None
-
-        if "全部成交" in ln or "已成" in ln:
-            status = "已成"
-        elif "部分成交" in ln:
-            status = "部分成交"
-        elif "已撤" in ln:
-            status = "已撤"
-        else:
-            status = "已报"
-        rows.append({
-            "code": code,
-            "name": (re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "",
-                            re.split(r"买入|卖出", tail)[0])[:12] or None),
-            "side": "买入" if "买入" in ln else ("卖出" if "卖出" in ln else None),
-            "status": status,
-            "qty": int(g(0)) if g(0) is not None else None,            # 委托数量
-            "filled_qty": int(g(1)) if g(1) is not None else 0,        # 成交数量
-            "price": g(2),                                             # 委托价格
-            "avg_price": g(3),                                         # 成交均价
-            "deal_id": str(int(g(5))) if g(5) is not None else None,   # 合同编号
-        })
-    return rows
+#
+# 实现已抽到 `trader/ths_parse.py`（纯函数、**无 win32 依赖**）。
+# 为什么抽出去（2026-09-21）：本模块顶层 `import win32gui / pywinauto`，
+# 只有 32 位 Python 能加载 → 持仓/成交**行解析**这条最易静默出错的逻辑
+# 进不了 64 位跑的 `tools/selftest.py`，历次坑只能人工连客户端复现
+# （2026-09-21 的「C沈鼓」丢行即为此类）。现在 selftest 可用真实 OCR 原文回归。
+# 这里 re-export 保持向后兼容：`from trader.ths_uia import parse_position` 照旧可用。
+from .ths_parse import (  # noqa: E402
+    _BAN_WORDS, _clean_code, _to_float, pos_frame_sane,
+    parse_confirm_text, parse_position, parse_trades)
