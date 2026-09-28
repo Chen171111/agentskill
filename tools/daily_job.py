@@ -182,6 +182,53 @@ def main():
     # （报警器要定期按一下，否则坏掉了也不知道）
     selftest = "--simulate-failure" in sys.argv
 
+    # ── 交易日守卫（2026-09-25 新增）──────────────────────────────────
+    # 背景：2026-09-25（中秋法定节假日）计划任务 QuantPanorama_DailyRun 照常触发，
+    # 走完整交易链路 → 同花顺在休市日连不上交易窗口/持仓表异常 → 白白报
+    # 「自动交易失败」。本机交易日历（dataprovider/calendar.py）确认 09-25/26/27
+    # 均为非交易日，09-28（周一）才开市。休市日无单可下， scheduled 模式
+    # 直接跳过：写 skipped 状态（ok=true）、退出 0、不发告警、不碰 ALERT.txt。
+    _trading_today = True
+    try:
+        # ⚠️ 本脚本在 tools/ 下运行，sys.path 不含项目根目录，
+        # 必须先补 ROOT 才能导入 dataprovider（check_alerts.py 顶部同理）。
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from dataprovider.calendar import is_trading_day
+        _trading_today = is_trading_day(started)
+    except Exception as _e:
+        # 日历不可用 → fail-open：宁可节假日跑一次失败（有告警兜底），
+        # 也不能交易日被误跳过（那会白丢一个真实交易日）。
+        print("[daily_job] ⚠️ 交易日历不可用（{}）→ 按交易日照常执行".format(_e))
+
+    if not _trading_today and not manual and not selftest:
+        status = {
+            "ts": started.strftime("%Y-%m-%d %H:%M:%S"),
+            "date": started.strftime("%Y%m%d"),
+            "mode": "scheduled",
+            "ok": True,
+            "exit_code": 0,
+            "skipped": "non-trading-day",
+            "attempts": 0,
+            "cmd": "main.py simulate --ths",
+            "rebalanced": None,
+            "summary": "非交易日（节假日/周末），按设计跳过交易",
+            "error": "",
+        }
+        try:
+            STATUS.write_text(json.dumps(status, ensure_ascii=False, indent=2),
+                              encoding="utf-8")
+        except Exception:
+            pass
+        # 注意：**不清 ALERT.txt** —— 旧告警（若来自上一个交易日）是真实的
+        # 未解决问题，等下一个交易日真实运行成功后再自然清除，不由跳过掩盖。
+        print("[daily_job] 今日非交易日 → 跳过交易链路"
+              "（不连同花顺、不下单、不发告警；last_run.json 已记 skipped）")
+        return 0
+    if not _trading_today:
+        print("[daily_job] ⚠️ 今日非交易日（--manual/--simulate-failure 照常执行；"
+              "休市日同花顺可能连不上或持仓读取异常，失败属预期）")
+
     # ── 执行：连接类失败 → **收盘前限窗重试**（见文件顶部的 `_RETRY_*` 说明）──
     rc, err, captured = 1, "", []
     n_attempt = 0

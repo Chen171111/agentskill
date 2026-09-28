@@ -129,6 +129,16 @@ def cmd_simulate(args):
 
     --dry：接入同花顺做只读试算（对账+算单），**不提交任何委托、不写本地账本**。
     """
+    # 2026-09-25：非交易日（节假日/周末）同花顺可能连不上/持仓读取异常，
+    # 手动运行不拦截（调试可能需要），但给出明确提示，避免误判为故障。
+    try:
+        from datetime import date as _date
+        from dataprovider.calendar import is_trading_day
+        if not is_trading_day(_date.today()):
+            print("[提示] 今日为非交易日（节假日/周末），股市休市："
+                  "同花顺可能连不上或持仓表异常，失败属预期，不是链路故障。")
+    except Exception:
+        pass  # 日历不可用 → 不提示、不拦截
     from scheduler.runner import DailyRunner
     codes = _codes(args)
     broker = _make_broker(args)

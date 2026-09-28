@@ -175,14 +175,35 @@ class DailyRunner:
         # 历史坑：本地 DB 可能残留早先 PaperBroker 的「幽灵持仓」，
         # 若不对账就下单，会拿不存在的持仓去卖 → 废单/误判。
         if self.broker is not None and hasattr(self.broker, "reconcile"):
-            try:
-                ok = self.broker.reconcile(self.account, prices)
-            except TypeError:
-                ok = self.broker.reconcile(self.account)
-            except Exception as e:
-                raise RuntimeError("下单前对账异常，拒绝在未知账本上下单: {}".format(e))
+            # 只读重试：读表失败多为瞬时（弹窗/渲染未完成），重读常能通过。
+            # ⚠️ 每次尝试前后对 account 做快照/回滚，失败尝试**不得**污染本地账本。
+            import copy as _copy
+            _attempts = 1 + max(int(getattr(config, "RECONCILE_RETRY", 0) or 0), 0)
+            _wait = float(getattr(config, "RECONCILE_RETRY_WAIT", 0) or 0)
+            ok = False
+            for _i in range(_attempts):
+                snap_acc = (self.account.cash, self.account.frozen,
+                            _copy.deepcopy(self.account.positions))
+                try:
+                    try:
+                        ok = bool(self.broker.reconcile(self.account, prices))
+                    except TypeError:
+                        ok = bool(self.broker.reconcile(self.account))
+                except Exception as e:
+                    ok = False
+                    _err = e
+                if ok:
+                    break
+                # 回滚，避免失败尝试的半成品数据留在账本里
+                self.account.cash, self.account.frozen, self.account.positions = snap_acc
+                if _i + 1 < _attempts:
+                    print("[runner] 对账未通过（第 {}/{} 次），{:.0f}s 后重读…".format(
+                        _i + 1, _attempts, _wait), flush=True)
+                    time.sleep(_wait)
             if not ok:
-                raise RuntimeError("下单前对账失败（持仓/资金读取未通过校验），拒绝下单")
+                raise RuntimeError(
+                    "下单前对账失败（持仓/资金读取未通过校验），拒绝下单"
+                    "（已重试 {} 次；请点掉同花顺弹窗、切到持仓页并保持窗口可见）".format(_attempts))
             print("[runner] 下单前对账完成：现金 {:.2f} 冻结 {:.2f} 持仓 {}".format(
                 self.account.cash, self.account.frozen,
                 {k: v.get("qty") for k, v in self.account.positions.items()}))
@@ -254,14 +275,24 @@ class DailyRunner:
         orders = executor.rebalance(self.account, weights, prices)
 
         # 账本对账（同花顺模式）：回读真实持仓/资金校正本地账户，杜绝双账本
+        post_synced = True          # 下单后账本是否已用券商真值校正
         if self.broker is not None and hasattr(self.broker, "reconcile"):
             try:
                 try:
-                    self.broker.reconcile(self.account, prices)
+                    post_synced = bool(self.broker.reconcile(self.account, prices))
                 except TypeError:
-                    self.broker.reconcile(self.account)
+                    post_synced = bool(self.broker.reconcile(self.account))
             except Exception as e:
+                post_synced = False
                 print("[runner] 对账失败: {}".format(e))
+            if not post_synced:
+                # ⚠️ 2026-09-28 修复（4 个交易日停摆的真因）：
+                # 原先这里**失败也只 print**，随后照旧 `save_positions(self.account.positions)`
+                # → 把**交易前的旧持仓**又写回库。09-22 就是这样：orders 记着成交，
+                #   但 positions 永远停在「510880 1600」，与券商（513100+513500）相差一个交易日，
+                #   导致此后每次下单前对账都必然失败 → 死锁 4 天，而当日还报 ok/exit 0。
+                # 现在的处理：**账本未校验通过就绝不落库**（宁缺勿错），并显式告警。
+                print("[runner] ⚠️ 下单后对账未通过 → **跳过本地账本落库**（避免用未校验的账本覆盖真值）")
 
         # 回读真实成交，修正订单状态。
         # 真实券商（同花顺）submit() 只返回 submitted，实际成交/部分成交/未成交
@@ -276,13 +307,18 @@ class DailyRunner:
         # 持久化（dry_run 时全部跳过，保证试算零副作用）
         if not self.dry_run:
             for o in orders:
-                self.db.save_order(o)
+                self.db.save_order(o)          # 成交回读结果照常入库（orders 是事实记录）
             self.db.set_state("strategy_since", str(self.strategy._since))
-            self.db.save_positions(self.account.positions)
+            if post_synced:
+                self.db.save_positions(self.account.positions)
+            # ⚠️ 未通过校验时不写 positions：见上面的修复说明。
+            #    orders 与 positions 会暂时不一致 —— 这是**诚实的状态**（orders=事实、
+            #    positions=未知），比写一个错的 positions 好；下次对账成功会自动校正。
         snap = self.account.snapshot(prices)
-        if not self.dry_run:
+        if not self.dry_run and post_synced:
             self.db.save_equity(last_date, snap["cash"], snap["market_value"],
                                 snap["total_equity"])
+        # ⚠️ 净值行同理：account 未与券商对齐时，算出来的净值是错的，不落库。
 
         return {
             "status": "ok",

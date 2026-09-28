@@ -56,23 +56,30 @@ def main():
     problems = []
     notes = []
 
+    # 今天是否交易日（2026-09-25 起 daily_job 在非交易日按设计跳过，写 skipped 状态）
+    today = date.today()
+    try:
+        trading = is_trading_day(today)
+    except Exception as e:
+        trading = False
+        notes.append("交易日历不可用（{}），跳过「到点没跑」判定".format(e))
+    # 到点没跑：今天是交易日、且已过 14:50+宽限，但最后一次运行不是今天
+    due = now.hour * 60 + now.minute >= (RUN_HHMM[0] * 60 + RUN_HHMM[1] + GRACE_MIN)
+
     st = _load_status()
     if st is None:
         problems.append("从未产生运行记录（state/last_run.json 不存在）—— 自动交易可能一次都没跑过")
     else:
         notes.append("最近一次运行：{}  退出码={}  {}".format(
             st.get("ts"), st.get("exit_code"), st.get("summary") or ""))
+        if st.get("skipped") == "non-trading-day":
+            # 2026-09-25 新增：daily_job 在非交易日（节假日/周末）按设计跳过，
+            # 记录为 ok=true + skipped —— 这是正常状态，不是故障。
+            notes.append("  └ 今日为非交易日，计划运行已按设计跳过（skipped=non-trading-day）")
         if not st.get("ok"):
             problems.append("最近一次运行失败（退出码 {}）".format(st.get("exit_code")))
 
         # 到点没跑：今天是交易日、且已过 14:50+宽限，但最后一次运行不是今天
-        today = date.today()
-        due = now.hour * 60 + now.minute >= (RUN_HHMM[0] * 60 + RUN_HHMM[1] + GRACE_MIN)
-        try:
-            trading = is_trading_day(today)
-        except Exception as e:
-            trading = False
-            notes.append("交易日历不可用（{}），跳过「到点没跑」判定".format(e))
         if trading and due:
             if str(st.get("date")) != today.strftime("%Y%m%d"):
                 problems.append(
@@ -81,7 +88,14 @@ def main():
                         RUN_HHMM[0], RUN_HHMM[1], st.get("ts")))
 
     if ALERT.exists():
-        problems.append("存在告警文件 state/ALERT.txt")
+        if trading:
+            problems.append("存在告警文件 state/ALERT.txt")
+        else:
+            # 非交易日：daily_job 按设计跳过、不写新告警，此时存在的 ALERT 必是
+            # 上一个交易日的旧告警 → 只提示不计入问题，避免节假日巡检反复报
+            # 「自动交易异常」（2026-09-25 中秋节实际发生）。
+            # 下一个交易日恢复全量判定：运行成功自动清 ALERT，失败则 ALERT 更新。
+            notes.append("（非交易日，不计入问题）存在旧告警 state/ALERT.txt，留待下一交易日处理：")
         try:
             notes.append(ALERT.read_text(encoding="utf-8", errors="ignore")[:1500])
         except Exception:
