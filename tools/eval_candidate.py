@@ -43,12 +43,12 @@ import json
 import os
 import sys
 import time
+from types import SimpleNamespace   # 2026-09-29 补：--neighbors hold= 路径曾因此 NameError
 import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tools.backtest_dividend import prepare as prepare_div  # noqa: E402
 from tools.backtest_stock import metrics, run  # noqa: E402
 from tools.build_div_tax import load_div_tax, DEFAULT_DIV_TAX  # noqa: E402
 from tools.panel_cache import build_panel  # noqa: E402
@@ -452,7 +452,7 @@ def main(argv=None) -> int:
                                  "verdict": verdict, "reason": "；".join(reason),
                                  "evidence_file": args.out},
                                 ensure_ascii=False) + "\n")
-        print(f"  已记入证伪清单 state/refuted.jsonl")
+        print("  已记入证伪清单 state/refuted.jsonl")
 
     print(f"\n  产物：{args.out} / {args.out.replace('.csv','_detail.csv')} / {args.json}")
     print(f"  总用时 {(time.time()-t_start)/60:.1f} min")

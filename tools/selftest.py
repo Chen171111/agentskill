@@ -190,24 +190,29 @@ def _adj_pointintime():
     codes = rng.choice(b.code.unique(), min(400, b.code.nunique()), replace=False)
     b = b[b.code.isin(codes)].sort_values(["code", "date"]).reset_index(drop=True)
     div = div[div.code.isin(codes)]
-    CUT_A, CUT_B = "20221231", "20260911"
-    grid = b[b.date <= CUT_A].copy()
-    da = div[div.EX_DIVIDEND_DATE.astype(str).str.replace("-", "", regex=False) <= CUT_A]
-    db = div.copy()
-    for mode in ("correct", "legacy"):
-        pa = build_yield_panel(grid.copy(), da, price_col="close", adj_mode=mode)
-        pb = build_yield_panel(grid.copy(), db, price_col="close", adj_mode=mode)
-        m = pa[["code", "date", "dps_ttm"]].merge(
-            pb[["code", "date", "dps_ttm"]], on=["code", "date"], suffixes=("_a", "_b"))
-        m = m.dropna(subset=["dps_ttm_a", "dps_ttm_b"])
-        diff = (m.dps_ttm_a - m.dps_ttm_b).abs().max()
-        n_bad = int(((m.dps_ttm_a - m.dps_ttm_b).abs() > 1e-12).sum())
-        if mode == "correct":
-            assert diff == 0, (
-                f"correct 口径在换数据截止日后历史段变了（不一致 {n_bad} 组 / 最大差 {diff}）"
-                "→ 它不再是 point-in-time 的，可复现性假设被破坏")
-        else:
-            print(f"      （对照）legacy 不一致 {n_bad} 组，最大差 {diff:.6f} —— 预期非 0")
+    # 两个截止日各跑一遍（2026-09-29：原 CUT_B 赋值后从未使用，第二段场景
+    # 静默缺失——"跑过"不等于"测过"）。correct 口径下，截止日之前的历史段
+    # dps_ttm 不得因"多看了一天分红数据"而改变（point-in-time 的可复现性）。
+    for cut in ("20221231", "20260911"):
+        grid = b[b.date <= cut].copy()
+        da = div[div.EX_DIVIDEND_DATE.astype(str).str.replace("-", "", regex=False) <= cut]
+        db = div.copy()
+        for mode in ("correct", "legacy"):
+            pa = build_yield_panel(grid.copy(), da, price_col="close", adj_mode=mode)
+            pb = build_yield_panel(grid.copy(), db, price_col="close", adj_mode=mode)
+            m = pa[["code", "date", "dps_ttm"]].merge(
+                pb[["code", "date", "dps_ttm"]], on=["code", "date"], suffixes=("_a", "_b"))
+            m = m.dropna(subset=["dps_ttm_a", "dps_ttm_b"])
+            diff = (m.dps_ttm_a - m.dps_ttm_b).abs().max()
+            n_bad = int(((m.dps_ttm_a - m.dps_ttm_b).abs() > 1e-12).sum())
+            if mode == "correct":
+                assert diff == 0, (
+                    f"correct 口径在换数据截止日（{cut}）后历史段变了"
+                    f"（不一致 {n_bad} 组 / 最大差 {diff}）"
+                    "→ 它不再是 point-in-time 的，可复现性假设被破坏")
+            else:
+                print(f"      （对照 cutoff={cut}）legacy 不一致 {n_bad} 组，"
+                      f"最大差 {diff:.6f} —— 预期非 0")
 
 
 # ============================ 涨跌停 ============================
@@ -712,6 +717,114 @@ def _data_sane():
     assert int((b.close <= 0).sum()) == 0, "存在非正收盘价"
     if "amount" in b.columns:
         assert int((b.amount.fillna(0) < 0).sum()) == 0, "存在负成交额"
+
+
+# ============================ 风控（组合级） ============================
+@check("风控", "回撤熔断滞回：进入后 dd 回到 10~15% 应保持降仓，≤10% 才恢复")
+def _dd_circuit_hysteresis():
+    """2026-09-29 修复回归（原滞回带完全失效）。
+
+    原实现 active 期间把 dd 直接喂 levels 循环，而 levels 最低档就是 15% →
+    dd 落回 (10%,15%) 时循环落空返回 1.0，熔断立即解除，「≤10% 才恢复」
+    从未生效（回撤在阈值附近往返 → 仓位在 0.65/1.0 间反复开关）。
+    走公开 API `scale(nav_history)` 断言，顺便覆盖 dd 计算与状态转换；
+    实盘侧的状态跨运行持久化由 runner 的 dd_circuit_active 负责（见下一条）。
+    """
+    from risk.portfolio import PortfolioRisk
+    pr = PortfolioRisk(dd_circuit=True, vol_target=None)     # 隔离波动率目标
+    assert pr.scale([100.0, 84.0]) == 0.65, "dd=16% 应进入熔断（0.65 档）"
+    assert pr.scale([100.0, 84.0, 88.0]) == 0.65, \
+        "dd=12% 在滞回带内，应保持 0.65（原实现在此解除熔断）"
+    assert pr.scale([100.0, 84.0, 88.0, 89.0]) == 0.65, "dd=11% 仍在带内"
+    assert pr.scale([100.0, 84.0, 88.0, 89.0, 91.0]) == 1.0, \
+        "dd=9% ≤10% 才恢复满仓"
+    assert pr.scale([100.0, 84.0, 88.0, 89.0, 91.0, 89.0]) == 1.0, \
+        "恢复后 dd=11% 未再触 15% 阈，不得重入"
+    assert pr.scale([100.0, 84.0, 88.0, 89.0, 91.0, 89.0, 85.0]) == 0.65, \
+        "dd=15% 重新触发熔断"
+    pr2 = PortfolioRisk(dd_circuit=True, vol_target=None)
+    assert pr2.scale([100.0, 70.0]) == 0.0, "dd=30% 应落 0.0 清仓档"
+    assert pr2.scale([100.0, 70.0, 79.0]) == 0.40, "dd=21% 应落 0.40 档"
+
+
+@check("风控", "行情价 NaN/inf 入口闸门 + 熔断状态跨运行持久化")
+def _runner_finite_and_circuit_state():
+    """2026-09-29：nan 的比较运算全部为 False → calc=nan 时 _pos_ok 五个判据
+    全"通过"、止损/熔断静默失效、nan 成本价写进账本（检验时实测复现）。
+    runner 必须在 prices 入口拒绝非有限值。行为回归见 tools/test_pos_ok.py
+    场景 8（须 32 位）；这里只做 64 位可跑的结构断言。
+    另：熔断滞回状态必须存 DB state（dd_circuit_active），否则实盘每次新建
+    RiskManager 实例、滞回带在实盘从未生效。
+    """
+    src = open(os.path.join(ROOT, "scheduler", "runner.py"), encoding="utf-8").read()
+    assert "isfinite" in src and "NaN/inf" in src, \
+        "runner 必须在 prices 入口加 isfinite 闸门（否则 nan 穿透全部校验）"
+    assert "dd_circuit_active" in src, \
+        "熔断滞回状态必须跨运行持久化（DB state dd_circuit_active）"
+    msrc = open(os.path.join(ROOT, "risk", "manager.py"), encoding="utf-8").read()
+    assert "set_circuit_active" in msrc and "circuit_active" in msrc, \
+        "RiskManager 必须暴露熔断状态的存取方法（供 runner 持久化）"
+
+
+@check("回测", "停牌持仓按最后已知价计价，不按 0 元（防假回撤误触发熔断）")
+def _backtest_suspension_valuation():
+    """2026-09-29：`engine._row` 会把 NaN（停牌）从行里剔除，原
+    `market_value` 的 `prices.get(c, 0.0)` 让停牌持仓当日按 **0 元**计：
+      · 净值凭空蒸发该持仓全额 → 假回撤，可能误触发 15% 回撤熔断；
+      · `trade()` 的 total 被低估 → 调仓日目标市值算小、买入偏少。
+    停牌只是"没有新报价"，不是"市值归零"。交易路径（要求当日价 > 0）
+    不受影响——没有实时价确实不能撮合。
+    ⚠️ 本修复会**改动研究数值**（停牌日净值不再假跌），历史回测对比需重跑。
+    """
+    from backtest.account import BacktestAccount
+    acc = BacktestAccount(init_cash=100000.0)
+    acc.positions = {"600000.SH": {"qty": 1000, "cost": 10.0, "peak": 10.0}}
+    assert acc.market_value({"600000.SH": 11.0}) == 11000.0, "正常日应按当日价"
+    assert acc.market_value({}) == 11000.0, \
+        "停牌（行内无该 code）被按 0 元计价 → 假回撤"
+    assert acc.market_value({"600000.SH": float("nan")}) == 11000.0, \
+        "显式 NaN 也要兜底（NaN 是 truthy，`if px` 挡不住）"
+    acc.positions["000001.SZ"] = {"qty": 100, "cost": 5.0, "peak": 5.0}
+    assert acc.market_value({}) == 11000.0, "从未知道价的标的才落 0"
+    acc.mark_to_close("20260929", {})            # 停牌日记账不得蒸发
+    assert acc._equity[-1] == 111000.0, acc._equity[-1]
+
+
+@check("执行", "多笔买单不超配现金（卖出回款计入预算，逐单扣减）")
+def _execution_cash_budget():
+    """2026-09-29：真实券商 submit() 只返回 submitted、不当场成交，
+    `account.cash` 在整批订单生成期间不会变 —— 原实现多笔买单都按交易前
+    现金核算会**超配**（broker 拒单/部分成交，策略目标失真；PaperBroker
+    甚至会把现金打成负数）。修法：cash_left 逐单扣减 + 卖出回款按 A 股
+    当日可用计入预算（先卖后买的提交顺序保证这一点）。
+    """
+    from account.portfolio import PortfolioAccount
+    from trader.execution import ExecutionEngine
+    # 场景 A：满仓现金、两个目标各 90% → 买入总额不得超现金（旧实现会按
+    # 交易前现金给每只都下 90% 的大单，合计 180%，PaperBroker 打成负现金）
+    acc = PortfolioAccount(init_cash=50000.0)
+    prices = {"513100.SH": 2.0, "513500.SH": 4.0}
+    orders = ExecutionEngine().rebalance(
+        acc, {"513100.SH": 0.9, "513500.SH": 0.9}, prices)
+    buys = [o for o in orders if o.side == "buy"]
+    spent = sum(o.qty * o.price for o in buys)
+    assert spent <= 50000.0 * 1.001, \
+        "买入总额 {:.0f} 超现金 50000（多笔超配）".format(spent)
+    assert acc.cash >= 0, "现金被超配成负数：{:.2f}".format(acc.cash)
+    # 场景 B：持仓可卖 → 回款计入预算，两只都成交且总额不超预算
+    # （prices 必须覆盖持仓标的——生产里 prices 就是整个策略池，与执行路径一致）
+    acc2 = PortfolioAccount(init_cash=10000.0)
+    acc2.positions = {"510880.SH": {"qty": 20000, "cost": 3.0,
+                                    "peak": 3.0, "mark": 3.0}}
+    prices2 = {"510880.SH": 3.0, "513100.SH": 2.0, "513500.SH": 4.0}
+    orders2 = ExecutionEngine().rebalance(
+        acc2, {"513100.SH": 0.9, "513500.SH": 0.9}, prices2)
+    buys2 = [o for o in orders2 if o.side == "buy"]
+    assert len(buys2) == 2, "卖出回款应让两只都成交，实际 {} 笔".format(len(buys2))
+    budget = 10000.0 + 20000 * 3.0
+    spent = sum(o.qty * o.price for o in buys2)
+    assert spent <= budget * 1.001, "买入总额 {:.0f} 超预算 {:.0f}".format(spent, budget)
+    assert acc2.cash >= 0, "现金被超配成负数：{:.2f}".format(acc2.cash)
 
 
 # ============================ 券商读取（同花顺） ============================

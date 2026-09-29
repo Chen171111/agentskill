@@ -21,7 +21,7 @@
   ② 差额 ≥ 2%（确有东西没读到）→ 回到市值反证：
      `calc + missing <= mv×1.05` 判漏读并拒单。
 
-本文件把 7 个场景钉死防回归：
+本文件把 8 个场景钉死防回归：
   1. 幽灵 4.6% < 5%（09-28 实况口径）     → 必须放过（**旧规则在此死锁**）
   2. 幽灵 78% > 5%（池外个股）            → 必须放过（旧规则也放过，防改坏）
   3. 真清仓（09-14 实测口径）             → 必须放过
@@ -29,6 +29,7 @@
   5. 漏读 1.5%（<2%）                    → 按幽灵放过（**已知代价**，记录在案）
   6. 判据 3 的 5% 闸门（qty=500 串位帧）  → 必须拒单
   7. 无消失持仓（含 qty=0 旧行）          → 必须放过
+  8. 行情价 NaN/inf（09-29 新增）        → 必须拒单（nan 比较全 False 会穿透全部判据）
 
 用法:
     E:\\Python32\\python.exe tools/test_pos_ok.py
@@ -177,6 +178,21 @@ def check_normal():
     assert B._pos_ok(POS_LIVE, BAL_LIVE, P_LIVE, {})
 
 
+def check_nan_price_rejected():
+    """场景 8（2026-09-29 新增）：行情价 NaN/inf 必须拒单。
+
+    nan 的比较运算**全部返回 False** —— 不挡它，判据 3（5% 闸门）和判据 4
+    （幽灵分支/市值反证）会全部静默放行（本场景修复前实测：五个判据全"通过"），
+    nan 还会经 reconcile 写进账本（cost/mark=nan → 市值/净值全污染）。
+    入口闸门在 runner（prices isfinite），这里是校验器本体的最后一道防线。
+    """
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        px = dict(P_LIVE)
+        px["513100.SH"] = bad
+        assert not B._pos_ok(POS_LIVE, BAL_LIVE, px, OLD_LIVE), \
+            "行情价 {!r} 必须拒单（nan/inf 会穿透全部判据）".format(bad)
+
+
 def regression_all() -> int:
     """跑全部场景断言；返回通过数。失败即抛 AssertionError。"""
     fns = [check_ghost_small_deadlock_zone,
@@ -185,7 +201,8 @@ def regression_all() -> int:
            check_missed_read_over_2pct,
            check_missed_read_under_2pct_accepted_hole,
            check_calc_mv_gate_5pct,
-           check_normal]
+           check_normal,
+           check_nan_price_rejected]
     for fn in fns:
         fn()
         print("  ✓ {}".format(fn.__name__))
