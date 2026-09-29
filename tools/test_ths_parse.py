@@ -79,6 +79,16 @@ ORDER_OCR_BOTH_SIDES = "\n".join([
     '14:50:03 510880 红利ETF华泰柏瑞 买入 已成 200 200 3.400 3.398 0 625377492 上海A股',
 ])
 
+# ---- 夹具 6：2026-09-29 实盘「未成交卖单」原样 OCR（未删改） ----
+# 真实事故：证券名称「标普500ETF」里的 500 被当成**委托数量**，整行数字左移一位，
+# 于是 filled_qty 被写成 100（实际 0 成交）→ orders 台账写出**假成交**。
+# 注意本行的「操作」列（卖出）被 OCR 漏读，side 为 None —— 这也一并回归。
+ORDER_OCR_UNFILLED = "\n".join([
+    '委托时间 《证券代码 ， 证券名称 操作           备注            委托数量 ame ， 委托价格 ， 成交均价 ” 撤漠数量        SaaS        交易市场',
+    '14:56:59 513500 ，标普500ETF Sik            未成交                       100                    0             2.688             0.000                    0 6285045859 ”上海A股',
+    '汇总                                                                                              100                 0',
+])
+
 
 def check_position_row_with_latin_name():
     """回归：名称被 OCR 读成拉丁串（'C沈鼓'→'Cit'）的持仓行不得被丢弃。"""
@@ -177,6 +187,30 @@ def check_order_row_matches_side():
     assert match_order_row(None, "510880.SH", "buy", 100) is None
 
 
+def check_trades_name_digits_not_treated_as_qty():
+    """回归：证券名称里的数字（「标普500ETF」的 500）不得被当成委托数量。
+
+    背景（2026-09-29 实盘暴露）：旧实现对 code 之后的**整段**抽数字，
+    名称里的 500 变成 nums[0] → 整行数字左移一位 →
+    **「委托数量」被当成「成交数量」**（filled_qty=100，而实际 0 成交）
+    → `orders` 台账写出**假成交**。这是「台账说谎」类问题的典型，
+    只有用真实 OCR 原文才能回归到。
+    """
+    rows = parse_trades(ORDER_OCR_UNFILLED)
+    assert len(rows) == 1, "应解析出 1 行委托，实际 {}：{}".format(len(rows), rows)
+    r = rows[0]
+    assert r["code"] == "513500"
+    assert r["qty"] == 100, "委托数量错（名称里的 500 混进来了）：{}".format(r)
+    assert r["filled_qty"] == 0, "成交数量错（把委托数量当成了成交量）：{}".format(r)
+    assert abs(r["price"] - 2.688) < 1e-9, "委托价格错：{}".format(r)
+    assert not r["avg_price"], "未成交时成交均价应为 0/空：{}".format(r)
+    assert r["deal_id"] == "6285045859", "合同编号错：{}".format(r)
+    # 该行「操作」列被 OCR 漏读 → side 为 None，但不得因此丢行
+    assert r["side"] is None, "该行操作列本就读不到，应为 None：{}".format(r)
+    # 状态：文本为「未成交」→ 归入「已报」（未成交）
+    assert r["status"] == "已报", "未成交应归为已报：{}".format(r)
+
+
 def regression_all() -> int:
     """跑全部夹具断言；返回通过数。失败即抛 AssertionError。"""
     fns = [check_position_row_with_latin_name,
@@ -184,7 +218,8 @@ def regression_all() -> int:
            check_position_still_handles_cjk_rows,
            check_trades_row_with_latin_name,
            check_pos_frame_sanity,
-           check_order_row_matches_side]
+           check_order_row_matches_side,
+           check_trades_name_digits_not_treated_as_qty]
     for fn in fns:
         fn()
         print("  ✓ {}".format(fn.__name__))

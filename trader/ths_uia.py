@@ -648,7 +648,18 @@ class UiaThsBroker(Broker):
     def cancel_all(self, scope="all", timeout=6.0):
         """撤销可撤委托。scope: all=全撤 / buy=撤买 / sell=撤卖。
 
-        返回 (是否点到按钮, 确认弹窗文本)。
+        返回 (本次点击是否生效, 确认弹窗文本)。
+
+        ⚠️ **返回值不代表「委托已撤销」**（2026-09-29 实测澄清）
+        ------------------------------------------------------
+        实测：有一笔真实未成交卖单（100 股 513500，持仓 frozen=100）时调用
+        `cancel_all("all")` —— 点到了按钮，但**既不弹确认框、委托也不消失**，
+        `frozen` 保持 100。即该模拟盘**不支持程序化撤单**。
+
+        旧实现无论有没有弹确认框都 `return True`，调用方无法区分
+        「撤掉了」与「什么都没发生」。现在 `dlg is None` 明确判为**未生效**。
+        注意：即便返回 True（弹框并点了「是」），也**必须由调用方回读
+        持仓 `frozen` / 当日委托数量来确认**，不能凭返回值下结论。
         """
         self._switch("withdraw")
         time.sleep(1.2)
@@ -665,11 +676,14 @@ class UiaThsBroker(Broker):
         time.sleep(1.2)
 
         dlg, _ = self._find_confirm_dialog(timeout=timeout)
-        txt = ""
-        if dlg is not None:
-            txt = self._read_confirm_text(dlg)
-            self._click_dialog_button(dlg, _CONFIRM_YES)
-            time.sleep(0.8)
+        if dlg is None:
+            # 点了按钮却没弹确认框 = 这次点击没有生效（无委托可撤 / 该客户端
+            # 不支持程序化撤单）。不要谎报成功。
+            self._dismiss_info()
+            return False, "未出现撤单确认弹窗（可能无可撤委托，或该客户端不支持程序化撤单）"
+        txt = self._read_confirm_text(dlg)
+        self._click_dialog_button(dlg, _CONFIRM_YES)
+        time.sleep(0.8)
         self._dismiss_info()
         return True, txt
 
@@ -1028,17 +1042,31 @@ class UiaThsBroker(Broker):
         return best
 
     def fetch_today_orders(self, tries=3) -> list:
-        """回读当日委托（连拍取行数最多的那一帧）。"""
+        """回读当日委托（连拍取行数最多的那一帧）。
+
+        ⚠️ 2026-09-29 修正：**不得用 `_switch()` 的返回值当判据**。
+        实测（当日 14:56:59 提交一笔 100 股 513500 卖单之后）：
+        `_switch("today_order")` 返回 **False**，但页面**其实已经切过去了**
+        —— 手动读到的表头/数据都在。旧实现据此 `continue`，三次全部跳过读表，
+        函数返回 `[]` → `sync_fill` 永远拿不到成交信息，台账停在 submitted。
+
+        现在改为**内容判据**：读到的文本必须含委托页表头（「委托时间」/「委托数量」）
+        才认这一帧，否则重试。切页动作照做，但它的返回值不再决定是否读表。
+        """
         best = []
         for _ in range(tries):
             self._dismiss_popups()
             self._switch("query")
             time.sleep(0.3)
-            if not self._switch("today_order"):
+            self._switch("today_order")      # 返回值不可靠，只作动作、不作判据
+            time.sleep(1.0)
+            txt = self._read_grid_text()
+            # 内容判据：委托页表头含「委托时间」/「委托数量」；资金股票页没有，
+            # 可防止切页真失败时把**持仓行**误当委托行解析出来。
+            if "委托时间" not in txt and "委托数量" not in txt:
                 time.sleep(0.5)
                 continue
-            time.sleep(1.0)
-            cur = parse_trades(self._read_grid_text())
+            cur = parse_trades(txt)
             if len(cur) > len(best):
                 best = cur
             if len(best) >= 3:
@@ -1149,6 +1177,17 @@ class UiaThsBroker(Broker):
             account.frozen = float(bal.get("frozen") or 0.0)
         except (TypeError, ValueError):
             account.frozen = 0.0
+
+        # ⚠️ 冻结**股份** = 有未成交委托（2026-09-29 新增告警）
+        # 实测事故：当日 14:56:59 提交一笔 100 股 513500 卖单未成交，持仓表为
+        # `available=21100 / frozen=100`。但本函数只落 `qty`，**冻结信息被丢弃**
+        # → 下游（含人工看日志）完全看不出「有挂单」，于是
+        # 「持仓总量没变」被误判成「没有委托」——这正是本次排查时踩的坑。
+        # 注意：冻结**股份**与 `bal["frozen"]`（冻结**资金**）是两回事。
+        frozen_pos = {self._guess_full_code(c): int(p.get("frozen") or 0)
+                      for c, p in pos.items() if int(p.get("frozen") or 0) > 0}
+        if frozen_pos:
+            print("[reconcile] ⚠️ 存在冻结股份（= 有未成交委托）：{}".format(frozen_pos))
         return True
 
     @staticmethod

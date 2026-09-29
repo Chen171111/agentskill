@@ -190,7 +190,20 @@ def parse_trades(text) -> list:
         if not code:
             continue
         tail = ln.split(code, 1)[-1]
-        nums = re.findall(r"\d[\d,]*(?:\.\d+)?", tail)
+        # ⚠️ 必须从「操作/状态」关键词之后再取数字（2026-09-29 实盘数据修正）
+        # ------------------------------------------------------------------
+        # 证券名称里常带数字：标普500ETF、中证500、沪深300、创业板50、500ETF …
+        # 旧实现直接对 code 之后的**整段**抽数字，于是名称里的 500 被当成
+        # **委托数量**，整行数字**全体左移一位**。实测行（当日真实未成交卖单）：
+        #   "14:56:59 513500 标普500ETF Sik 未成交 100 0 2.688 0.000 0 6285045859"
+        #   旧解析 → qty=500 filled_qty=100 price=0.0 avg_price=2.688 deal_id='0'
+        #   正确值 → qty=100 filled_qty=0   price=2.688 avg_price=0.000 deal_id=6285045859
+        # 最危险的后果：**把「委托数量」当成「成交数量」**（filled_qty=100 而实际
+        # 0 成交）→ orders 台账写出假成交，与「报告写 325 天其实只转了 297 天」同类。
+        # 操作/状态关键词一定出现在名称之后，从它开始取数字即可。
+        _op = re.search(r"买入|卖出|已报|已成|未成交|部分成交|已撤|废单|待撤", tail)
+        seg = tail[_op.start():] if _op else tail
+        nums = re.findall(r"\d[\d,]*(?:\.\d+)?", seg)
         nums_f = [_to_float(x) for x in nums]
 
         def g(i):
