@@ -287,7 +287,7 @@
 
 ```bash
 PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-cd "E:/MyWorkAndProject/量化/agentskill"
+cd "E:/MyWorkAndProject/quant/agentskill"
 
 # 一键（约 2 分钟）。--force 必须加：产物比输入新时驱动会跳过
 $PY tools/run_reruns.py --only R1 --force

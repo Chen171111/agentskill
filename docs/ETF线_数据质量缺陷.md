@@ -123,7 +123,7 @@ ETF 发生**份额拆分 / 份额折算**时，价格会跳变，但**份额数�
 
 ```bash
 PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-cd "E:/MyWorkAndProject/量化/agentskill"
+cd "E:/MyWorkAndProject/quant/agentskill"
 
 $PY tools/diag_risk_controls.py                    # 风控阈值诊断（发现问题）
 $PY tools/diag_price_anomalies.py                  # 只诊断

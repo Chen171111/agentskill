@@ -45,7 +45,7 @@
 用法
 ----
     PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-    cd "E:/MyWorkAndProject/量化/agentskill"
+    cd "E:/MyWorkAndProject/quant/agentskill"
     $PY -u tools/probe_split_thresh.py 0.35      # 现用值，应 = 3.33%
     $PY -u tools/probe_split_thresh.py 0.1995    # 应 = 2.65%（展示误判代价）
 """

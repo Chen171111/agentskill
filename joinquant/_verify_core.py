@@ -38,7 +38,7 @@ ETF 份额折算未复权）。把策略移植到聚宽属于**最容易出现�
 用法
 ----
     PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-    cd "E:/MyWorkAndProject/量化/agentskill"
+    cd "E:/MyWorkAndProject/quant/agentskill"
     $PY joinquant/_verify_core.py
 """
 from __future__ import annotations

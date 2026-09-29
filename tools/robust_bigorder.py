@@ -11,7 +11,7 @@
 
 用法
 ----
-    cd E:/MyWorkAndProject/量化/agentskill
+    cd E:/MyWorkAndProject/quant/agentskill
     python tools/robust_bigorder.py
 """
 from __future__ import annotations

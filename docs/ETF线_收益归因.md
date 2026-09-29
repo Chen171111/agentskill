@@ -319,7 +319,7 @@ HANDOFF 当年"复测有效才开启"的判断**是可以站住的**。
 
 ```bash
 PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-cd "E:/MyWorkAndProject/量化/agentskill"
+cd "E:/MyWorkAndProject/quant/agentskill"
 
 $PY tools/attribute_etf_return.py          # 收益归因（约 40 秒）
 $PY tools/reproduce_faber_validation.py    # Faber 验证复现（约 55 秒）

@@ -9,7 +9,7 @@
 用法
 ----
     PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-    cd "E:/MyWorkAndProject/量化/agentskill"
+    cd "E:/MyWorkAndProject/quant/agentskill"
     $PY -u tools/verify_div_tax.py                 # 用默认参数（topk=50 / hold=5 / 2019~2026-09-11）
     $PY -u tools/verify_div_tax.py --help          # ← 2026-09-21 前这行会**卡死**（见下）
 

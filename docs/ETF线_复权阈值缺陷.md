@@ -1,6 +1,6 @@
 # ETF 线：份额折算**判据缺陷** —— 阈值贴在涨停带上，已误伤一次
 
-> 2026-09-16 晚 ｜ 项目：`E:\MyWorkAndProject\量化\agentskill`
+> 2026-09-16 晚 ｜ 项目：`E:\MyWorkAndProject\quant\agentskill`
 > 相关：`tools/README.md` 铁律 14 ｜ `docs/项目运行手册.md` §4.1b
 > **制度依据：`docs/参考_A股ETF涨跌幅限制.md`**（涨跌幅分档、误传澄清、来源都在那里，本文不重复）
 > 修复：`dataprovider/adjust.py` + `tools/diag_price_anomalies.py` + `tools/repair_etf_adjust.py` + `tools/sweep_etf_pool_expand.py`（`THRESH` **0.20 / 0.25 → 0.35**）
@@ -159,7 +159,7 @@
 
 ```bash
 PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-cd "E:/MyWorkAndProject/量化/agentskill"
+cd "E:/MyWorkAndProject/quant/agentskill"
 
 $PY -m dataprovider.adjust                    # 池内自检（应报 4 处）
 $PY -u tools/scan_return_bands.py             # 阈值依据：21%~40% 应为空

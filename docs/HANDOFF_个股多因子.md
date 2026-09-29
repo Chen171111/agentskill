@@ -1,7 +1,7 @@
 # 交接文档：个股多因子模型线
 
 > 交接时间：2026-09-13（第三次交接，本线为 2026-09-12 新增）
-> 项目：`E:\MyWorkAndProject\量化\agentskill`
+> 项目：`E:\MyWorkAndProject\quant\agentskill`
 > 本文件供下一个 agent 快速接手**个股多因子模型**这条线。
 > ETF 轮动线 / 同花顺下单链路见根目录 `HANDOFF.md`（本文档不涉及）。
 > **完整研究报告见 `docs/个股多因子模型报告.md`（第 8 节为本次新增）。**
@@ -211,7 +211,7 @@ ETF 线出过「份额拆分未复权」事故（`docs/ETF线_数据质量缺陷
 环境：`PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"`
 
 ```bash
-cd "E:/MyWorkAndProject/量化/agentskill"
+cd "E:/MyWorkAndProject/quant/agentskill"
 
 # ── 数据层 ──────────────────────────────────────────────
 # 1) 代码表探测（约 2 秒）
@@ -511,7 +511,7 @@ ETF 轮动线基础设施已跑通（主链路 + 同花顺模拟盘 + 每日 14:
 **修复后验证**：
 
 ```bash
-cd "E:/MyWorkAndProject/量化/agentskill"
+cd "E:/MyWorkAndProject/quant/agentskill"
 git ls-files --others --exclude-standard tools/ | wc -l   # -> 17
 git check-ignore -v tools/backtest_stock.py               # -> 无输出 = 不再被忽略
 ```

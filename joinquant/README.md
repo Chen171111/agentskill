@@ -175,7 +175,7 @@ $PY joinquant/_verify_core.py    # 第四部分：聚宽环境兼容性
 
 ```bash
 PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-cd "E:/MyWorkAndProject/量化/agentskill"
+cd "E:/MyWorkAndProject/quant/agentskill"
 $PY - <<'EOF'
 import pathlib
 OLD = "FORM = 'indpct'          # 'indpct' = 定稿（行业内百分位）"
@@ -256,7 +256,7 @@ wv = np.ones(len(sel)); wv = wv / wv.sum()      # 等权、满仓
 
 ```bash
 PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-cd "E:/MyWorkAndProject/量化/agentskill"
+cd "E:/MyWorkAndProject/quant/agentskill"
 $PY joinquant/_verify_core.py | tee results/joinquant_verify.log
 ```
 

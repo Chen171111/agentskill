@@ -1,6 +1,6 @@
 # 参考：A 股 ETF 涨跌幅限制（制度梳理）
 
-> 2026-09-16 ｜ 项目：`E:\MyWorkAndProject\量化\agentskill`
+> 2026-09-16 ｜ 项目：`E:\MyWorkAndProject\quant\agentskill`
 > **用途**：`dataprovider/adjust.py` 份额折算判据阈值（`THRESH`）的**制度依据**
 > 相关：`tools/README.md` 铁律 14 ｜ `docs/ETF线_复权阈值缺陷.md` ｜ `docs/项目运行手册.md` §4.1b
 > 检索来源：交易所《交易规则》/ 官方业务指南 / 证监会投教（一手）＋ WebSearch（兜底，标注）

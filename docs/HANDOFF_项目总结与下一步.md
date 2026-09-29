@@ -1,6 +1,6 @@
 # 项目交接文档（唯一入口）
 
-> 更新：**2026-09-20** ｜ 仓库：`E:\MyWorkAndProject\量化\agentskill`（git 分支 `master`，**公开仓库**）
+> 更新：**2026-09-20** ｜ 仓库：`E:\MyWorkAndProject\quant\agentskill`（git 分支 `master`，**公开仓库**）
 > 规模：**92 个脚本** / **39 份文档** / 385 个结果文件 ｜ HEAD `e6609f4`（**= 远端 `origin/master`**，后续提交见 `git log`）｜ **未提交 0 项**
 >
 > ⚠️ 旧头部的「HEAD `48175c7` ｜ 未提交 47 项」是 **2026-09-18 的快照**，已过期；
@@ -439,7 +439,7 @@ mtime 判据会把**全部 31 步**都标成「待跑」—— 但**无税步骤
 | **17** | ✅ **`fwd_vs_bt_dev` 用 2 个交易日的年化值触发假警报**（2026-09-19 已修） | 纸面跟踪锚点 **20260915**，数据补齐到 20260917 后 `forward_dev()` 拿到 **3 行**就年化 → 「前向年化 **13.10%** vs 回测 7.45%」→ dev **0.0565 > 阈值 0.05** → 越界、写 `LEARN_ALERT.txt`。**但 2 个交易日的年化值方差极大（年化 = 日收益^244），不具统计意义**。根因是守卫太弱（`len(wide) >= 2`）。**修法**：要求**至少一个完整持有期（`MIN_TRACK_DAYS = 60`，与定稿 `hold=60` 一致）**才判定，否则返回 `None`（`chk` 已用 `if fdev is not None` 守卫 → 跳过该项）。⚠️ **`fwd_vs_bt_max_dev = 0.05` 阈值本身未动** —— 只修"样本不足就不该判"这个逻辑。**→ 纸面跟踪满 60 个交易日后（约 2026-12 中）这项才会开始真正判定** |
 | **18** | ⚠️ **资金规模「10 万」在公开仓库里有 325 处命中 / 66 个文件**（2026-09-19 复核） | 与 §七「**不在文档里写个人邮箱、账号、金额**」的自我约定**存在口径矛盾**：一边声明不写金额，一边把「真实资金 10 万」写进 **§1.3 硬约束**、`config.py` 注释、以及 39 份文档中的 20+ 份。**性质澄清**：「10 万」是**策略建模块化的资金档位**（用于最低佣金惩罚建模 —— 10 万 ÷ 20 只 = 5,000 元/笔 → **有效佣金率其实是万10**），**不是账户余额、不是账号**（账户类信息已在 09-16 脱敏；`.workbuddy/memory/*.md` 用 `<金额略>` 占位）。**敏感度：低-中**（暴露资金量级，但不含账号/精确余额/邮箱 —— 已复核 HEAD 无任何真实金额型数字与手机号）。⚠️ **且已处于公开状态**（09-19 已推送），「收回」在技术上**只能防未来、不能防过去**（除非再动一次历史重写）。**→ ✅ 2026-09-19 主人拍板：选「加口径声明」（数字保留）** —— 已在 `README.md` 顶部与本文 §1.3 加声明，见 §4.6 第 7 项。 |
 | **19** | ✅ **快照复核凭证曾给「全部 INPUTS」背书 → 误导性放行**（2026-09-21 已修） | 09-18 我加的 `cmp_bars_snapshot.py` 凭证**只比对 3 个 `bars_total*`**，但 `run_reruns.py --list` 当时把它当成**全部输入**的通行证，打出「✅ 不必重跑」。⚠️ 09-20 另一会话给 `INPUTS` 加了 **`DIV_TAX`**（引擎内扣税表，D4）→ 273 分钟的步骤其实是因它才待跑，而凭证**管不着它**。**修法**：凭证新增 **`covers`** 字段声明覆盖范围；`--list` 改为**只有全覆盖才打 ✅**，否则打印「**⚠️ 部分覆盖**」并**逐条列出未覆盖的输入**（实测现为 `bars_bfq` / `bonus_all` / `universe_all` / `industry_all` / `div_tax_table`）。⚠️ 同时修了一个**路径分隔符 bug**：凭证存的是 `os.path.relpath` 的 Windows 反斜杠、`INPUTS` 用正斜杠 → 直接比集合会**全部误判为未覆盖**（已归一化）。 |
-| **20** | ✅ **2 个脚本硬编码了本仓库的绝对路径**（2026-09-21 已修，并加自检防复发） | `tools/verify_div_tax.py` 与 `tools/faber_binding_diag.py` 都是同一模式：**先算好了** `ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))`，**后面又被一行 `ROOT = r"E:\MyWorkAndProject\量化\agentskill"` 覆盖掉**，还附带重复的 `import os/sys`。本机碰巧一致所以能跑，**换机器就断**——而仓库是**公开**的、对外承诺「clone 下来能跑」。→ 已清掉硬编码与重复导入；`tools/test_stock_timing.py` 的 `--etf-dir` 默认值也从绝对路径改为仓库相对路径 `data/stocks`。**并给 `selftest` 加第 28 项**（AST 扫「代码里的字符串常量」，**排除 docstring**、**放行 `E:\Python`/`E:\Python32` 这类运维说明**）→ 现在 **28/0/0**。 |
+| **20** | ✅ **2 个脚本硬编码了本仓库的绝对路径**（2026-09-21 已修，并加自检防复发） | `tools/verify_div_tax.py` 与 `tools/faber_binding_diag.py` 都是同一模式：**先算好了** `ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))`，**后面又被一行 `ROOT = r"E:\MyWorkAndProject\quant\agentskill"` 覆盖掉**，还附带重复的 `import os/sys`。本机碰巧一致所以能跑，**换机器就断**——而仓库是**公开**的、对外承诺「clone 下来能跑」。→ 已清掉硬编码与重复导入；`tools/test_stock_timing.py` 的 `--etf-dir` 默认值也从绝对路径改为仓库相对路径 `data/stocks`。**并给 `selftest` 加第 28 项**（AST 扫「代码里的字符串常量」，**排除 docstring**、**放行 `E:\Python`/`E:\Python32` 这类运维说明**）→ 现在 **28/0/0**。 |
 | **21** | ⚠️ **`tools/verify_div_tax.py` 的 `--help` 实际不可用（会先跑完整分析）**（2026-09-21 发现，未修） | 该脚本在**模块层**就执行数据加载与回测，`--help` 60 秒内不返回（实测 `rc=124`）。**影响**：`selftest` 的「`--help` 可执行」检查只覆盖 M1~M4，所以没抓到；文档里也没人用它的 `--help`。**属工程整洁性问题，不影响结论**。→ 若要修，把 `main()` 之外的工作挪进函数即可（**低风险但需动一个已验收的脚本，留待主人决定**）。 |
 | **22** | 🔍 **`div_tax_table.parquet` 含 54 行「未来除权日」**（末根 **20260924** > 今日 20260921）（2026-09-21 观察） | 派现表 37,250 行 / 5,227 只 / **20160226~20260924**。**判断：不是 bug** —— 上市公司会**提前公告**除权除息日，所以"已公告但尚未生效"的分红落在这张表里是**正确的 point-in-time 行为**；且引擎**只在匹配日期**才应用，`--end 20260911` 的窗口**碰不到它们**。**但值得记一笔**：任何"用未来日期做条件"的写法都要小心（本表当前无此问题）。 |
 | **23** | ✅ **3 个可执行脚本没有 `if __name__ == "__main__"` 守卫**（2026-09-21 已修，并加自检） | 全部工作写在**模块层** → ① **`--help` 不打帮助而是直接开跑**；② **`import tools.xxx` 会触发完整回测**（隐性副作用）。实测修前：`verify_div_tax.py` **卡死 27s+ 未返回**、`probe_split_thresh.py` **抛 `ValueError: could not convert '--help'`**、`faber_binding_diag.py` 静默照跑。**修法**：工作搬进 `main()` + argparse。⚠️ `probe_split_thresh.py` 的**位置参数被 `docs/ETF线_复权阈值缺陷.md` 用了**（两条 `... 0.35` / `... 0.1995`）→ 用 **`nargs="?"`** 保留，且**无参数仍打用法 + rc=2**（原行为）。**验证**：改造前后 `verify_div_tax` **输出逐字 diff 为空**、`faber_binding_diag` **产物字节一致**。**防复发**：`selftest` 加第 29 项（「可执行脚本」用**是否被别人 import** 自动推导，库模块豁免，白名单不用手工维护）。 |
@@ -487,7 +487,7 @@ mtime 判据会把**全部 31 步**都标成「待跑」—— 但**无税步骤
 
 ```bash
 $PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-cd "E:/MyWorkAndProject/量化/agentskill"
+cd "E:/MyWorkAndProject/quant/agentskill"
 ```
 
 ### 6.2 依赖（**研究环境的硬边界**）
@@ -569,7 +569,7 @@ cd "E:/MyWorkAndProject/量化/agentskill"
 
 ```bash
 $PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-cd "E:/MyWorkAndProject/量化/agentskill"
+cd "E:/MyWorkAndProject/quant/agentskill"
 
 # ① 5 分钟：确认环境没坏
 $PY tools/selftest.py                      # 期望：27/27 通过

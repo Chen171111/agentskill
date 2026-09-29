@@ -308,7 +308,7 @@ df["sell_blocked"] = df.open <= (df.prev_close * (1 - lim)).round(2)
 
 ```bash
 PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-cd "E:/MyWorkAndProject/量化/agentskill"
+cd "E:/MyWorkAndProject/quant/agentskill"
 
 # ── 命令覆盖审计（4 类问题，只读）──
 $PY tools/audit_doc_commands.py

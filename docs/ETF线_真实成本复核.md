@@ -343,7 +343,7 @@ Faber 趋势过滤 / 趋势门）**没有跑赢一个懒人基准**，需要查�
 
 ```bash
 PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-cd "E:/MyWorkAndProject/量化/agentskill"
+cd "E:/MyWorkAndProject/quant/agentskill"
 
 # 成本/资金口径对照 + 池子全历史对比（约 25 秒）
 $PY tools/test_etf_realcost.py

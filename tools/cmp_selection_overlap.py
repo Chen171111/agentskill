@@ -23,7 +23,7 @@ prepare(口径 correct) ─┘
 用法
 ----
     PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-    cd "E:/MyWorkAndProject/量化/agentskill"
+    cd "E:/MyWorkAndProject/quant/agentskill"
     $PY tools/cmp_selection_overlap.py
 """
 from __future__ import annotations

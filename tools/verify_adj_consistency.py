@@ -20,7 +20,7 @@
 用法
 ----
     PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-    cd "E:/MyWorkAndProject/量化/agentskill"
+    cd "E:/MyWorkAndProject/quant/agentskill"
     $PY tools/verify_adj_consistency.py --n 20
 """
 from __future__ import annotations

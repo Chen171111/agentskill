@@ -12,7 +12,7 @@
 用法
 ----
     PY="C:/Users/XiaoQi/.workbuddy-ai/binaries/python/envs/default/Scripts/python.exe"
-    cd "E:/MyWorkAndProject/量化/agentskill"
+    cd "E:/MyWorkAndProject/quant/agentskill"
 
     # 先各跑一遍（约 15 分钟/次）
     $PY tools/test_industry_neutral.py --bars data/stockbars/bars_total.parquet --tax-rate 0.1 \\
