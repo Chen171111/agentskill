@@ -21,7 +21,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from trader.ths_parse import parse_position, parse_trades, pos_frame_sane   # noqa: E402
+from trader.ths_parse import (  # noqa: E402
+    match_order_row, parse_position, parse_trades, pos_frame_sane)
 
 # ---- 夹具 1：持仓表（含一行「名称 OCR 全丢」的新股） ----
 POS_OCR = "\n".join([
@@ -66,6 +67,17 @@ GOOD_FRAME_20260921 = {
     '601091': {'qty': 2400, 'available': 0, 'frozen': 2400,
                'cost': 41.673, 'price': 37.720},
 }
+
+# ---- 夹具 5：当日委托表，**同一代码买卖两行**（sync_fill 串向的真实场景） ----
+# 场景：同日对同一只标的既有卖出又有买入委托（上午调仓卖出 → 下午重跑又买入，
+# 或部分成交后补单、人工委托与自动委托撞在同一标的上）。
+# 旧 sync_fill 只按 code 匹配、命中即返回第一行 → 买单会拿到**卖单**的
+# 成交均价 3.498，`orders` 台账的「成交价」是假的。
+ORDER_OCR_BOTH_SIDES = "\n".join([
+    '委托时间 证券代码 证券名称 操作 状态 委托数量 成交数量 委托价格 成交均价 撤消数量 合同编号 交易市场',
+    '09:35:12 510880 红利ETF华泰柏瑞 卖出 已成 100 100 3.500 3.498 0 625377491 上海A股',
+    '14:50:03 510880 红利ETF华泰柏瑞 买入 已成 200 200 3.400 3.398 0 625377492 上海A股',
+])
 
 
 def check_position_row_with_latin_name():
@@ -120,13 +132,59 @@ def check_pos_frame_sanity():
     assert pos_frame_sane({}) and pos_frame_sane(None), "空帧不应崩溃"
 
 
+def check_order_row_matches_side():
+    """回归：sync_fill 必须按【方向】匹配委托行，同日同代码多笔时不得串向。
+
+    背景（2026-09-29 核对 `Order` 语义时发现）：`UiaThsBroker.sync_fill()` 旧实现
+    只按 code 匹配并 `return` 第一行。当日委托表里同一代码可能有多行且方向相反
+    （部分成交补单 / 同日重跑 / 人工委托撞车），于是买单会被写进卖单的
+    成交价与成交量 —— `orders` 表是审计事实记录，串向即失真
+    （资金与持仓有 reconcile 兜底，所以不会错单，但台账会说谎）。
+    """
+    rows = parse_trades(ORDER_OCR_BOTH_SIDES)
+    assert len(rows) == 2, "应解析出 2 行委托，实际 {}：{}".format(len(rows), rows)
+    assert {r["side"] for r in rows} == {"买入", "卖出"}, \
+        "「操作」列未解析出来：{}".format([r["side"] for r in rows])
+
+    # 买单必须选中**买入**行（成交均价 3.398），而不是卖单的 3.498
+    r = match_order_row(rows, "510880.SH", "buy", 200)
+    assert r is not None and r["side"] == "买入", "买单选中了卖单行：{}".format(r)
+    assert abs(r["avg_price"] - 3.398) < 1e-9, \
+        "买单成交均价串到了卖单：{}".format(r)
+
+    # 卖单必须选中**卖出**行
+    r2 = match_order_row(rows, "510880.SH", "sell", 100)
+    assert r2 is not None and r2["side"] == "卖出", "卖单选中了买单行：{}".format(r2)
+    assert abs(r2["avg_price"] - 3.498) < 1e-9
+
+    # 数量对不上但方向唯一 → 仍按方向匹配（OCR 可能把数量读错）
+    r3 = match_order_row(rows, "510880", "buy", 999)
+    assert r3 is not None and r3["side"] == "买入"
+
+    # 只剩反向行 → 必须返回 None（宁可台账停在 submitted，也不用错行）
+    only_sell = [x for x in rows if x["side"] == "卖出"]
+    assert match_order_row(only_sell, "510880.SH", "buy", 100) is None, \
+        "只有反向委托时不得回退取第一行（会串向）"
+
+    # OCR 丢了「操作」列（side=None）→ 兜底匹配，否则台账永远停在 submitted
+    blind = [dict(rows[0], side=None)]
+    assert match_order_row(blind, "510880.SH", "buy", 100) is not None, \
+        "OCR 丢方向时应兜底匹配"
+
+    # 代码不存在 / 空输入 / None
+    assert match_order_row(rows, "999999.SH", "buy", 100) is None
+    assert match_order_row([], "510880.SH", "buy", 100) is None
+    assert match_order_row(None, "510880.SH", "buy", 100) is None
+
+
 def regression_all() -> int:
     """跑全部夹具断言；返回通过数。失败即抛 AssertionError。"""
     fns = [check_position_row_with_latin_name,
            check_position_ignores_header_summary_junk,
            check_position_still_handles_cjk_rows,
            check_trades_row_with_latin_name,
-           check_pos_frame_sanity]
+           check_pos_frame_sanity,
+           check_order_row_matches_side]
     for fn in fns:
         fn()
         print("  ✓ {}".format(fn.__name__))

@@ -622,7 +622,12 @@ class UiaThsBroker(Broker):
         self._dismiss_info()
 
         order.status = "submitted"
-        order.filled_price = float(order.price or 0.0)
+        # ⚠️ filled_price 保持 None（2026-09-29）：此处只完成了「提交」，
+        # 成交价/量必须等 sync_fill 回读当日委托。旧实现写 order.price，
+        # 会让**未成交**的订单在台账里也带一个非空「成交价」= 委托价
+        # —— 字段名说谎，与「报告写 325 天其实只转了 297 天」同类问题。
+        # 展示层是 `filled_price or price`（main.py），回退显示委托价，观感不变。
+        order.filled_price = None
         order.filled_qty = 0          # 真实成交量以当日委托回读为准
         order.fee = 0.0
         return order
@@ -1042,23 +1047,34 @@ class UiaThsBroker(Broker):
         return best
 
     def sync_fill(self, order: Order):
-        """回读当日委托，用真实成交价/成交量修正订单。"""
+        """回读当日委托，用真实成交价/成交量修正订单。
+
+        ⚠️ 2026-09-29 核对 `Order` 语义时的两处修正：
+
+        1. **必须同方向** —— 见 `trader.ths_parse.match_order_row`。当日委托表里
+           同一代码可能有多行（部分成交后补单 / 同日重跑 / 人工委托），旧实现
+           只按 code 匹配、命中即返回第一行；若第一行是反向委托，就会拿卖单的
+           成交价与成交量去修正买单 —— `orders` 是审计事实记录，串向即失真。
+        2. **不再静默吞异常** —— 原先的 `except Exception: pass` 让 `runner` 层的
+           「成交回读失败」告警永远收不到（异常在更内层就被吃掉了），结果是
+           「真的没成交」与「回读失败」在台账里长得一模一样。
+        """
         try:
             rows = self.fetch_today_orders()
-            code = order.code.split(".")[0]
-            for r in rows:
-                if (r.get("code") or "").zfill(6) != code:
-                    continue
-                if r.get("avg_price"):
-                    order.filled_price = r["avg_price"]      # 成交均价
-                elif r.get("price"):
-                    order.filled_price = r["price"]          # 委托价兜底
-                if r.get("filled_qty"):
-                    order.filled_qty = r["filled_qty"]
-                order.status = "filled" if r.get("status") == "已成" else "submitted"
-                return
-        except Exception:
-            pass
+        except Exception as e:
+            print("[ths_uia] ⚠️ sync_fill 回读当日委托失败 {} {}：{}".format(
+                order.code, order.id, e))
+            return
+        r = match_order_row(rows, order.code, order.side, order.qty)
+        if r is None:
+            return
+        if r.get("avg_price"):
+            order.filled_price = r["avg_price"]      # 成交均价
+        elif r.get("price"):
+            order.filled_price = r["price"]          # 委托价兜底
+        if r.get("filled_qty"):
+            order.filled_qty = r["filled_qty"]
+        order.status = "filled" if r.get("status") == "已成" else "submitted"
 
     def reconcile(self, account, prices=None) -> bool:
         """用同花顺真实持仓/资金校正本地账户，消除双账本。
@@ -1155,4 +1171,5 @@ class UiaThsBroker(Broker):
 # （2026-09-21 的「C沈鼓」丢行即为此类）。现在 selftest 可用真实 OCR 原文回归。
 # 这里 re-export 保持向后兼容：`from trader.ths_uia import parse_position` 照旧可用。
 from .ths_parse import (  # noqa: E402
-    pos_frame_sane, parse_confirm_text, parse_position, parse_trades)
+    match_order_row, pos_frame_sane, parse_confirm_text, parse_position,
+    parse_trades)

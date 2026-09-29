@@ -217,3 +217,55 @@ def parse_trades(text) -> list:
             "deal_id": str(int(g(5))) if g(5) is not None else None,   # 合同编号
         })
     return rows
+
+
+def match_order_row(rows, code, side, qty=None):
+    """从当日委托行里挑出**属于这一笔订单**的那一行；挑不到返回 None。
+
+    ⚠️ 为什么必须同时匹配「方向」（2026-09-29 核对 `Order` 语义时发现）
+    ------------------------------------------------------------------
+    当日委托表里**同一代码可以有多行**，且方向可能相反：
+
+    - 部分成交后补单 / 同一天重跑（上一笔还挂着没成交）
+    - 用户手工委托 + 自动交易委托落在同一只标的上
+
+    旧 `UiaThsBroker.sync_fill()` 只按 code 匹配、命中即 `return` 第一行 ——
+    若第一行是**反向**委托，就会拿卖单的成交价/成交量去修正买单：
+    `orders` 表是**审计事实记录**，一旦串向，"成交价/成交量"就全是假的。
+    （资金与持仓有 `reconcile()` 回读券商兜底，所以不会错单，但台账会说谎。）
+
+    匹配优先级（逐级放宽，OCR 丢字段时不至于完全失配）
+    --------------------------------------------------
+    1. code + 方向 + 委托数量   最精确
+    2. code + 方向
+    3. code                     仅当**所有**候选行都没读出方向时才用（等价旧行为）
+
+    关键：只要候选行里存在**方向明确且相反**的行，就**不**回退到第 3 级 ——
+    宁可返回 None（台账停在 submitted，诚实地表示"回读不到"），也不用错行。
+
+    参数
+    ----
+    rows : parse_trades() 的返回值（或任何含 code/side/qty 的 dict 列表）
+    code : 订单代码，带不带市场后缀都行（"510880" / "510880.SH"）
+    side : "buy"/"sell"，或已经是中文的 "买入"/"卖出"
+    qty  : 委托数量（int）
+    """
+    code6 = str(code).split(".")[0].zfill(6)
+    want = "买入" if side in ("buy", "买入") else "卖出"
+    cands = [r for r in (rows or [])
+             if str(r.get("code") or "").split(".")[0].zfill(6) == code6]
+    if not cands:
+        return None
+
+    if qty is not None:
+        for r in cands:
+            if r.get("side") == want and r.get("qty") is not None \
+                    and int(r["qty"]) == int(qty):
+                return r
+    for r in cands:
+        if r.get("side") == want:
+            return r
+    # 兜底：整批候选行都没读出方向（OCR 丢了「操作」列）→ 只能取第一行
+    if all(r.get("side") is None for r in cands):
+        return cands[0]
+    return None

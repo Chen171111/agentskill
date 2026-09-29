@@ -342,18 +342,43 @@ submit    → status: submitted
    但它已被 `UiaThsBroker` 取代（`main.py:_make_broker` 的 `--ths` 走 UIA），故不影响。
    若要彻底清理，可给 `ThsBroker` 补 `cancel` 或标注弃用。
 
-4. **`scheduler` / `pipeline` 接入新 Broker —— 部分待办，且有一处语义不一致需核对。**
-   2026-09-13 核实：
+4. **`scheduler` / `pipeline` 接入新 Broker —— ✅ 2026-09-29 已核对完毕，并修掉 3 处台账保真缺陷。**
 
-   - `scheduler/runner.py:19` 仍 `from trader.broker import ThsBroker`（旧类），
-     但 `runner` 对 broker 是**鸭子类型**调用（`hasattr(broker, "reconcile"/"sync_fill")`），
-     而 `UiaThsBroker` **两个方法都有** → **功能上可接**，只是导入行与默认路径仍指向旧类，
-     需清理并实测确认。
-   - ⚠️ **`Order` 语义确实不一致**：`ThsBroker.submit()` 会置
-     `status="filled"` / `filled_price` / `filled_qty` / `fee`；
-     而 `UiaThsBroker.submit()`（`:507`）**直接 `return order`，不改任何字段**。
-     下游若读 `order.status` 判断成交，两条链路行为不同 —— **这是接入前必须核对的第一件事**。
-     需确认 `execution.py` / `scheduler` 是按 `status` 还是按 `sync_fill()` 回读判定成交。
+   2026-09-13 提出的「`Order` 语义不一致」经逐层核对**已消解** —— 两条链路确实行为不同，
+   但 `UiaThsBroker` 是**正确**的那一侧：
+
+   | 环节 | 行为 | 判定 |
+   |---|---|---|
+   | `UiaThsBroker.submit()` | 提交成功 → `status="submitted"` / `filled_qty=0` | ✅ 诚实反映「已报未成」 |
+   | `UiaThsBroker.sync_fill()` | 回读当日委托：`已成` → `filled` + 成交均价/成交量 | ✅ 与真实券商语义一致 |
+   | `execution.rebalance()` | 只对 `status=="filled"` 调 `apply_fill` | ✅ 真实券商路径不误触发（成交靠 reconcile 回读） |
+   | `runner.run_once()` | 下单 → `reconcile` → 逐笔 `sync_fill` → 落库 | ✅ 顺序正确 |
+   | 旧 `ThsBroker.submit()` | **无条件**置 `status="filled"` + `filled_qty=order.qty` | ⚠️ 把「已报」当「已成」——**已弃用**，全仓库零调用点 |
+
+   > 顺带核实：`scheduler/runner.py` **已不再** `import ThsBroker`（2026-09-13 那条记录已过时）；
+   > `main.py:_make_broker` 只构造 `UiaThsBroker`。旧类已在 `trader/broker.py` 加「已弃用」标注。
+
+   **核对中发现并修复的 3 处台账保真缺陷**（`orders` 表是**审计事实记录**）：
+
+   1. **`sync_fill` 只按 code 匹配、不校验方向**（真 bug）—— 当日委托表里同一代码
+      可能有多行且方向相反（部分成交后补单 / 同日重跑 / 人工委托撞车），旧实现
+      命中即返回第一行 → **买单被写进卖单的成交价与成交量**。
+      修法：新增纯函数 `trader.ths_parse.match_order_row()`
+      （`code+方向+数量` → `code+方向` → 仅当**全部**候选都没读出方向时才兜底第一行；
+      只要存在方向明确且相反的行就返回 `None` —— 宁可台账停在 `submitted`，也不用错行）。
+      放进 `ths_parse.py` 以便进 64 位 selftest；回归
+      `tools/test_ths_parse.py::check_order_row_matches_side`。
+   2. **`sync_fill` 静默吞异常** —— `except Exception: pass` 让 `runner` 层的
+      「成交回读失败」告警**永远收不到**（异常在更内层就被吃掉）→
+      「真的没成交」与「回读失败」在台账里长得一模一样。修法：打印告警后 return。
+   3. **`submit()` 用委托价冒充成交价** —— `filled_price = order.price` 让**未成交**
+      订单也带一个非空「成交价」。修法：置 `None`；展示层是 `filled_price or price`
+      （`main.py`），回退显示委托价，观感不变。
+
+   **验证**：`test_ths_parse` **6/6**、`selftest` **16/0/0**、`pyflakes`（非 joinquant）
+   **零输出**、`compileall` 全过；`main.py simulate --ths --dry` 端到端通过
+   （对账 `{513100.SH: 25000, 513500.SH: 21200}`；**零副作用**已验证：
+   `strategy_since` 保持 18、`orders` 表无新增）。
 5. **权限**：本次全程以**普通权限**跑通（消息级方案对 UIPI 不敏感）。仅「真实鼠标点击切查询子页」
    一步要求窗口可见；若日后改用真实点击做全部操作，则 Python 与同花顺需同权限。
 6. **测试留痕**：本会话共下了 3 笔 510880 买单（各 100 股），**全部成交**，模拟盘因此持有
@@ -447,7 +472,7 @@ nan 的比较运算**全部返回 False** → `_pos_ok` 五个判据全"通过"�
 | 类别 | 路径 | 大小 | 判据 |
 |---|---|---|---|
 | 死缓存 | `data/cache/panel_*.parquet` ×3 | 4.0 GB | 本仓库**无任何代码**读写该路径；生成器 `panel_cache.py` 已随线迁走（只有 quant2 有）。`dataprovider/altdata.py` 读的是 `E:\MyWorkAndProject\精灵历史数据\metrics\etf_bigorder.parquet`，与此无关 |
-| 个股线数据 | `data/stocks/`、`stocks_backup_20260913/`、`stocks_backup_20260914/`、`stocks_repaired/` | 104 MB | 前三者在 `quant2/data/` 有同内容副本（190 / 190 / 11 文件）；两个 backup 属历史冗余 |
+| 个股线数据 ⚠️ | `data/stocks/`、`stocks_backup_20260913/`、`stocks_backup_20260914/`、`stocks_repaired/` | 104 MB | 原判据「在 `quant2/data/` 有同内容副本」**不成立** —— `data/stocks/` 其实是 `config.STOCK_DIR`，ETF 与个股**共用**。详见本节末尾「⚠️ 事后更正」 |
 | 个股线日志 | `state/` 下 `append_stock_bars_*.log`、`merge_stockbars_*.log`、`rebuild_tax10_*.log`、`rebuild_tax20_*.log`、`split_repairs.log` | 39 KB | 个股线专属运行日志，结论已收入本文件 §八 |
 | 孤儿字节码 | `__pycache__/*.pyc`（22 个） | — | `append_stock_bars` / `backtest_stock` / `fetch_stock_bfq` / `build_div_tax` / `diag_stock_*` / `verify_div_tax` / `stock_factors` 等**已删除模块**的 .pyc |
 
@@ -497,8 +522,36 @@ nan 的比较运算**全部返回 False** → `_pos_ok` 五个判据全"通过"�
   命中哪个 hash 再逐个删，不要盲删。
 - `quant2/data/` 其余 2.0 GB：个股线研究数据本体，**不该动**。
 
+### ⚠️ 事后更正（2026-09-29 14:55，自查发现）
+
+**`data/stocks/` 不是个股线专属目录。它是 `config.STOCK_DIR` —— `DataStore` 存放
+「所有标的 CSV」的地方，ETF 与个股共用。**
+
+清理时我按「个股线专属」处理，移走并删掉的 190 个文件里含 **ETF 全球池的全部 11 只**
+（`159915` / `159920` / `159928` / `510050` / `510300` / `510500` / `510880` /
+`511010` / `513100` / `513500` / `518880`）。
+
+- **实际损失：无。** 当日 14:50 的计划任务（`tools/refresh_data.py` 走 akshare）
+  已把这 11 只**自动重建** —— `data/stocks/*.csv` 时间戳均为 `2026-09-29 14:50`，
+  且该次运行 `ok=true / exit_code=0`、下单前对账通过
+  （`{'513100.SH': 25000, '513500.SH': 21200}`）、总资产 189,276.80 与前一交易日自洽。
+- **但判据是错的**：当时只比对了「文件数 190 = 190」，既没查目录归属
+  （`config.STOCK_DIR`），也没看那 190 个文件**是什么**。
+  若当日刷新失败，ETF 线会**直接断数据**。
+
+> **教训**：删除数据前必须查**目录归属**（config 定义 + 代码引用），
+> 「另一处有副本」不足以作为判据 —— 副本可能同样混装，而且「有副本」≠「本仓库不需要」。
+> 对照：`data/cache/panel_*.parquet` 那条是**查过归属**的（全仓库代码零引用，
+> 生成器 `panel_cache.py` 只在 quant2），判据成立。
+
+**另一处需留意**：`data/stocks_backup_20260913` / `_20260914` 同样是**混装**备份
+（含 ETF CSV 的历史快照），已一并删除。当前 CSV 可由 akshare 重建、
+`dataprovider/adjust.py` 读取时会自动复权，故影响可忽略 ——
+但**这两个备份曾是 ETF 行情唯一的历史快照**，今后不要盲删。
+
 ### 结论
 
-本仓库现为**纯 ETF 轮动实盘线**：代码 14 MB、`data/` 92 KB、`state/` 399 KB。
+本仓库现为**纯 ETF 轮动实盘线**：代码 14 MB、`data/` ≈ 1.8 MB
+（11 只 ETF CSV + 交易日历）、`state/` 399 KB。
 个股线的一切（代码 / 数据 / 文档 / 研究状态）只在 `E:\MyWorkAndProject\quant2`，
 两库物理隔离、互不回写（边界见 `quant2/docs/隔离工作空间说明.md`）。

@@ -155,6 +155,16 @@ class DryRunBroker(Broker):
 class ThsBroker(Broker):
     """同花顺客户端（ths）下单接口，基于 easytrader。
 
+    ⚠️ **已弃用（2026-09-29 核实：全仓库无任何调用点）**
+    ------------------------------------------------------------------
+    新版同花顺是**纯自绘 UI**，easytrader 的 win32 实现适配不了。而且本类
+    `submit()` 有一个**危险假设**：无条件置 `status="filled"` +
+    `filled_qty=order.qty`（把「已报」当「已成」），与真实成交无关。
+
+    `--ths` 实际走 `trader/ths_uia.py::UiaThsBroker`（消息级实现），
+    `main.py:_make_broker` 只构造 UiaThsBroker。本类仅作历史留存，
+    `trader/__init__.py` 仍在 `__all__` 里导出 —— 新代码不要用。
+
     依赖
     ----
     pip install easytrader
