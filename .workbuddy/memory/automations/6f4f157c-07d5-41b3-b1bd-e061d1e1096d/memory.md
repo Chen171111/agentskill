@@ -98,3 +98,21 @@
 - 已发告警邮件至 <邮箱略>，主题 `[agentskill] 自动交易异常 2026-09-28`，正文含根因、修复办法、最近成功时间与关键日志片段。
 - 未重跑下单、未改动持仓与交易状态。
 - 最近一次成功运行：2026-09-22 14:50:01，退出码 0，总资产 <金额略>（现金 <金额略> + 市值 <金额略>）。
+
+## 2026-09-29 15:12
+- 运行 `tools/check_alerts.py`，退出码 0（正常）。
+- 最近一次运行：2026-09-29 14:50:09，退出码 0，总资产 <金额略>（现金 <金额略> + 市值 <金额略>）。
+- **连续 4 个交易日（09-23/09-24/09-25/09-28）的失败已中断**，09-29 计划运行恢复正常，当日无 ALERT.txt。
+- 计划任务 QuantPanorama_DailyRun 只读核对：State=Ready、LastRunTime=2026/9/29 14:50:00、
+  LastTaskResult=0、NextRunTime=2026/9/30 14:50:00、NumberOfMissedRuns=0。
+- 结论：正常，未发邮件。
+- **⚠️ 本次额外发现并已修复：自动化配置的工作目录失效。**
+  原 `cwds` 与提示词路径写的是 `E:\MyWorkAndProject\量化\agentskill`，该目录当时是**空目录**，
+  里面没有 `tools/check_alerts.py`，照原样执行会直接 `No such file or directory`。
+  真实仓库为 `E:\MyWorkAndProject\quant\agentskill`（判定依据：计划任务 QuantPanorama_DailyRun 的
+  Execute=`...\quant\agentskill\daily_run.bat`、WorkingDirectory 同路径；git remote 指向
+  github.com/Chen171111/agentskill）。
+  已把自动化 `cwds` 更新为该路径，并在提示词中加入「若目录为空则以计划任务动作路径为准」的兜底定位，
+  避免后续再次踩空。
+- 复用要点：本机查计划任务只能走 PowerShell 只读 `Get-ScheduledTask` / `Get-ScheduledTaskInfo`；
+  Bash 下 `schtasks` 与直读 `C:\Windows\System32\Tasks\` 会被拒（Permission denied）。

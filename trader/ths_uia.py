@@ -82,6 +82,9 @@ _POPUP_CLOSE_WORDS = ("确定", "知道了", "知道了(&K)", "关闭", "关闭(
 class UiaThsBroker(Broker):
     """同花顺交易客户端下单/查询（消息级自动化）。"""
 
+    # 「操作」列读不出的一次性告警开关（见 sync_fill）。类属性便于测试重置。
+    _side_warned = False
+
     def __init__(self, exe_path=None, use_market_price=True):
         self._hwnd = None
         self._lock = Lock()
@@ -1041,8 +1044,35 @@ class UiaThsBroker(Broker):
             time.sleep(0.4)
         return best
 
+    @staticmethod
+    def _order_frame_score(rows) -> int:
+        """给一帧委托行打分，用于在连拍帧里挑**信息最完整**的一帧。
+
+        ⚠️ 为什么不能只比「行数」（2026-09-29 实测）
+        ------------------------------------------
+        旧实现 `if len(cur) > len(best)` —— 只有 1 笔委托时**所有帧行数都相等**，
+        于是永远保留**第一帧**。而实盘连拍 5 帧里，第一帧恰恰是名称带噪串
+        （`#R@S500ETF 32h`）的那一帧，解析最容易出错。行数相同 ≠ 信息等价。
+
+        评分项都取「有真值才算分」的字段，避免把 OCR 读坏的帧选进来：
+        合同编号（≥9 位长整数）/ 成交均价 / 委托数量 / 状态为「已成」。
+        """
+        if not rows:
+            return -1
+        s = len(rows) * 10          # 行数优先（多笔委托不能丢行）
+        for r in rows:
+            if r.get("deal_id"):
+                s += 2
+            if r.get("avg_price"):
+                s += 2
+            if r.get("qty"):
+                s += 1
+            if r.get("status") == "已成":
+                s += 1
+        return s
+
     def fetch_today_orders(self, tries=3) -> list:
-        """回读当日委托（连拍取行数最多的那一帧）。
+        """回读当日委托（连拍取**信息最完整**的一帧）。
 
         ⚠️ 2026-09-29 修正：**不得用 `_switch()` 的返回值当判据**。
         实测（当日 14:56:59 提交一笔 100 股 513500 卖单之后）：
@@ -1052,8 +1082,10 @@ class UiaThsBroker(Broker):
 
         现在改为**内容判据**：读到的文本必须含委托页表头（「委托时间」/「委托数量」）
         才认这一帧，否则重试。切页动作照做，但它的返回值不再决定是否读表。
+
+        选帧：按 `_order_frame_score` 取分最高的一帧（同分取先到的）。
         """
-        best = []
+        best, best_score = [], -2
         for _ in range(tries):
             self._dismiss_popups()
             self._switch("query")
@@ -1067,15 +1099,20 @@ class UiaThsBroker(Broker):
                 time.sleep(0.5)
                 continue
             cur = parse_trades(txt)
-            if len(cur) > len(best):
-                best = cur
+            sc = self._order_frame_score(cur)
+            if sc > best_score:
+                best, best_score = cur, sc
             if len(best) >= 3:
                 break
             time.sleep(0.4)
         return best
 
-    def sync_fill(self, order: Order):
+    def sync_fill(self, order: Order, rows=None):
         """回读当日委托，用真实成交价/成交量修正订单。
+
+        `rows`：可选，已抓取的委托行（来自 `fetch_today_orders`）。传入可**省掉
+        一次全量连拍**（实测 `fetch_today_orders` 约 35 s，而它内部 3 次连拍
+        本身就可能拿到不同帧 —— 同一次校验用同一份数据才自洽）。
 
         ⚠️ 2026-09-29 核对 `Order` 语义时的两处修正：
 
@@ -1086,16 +1123,30 @@ class UiaThsBroker(Broker):
         2. **不再静默吞异常** —— 原先的 `except Exception: pass` 让 `runner` 层的
            「成交回读失败」告警永远收不到（异常在更内层就被吃掉了），结果是
            「真的没成交」与「回读失败」在台账里长得一模一样。
+
+        ⚠️ 实测补充（2026-09-29 已成交卖单 5 帧）：**`side` 读不出来是常态**，
+        「操作」列 5/5 帧被 OCR 读坏（'Sik'/'32h'/'SH SS8aba'…）→ `match_order_row`
+        实际走的是「全部候选行 side 均 None → 取第一行」的兜底分支。
+        方向匹配是**保险**，不是主路径；只有当日同标的出现方向明确的**多行**时才生效。
         """
-        try:
-            rows = self.fetch_today_orders()
-        except Exception as e:
-            print("[ths_uia] ⚠️ sync_fill 回读当日委托失败 {} {}：{}".format(
-                order.code, order.id, e))
-            return
+        if rows is None:
+            try:
+                rows = self.fetch_today_orders()
+            except Exception as e:
+                print("[ths_uia] ⚠️ sync_fill 回读当日委托失败 {} {}：{}".format(
+                    order.code, order.id, e))
+                return
         r = match_order_row(rows, order.code, order.side, order.qty)
         if r is None:
             return
+        if r.get("side") is None and not UiaThsBroker._side_warned:
+            # 只提示一次：这是**系统性**的 OCR 缺陷（实测 5/5 帧读不出），
+            # 逐笔打印会把日志刷成噪音，反而盖住真告警。
+            UiaThsBroker._side_warned = True
+            print("[ths_uia] ⚠️ 委托行「操作」列未读出（OCR 已知缺陷，5/5 帧复现）"
+                  "→ 方向匹配退化为「取第一行」兜底；本进程后续不再重复提示。"
+                  "首次：{} {} 兜底匹配到 {} 股（合同编号 {}）".format(
+                      order.code, order.id, r.get("qty"), r.get("deal_id")))
         if r.get("avg_price"):
             order.filled_price = r["avg_price"]      # 成交均价
         elif r.get("price"):

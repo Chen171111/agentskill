@@ -140,7 +140,9 @@ class DryRunBroker(Broker):
     def reconcile(self, account, prices=None) -> bool:
         return self.real.reconcile(account, prices)
 
-    def sync_fill(self, order):
+    def sync_fill(self, order, rows=None):
+        # rows：已回读的当日委托行（`UiaThsBroker` 用它省掉一次 35 s 连拍）。
+        # 本类是只读试算，不下单也无需回读，签名统一只为让 runner 无脑透传。
         return None
 
     # ---- 下单：只记录 ----
@@ -335,8 +337,12 @@ class ThsBroker(Broker):
             out["total"] = float(total)
         return out
 
-    def sync_fill(self, order: Order):
-        """下单后回读今日成交，用真实成交价/数量修正订单（替代限价记账）。"""
+    def sync_fill(self, order: Order, rows=None):
+        """下单后回读今日成交，用真实成交价/数量修正订单（替代限价记账）。
+
+        rows：已回读的当日委托行。本类走 easytrader 的 `today_trades`，
+        与委托行格式不同，故忽略该参数（签名统一，便于 runner 透传）。
+        """
         try:
             records = self._as_records(self.user.today_trades)
         except Exception:

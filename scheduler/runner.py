@@ -318,10 +318,23 @@ class DailyRunner:
         # 回读真实成交，修正订单状态。
         # 真实券商（同花顺）submit() 只返回 submitted，实际成交/部分成交/未成交
         # 必须回读当日委托才能知道，否则台账里全是「已报 0 股」。
+        #
+        # ⚠️ 2026-09-29：**当日委托只回读一次**，供本批全部订单复用。
+        #   旧实现 `for o in orders: sync_fill(o)` 里每笔都会重新 `fetch_today_orders()`
+        #   —— 实测单次 ≈35 s，3 笔订单就是 105 s（09-29 实测脚本被 120 s 超时杀死，
+        #   这是主因之一）。且逐笔重抓会拿到**不同帧**（OCR 连拍抖动：名称/状态列
+        #   时而读坏），同一批订单的成交价可能来自不同帧，自相矛盾。
         if self.broker is not None and hasattr(self.broker, "sync_fill"):
+            rows = None
+            if hasattr(self.broker, "fetch_today_orders"):
+                try:
+                    rows = self.broker.fetch_today_orders()
+                except Exception as e:
+                    # 回读失败不阻断：下面逐笔 sync_fill 会各自再试一次
+                    print("[runner] ⚠️ 当日委托回读失败（改由逐笔重试）：{}".format(e))
             for o in orders:
                 try:
-                    self.broker.sync_fill(o)
+                    self.broker.sync_fill(o, rows=rows)
                 except Exception as e:
                     # 不静默（2026-09-29）：回读失败会让订单台账停在 submitted
                     # （审计失真）。positions 有 reconcile 兜底，但这里必须留痕。

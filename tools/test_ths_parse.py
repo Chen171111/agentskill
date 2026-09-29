@@ -90,6 +90,37 @@ ORDER_OCR_UNFILLED = "\n".join([
 ])
 
 
+# ---- 夹具 7：2026-09-29 实盘「已成交卖单」原样 OCR（未删改，3 帧） ----
+# 背景：那笔 100 股 513500 卖单在收盘集合竞价成交后，连拍 5 帧「当日委托」页，
+# **逐帧对照 OCR 原文**才发现旧解析的结构性错误：
+#   「操作」列（应为「卖出」）5/5 帧全部被读坏（'Sik'/'32h'/'SH SS8aba'/'Si SHBatae'/'32k'）
+#   「状态」列（应为「全部成交」）有 2 帧被读坏（'SS8aba'/'SHBatae'）
+# → 任何「从操作/状态关键词起点抽数字」的方案都会**整行左移一位**：
+#     名称「标普500ETF」的 500 被当成委托数量，
+#     **「委托数量」被当成「成交数量」**（qty=500/filled_qty=100/price=100.0）
+# → orders 台账的成交价与成交量全是假的。
+# 修法：改「行尾市场词锚定」（尾部 6 列 5/5 帧稳定）。
+# 三帧共同的真值：qty=100 filled_qty=100 price=2.688 avg_price=2.690 deal_id=6285045859
+
+# 帧 4：状态列读出「全部成交」，最干净的一帧
+ORDER_OCR_FILLED = "\n".join([
+    '委托时间 《证券代码 ， 证券名称 操作           备注            委托数量 ame ， 委托价格 ， 成交均价 ” 撤漠数量        SaaS        交易市场',
+    '14:56:59 513500 ，标普500ETF Sik  全部成交     100    100   2.688   2.690    0 6285045859 ”上海A股',
+    '汇总                                                                                              100                 0',
+])
+
+# 帧 1：**状态列被 OCR 读坏**（'SS8aba'）→ 必须靠数量关系兜底判「已成」
+ORDER_OCR_FILLED_BADSTATUS = "\n".join([
+    '委托时间 《证券代码 ， 证券名称 操作           备注            委托数量 ame ， 委托价格 ， 成交均价 ” 撤漠数量        SaaS        交易市场',
+    '14:56:59 513500 #@S500ETF SH SS8aba    100   100   2.688   2.690    0 6285045859 “上海A股',
+])
+
+# 帧 0：名称前还混进了 `#R@S500ETF 32h` 这类噪串（多一个数字 32）
+ORDER_OCR_FILLED_NOISY = "\n".join([
+    '14:56:59 513500 #R@S500ETF 32h  全部成交    100   100   2.688   2.690    0 6285045859 ”上海A股',
+])
+
+
 def check_position_row_with_latin_name():
     """回归：名称被 OCR 读成拉丁串（'C沈鼓'→'Cit'）的持仓行不得被丢弃。"""
     pos = parse_position(POS_OCR)
@@ -211,6 +242,83 @@ def check_trades_name_digits_not_treated_as_qty():
     assert r["status"] == "已报", "未成交应归为已报：{}".format(r)
 
 
+def check_trades_filled_row_tail_anchor():
+    """回归：**已成交**委托行的 6 个尾部数字列不得错位（2026-09-29 实盘 3 帧）。
+
+    事故链
+    ------
+    「操作」列 5/5 帧被 OCR 读坏 → 旧「从关键词起点抽数字」的锚点失效 →
+    整行数字左移一位：名称「标普500ETF」的 500 变成委托数量，
+    「委托数量」变成「成交数量」。旧解析（帧 4）：
+        qty=500 / filled_qty=100 / price=100.0 / avg_price=2.688 / deal_id='0'
+    真值：
+        qty=100 / filled_qty=100 / price=2.688 / avg_price=2.690 / deal_id=6285045859
+
+    最危险的后果不是价格错，而是 **filled_qty 说谎** —— 对「未成交」行
+    （夹具 6）会写成 filled_qty=100 而实际 0 成交，`orders` 台账出现**假成交**。
+    """
+    for tag, txt in (("干净帧", ORDER_OCR_FILLED),
+                     ("状态列读坏帧", ORDER_OCR_FILLED_BADSTATUS),
+                     ("名称前噪串帧", ORDER_OCR_FILLED_NOISY)):
+        rows = parse_trades(txt)
+        assert len(rows) == 1, "[{}] 应解析出 1 行，实际 {}：{}".format(
+            tag, len(rows), rows)
+        r = rows[0]
+        assert r["code"] == "513500", "[{}] 代码错：{}".format(tag, r)
+        assert r["qty"] == 100, \
+            "[{}] 委托数量错（名称里的 500 混进来了？）：{}".format(tag, r)
+        assert r["filled_qty"] == 100, \
+            "[{}] 成交数量错（整行左移了？）：{}".format(tag, r)
+        assert abs(r["price"] - 2.688) < 1e-9, \
+            "[{}] 委托价格错：{}".format(tag, r)
+        assert abs(r["avg_price"] - 2.690) < 1e-9, \
+            "[{}] 成交均价错（被委托价顶替了？）：{}".format(tag, r)
+        assert r["deal_id"] == "6285045859", \
+            "[{}] 合同编号错：{}".format(tag, r)
+        # 状态：帧 1 的「全部成交」被读成 'SS8aba' → 必须靠「委托数量==成交数量」
+        # 兜底判「已成」，否则 sync_fill 的 status 永远停在 submitted
+        assert r["status"] == "已成", \
+            "[{}] 已成交行状态错（状态列读坏时未用数量关系兜底）：{}".format(tag, r)
+
+
+def check_trades_filled_status_from_qty_fallback():
+    """回归：状态列被 OCR 读坏时，用「成交数量 >= 委托数量」兜底判「已成」。
+
+    帧 1 实测：状态列读出 'SS8aba'（「全部成交」被读坏），但委托数量/成交数量
+    都是 100 —— 若不做兜底，`sync_fill` 里 `r["status"] == "已成"` 永远为假，
+    `order.status` 就永远停在 `submitted`，台账看不出这笔已经成交了。
+    """
+    rows = parse_trades(ORDER_OCR_FILLED_BADSTATUS)
+    assert rows and rows[0]["status"] == "已成", \
+        "状态列读坏时应由数量关系兜底：{}".format(rows)
+    # 反向：部分成交（100 委托 / 40 成交）不得被兜底成「已成」
+    partial = ('14:56:59 513500 标普500ETF Sik  部分成交   100    40   '
+               '2.688   2.690    0 6285045859 ”上海A股')
+    r = parse_trades(partial)[0]
+    assert r["status"] == "部分成交", "部分成交被误判：{}".format(r)
+    # 反向：已撤优先于「已成」文本
+    cancelled = ('14:56:59 513500 标普500ETF Sik  已撤      100     0   '
+                 '2.688   0.000    0 6285045859 ”上海A股')
+    r = parse_trades(cancelled)[0]
+    assert r["status"] == "已撤", "已撤被误判：{}".format(r)
+    assert r["filled_qty"] == 0, "已撤行成交数量应为 0：{}".format(r)
+
+
+def check_trades_sync_fill_gets_real_avg_price():
+    """回归：sync_fill 从已成交行取到的是**成交均价**，不是委托价。
+
+    帧 4 的委托价 2.688 与成交均价 2.690 **不同**（收盘集合竞价成交价高于
+    委托价）—— 这正是「用委托价冒充成交价」这类静默缺陷的照妖镜：
+    若取错，`orders.filled_price` 会写 2.688，与券商真值差 0.002/股。
+    """
+    rows = parse_trades(ORDER_OCR_FILLED)
+    r = match_order_row(rows, "513500.SH", "sell", 100)
+    assert r is not None, "已成交卖单应能被 match_order_row 选中"
+    assert abs(r["avg_price"] - 2.690) < 1e-9, \
+        "sync_fill 会取到 avg_price，它必须是成交均价 2.690：{}".format(r)
+    assert abs(r["price"] - 2.688) < 1e-9, "委托价应为 2.688：{}".format(r)
+
+
 def regression_all() -> int:
     """跑全部夹具断言；返回通过数。失败即抛 AssertionError。"""
     fns = [check_position_row_with_latin_name,
@@ -219,7 +327,10 @@ def regression_all() -> int:
            check_trades_row_with_latin_name,
            check_pos_frame_sanity,
            check_order_row_matches_side,
-           check_trades_name_digits_not_treated_as_qty]
+           check_trades_name_digits_not_treated_as_qty,
+           check_trades_filled_row_tail_anchor,
+           check_trades_filled_status_from_qty_fallback,
+           check_trades_sync_fill_gets_real_avg_price]
     for fn in fns:
         fn()
         print("  ✓ {}".format(fn.__name__))

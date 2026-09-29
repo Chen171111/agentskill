@@ -170,10 +170,88 @@ def parse_position(text) -> dict:
     return out
 
 
+# 委托表「交易市场」列的取值（实测：上海A股 / 深圳A股 / 北京A股）
+_MARKET_RE = re.compile(r"(?:上海|深圳|北京)A股|(?:沪|深|北)[A-Za-z]?股")
+# 委托表「操作 / 状态」列的取值（OCR 会读坏，仅作名称截断与状态判据的辅助）
+_STATE_WORDS = ("全部成交", "部分成交", "未成交", "已成", "已报", "已撤",
+                "废单", "待撤", "买入", "卖出")
+
+
+def _tail_six(tail):
+    """委托表行尾锚定 → [委托数量, 成交数量, 委托价格, 成交均价, 撤消数量, 合同编号]。
+
+    锚不上返回 None（交由 `parse_trades` 退回「关键词起点」路径，兼容成交表）。
+
+    ⚠️ 为什么必须**从行尾锚定**，而不是「从操作/状态关键词起点抽数字」
+    ==============================================================
+    2026-09-29 实盘连拍 5 帧「当日委托」页，逐帧对照 OCR 原文后定案：
+
+        帧  操作列(应为「卖出」)   状态列(应为「全部成交」)
+        0   '32h'         ✗       「全部成交」        ✓
+        1   'SH SS8aba'   ✗       'SS8aba'           ✗  ← 状态列也读坏
+        2   'Si SHBatae'  ✗       'SHBatae'          ✗  ← 状态列也读坏
+        3   '32k'         ✗       「全部成交」        ✓
+        4   'Sik'         ✗       「全部成交」        ✓
+
+    **操作列 5/5 帧全部读坏**，所以任何以「买入/卖出」为起点的方案都必然失败；
+    而旧 `_op` 词表**还漏了「全部成交」**（只有「已成」），于是 3 帧也一起失败。
+    失败的后果是**整行数字左移一位** —— 名称「标普500ETF」里的 500 被当成
+    委托数量，**「委托数量」被当成「成交数量」**：
+
+        帧 4 旧解析 → qty=500 filled_qty=100 price=100.0 avg_price=2.688 deal_id='0'
+        帧 4 正确值 → qty=100 filled_qty=100 price=2.688 avg_price=2.690 deal_id=6285045859
+
+    对「未成交」行（夹具 6）更致命：filled_qty 被写成 100 而实际 **0 成交**
+    → `orders` 台账写出**假成交**，与「报告写 325 天其实只转了 297 天」同类。
+
+    而**行尾 6 列在 5/5 帧里都稳定读出**，且紧邻「交易市场」列。故以市场词为锚、
+    向前取 6 个数字。合同编号额外要求 ≥9 位整数（实测 9~10 位），
+    以排除「当日成交」表（其尾部是 成交金额/成交编号/委托编号，编号仅 7 位）。
+
+    参数
+    ----
+    tail : 行内 6 位代码**之后**的全部文本
+    """
+    m = _MARKET_RE.search(tail)
+    if m:
+        seg = tail[:m.start()]
+    else:
+        # 无市场词：只有「最后一个数字是 ≥9 位整数」才敢按委托表尾部锚定
+        all_nums = re.findall(r"\d[\d,]*(?:\.\d+)?", tail)
+        if not all_nums:
+            return None
+        if len(all_nums[-1].replace(",", "").split(".")[0]) < 9:
+            return None
+        seg = tail
+    nums = re.findall(r"\d[\d,]*(?:\.\d+)?", seg)
+    if len(nums) < 6:
+        return None
+    six = nums[-6:]
+    if len(six[5].replace(",", "").split(".")[0]) < 9:
+        return None
+    return [_to_float(x) for x in six]
+
+
+def _name_of(tail):
+    """从行内代码之后的文本里切出证券名称（名称列是单列，后随其它列）。
+
+    ⚠️ 不得用「买入|卖出」分割（2026-09-29）：操作列 5/5 帧被 OCR 读坏，
+    分割不生效时名称会把状态与数字列整段吞进来（实测 `'2S500ETF32k全'`）。
+    改为：先按 ≥2 连续空白切出名称列，再剔除操作/状态词。
+    """
+    seg = re.split(r"\s{2,}", tail, maxsplit=1)[0]
+    for kw in _STATE_WORDS:
+        seg = seg.split(kw)[0]
+    return re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", seg)[:12] or None
+
+
 def parse_trades(text) -> list:
     """OCR 当日委托/成交表 → [{code, name, side, status, qty, filled_qty, price, avg_price, deal_id}]。
 
-    列序：委托时间 证券代码 证券名称 操作 状态 委托数量 成交数量 委托价格 成交均价 撤消数量 合同编号 交易市场
+    委托表列序：委托时间 证券代码 证券名称 操作 状态 委托数量 成交数量 委托价格 成交均价 撤消数量 合同编号 交易市场
+    成交表列序：成交时间 证券代码 证券名称 操作 成交数量 成交均价 成交金额 成交编号 委托编号
+
+    两种表**列数不同**，用 `_tail_six` 的尾部锚定区分（委托表锚得上，成交表锚不上）。
     """
     rows = []
     for ln in text.splitlines():
@@ -190,44 +268,53 @@ def parse_trades(text) -> list:
         if not code:
             continue
         tail = ln.split(code, 1)[-1]
-        # ⚠️ 必须从「操作/状态」关键词之后再取数字（2026-09-29 实盘数据修正）
-        # ------------------------------------------------------------------
-        # 证券名称里常带数字：标普500ETF、中证500、沪深300、创业板50、500ETF …
-        # 旧实现直接对 code 之后的**整段**抽数字，于是名称里的 500 被当成
-        # **委托数量**，整行数字**全体左移一位**。实测行（当日真实未成交卖单）：
-        #   "14:56:59 513500 标普500ETF Sik 未成交 100 0 2.688 0.000 0 6285045859"
-        #   旧解析 → qty=500 filled_qty=100 price=0.0 avg_price=2.688 deal_id='0'
-        #   正确值 → qty=100 filled_qty=0   price=2.688 avg_price=0.000 deal_id=6285045859
-        # 最危险的后果：**把「委托数量」当成「成交数量」**（filled_qty=100 而实际
-        # 0 成交）→ orders 台账写出假成交，与「报告写 325 天其实只转了 297 天」同类。
-        # 操作/状态关键词一定出现在名称之后，从它开始取数字即可。
-        _op = re.search(r"买入|卖出|已报|已成|未成交|部分成交|已撤|废单|待撤", tail)
-        seg = tail[_op.start():] if _op else tail
-        nums = re.findall(r"\d[\d,]*(?:\.\d+)?", seg)
-        nums_f = [_to_float(x) for x in nums]
 
-        def g(i):
-            return nums_f[i] if i < len(nums_f) else None
+        six = _tail_six(tail)
+        if six is not None:
+            qty_f, fill_f, price_f, avg_f = six[0], six[1], six[2], six[3]
+            deal_id = str(int(six[5])) if six[5] is not None else None
+        else:
+            # 成交表路径：从操作/状态关键词起点取数字（成交表操作列**含中文**
+            # 「买入/卖出」，实测夹具 2 能读出；委托表才读不出）
+            _op = re.search(r"买入|卖出|已报|已成|全部成交|部分成交|未成交|已撤|废单|待撤",
+                            tail)
+            seg = tail[_op.start():] if _op else tail
+            nums_f = [_to_float(x)
+                      for x in re.findall(r"\d[\d,]*(?:\.\d+)?", seg)]
 
-        if "全部成交" in ln or "已成" in ln:
-            status = "已成"
+            def g(i):
+                return nums_f[i] if i < len(nums_f) else None
+
+            qty_f, fill_f, price_f, avg_f = g(0), g(1), g(2), g(3)
+            deal_id = str(int(g(5))) if g(5) is not None else None
+
+        qty_i = int(qty_f) if qty_f is not None else None
+        fill_i = int(fill_f) if fill_f is not None else 0
+
+        # 状态：文本判据优先；**文本列被 OCR 读坏时用数量关系兜底**
+        # （5 帧实测有 2 帧「全部成交」被读成 'SS8aba'/'SHBatae'，
+        #   若不兜底，已成会被判成「已报」→ sync_fill 的 status 永远停在 submitted）
+        if "已撤" in ln or "废单" in ln:
+            status = "已撤"
         elif "部分成交" in ln:
             status = "部分成交"
-        elif "已撤" in ln:
-            status = "已撤"
+        elif "全部成交" in ln or "已成" in ln:
+            status = "已成"
+        elif qty_i and fill_i and fill_i >= qty_i:
+            status = "已成"
         else:
             status = "已报"
+
         rows.append({
             "code": code,
-            "name": (re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "",
-                            re.split(r"买入|卖出", tail)[0])[:12] or None),
+            "name": _name_of(tail),
             "side": "买入" if "买入" in ln else ("卖出" if "卖出" in ln else None),
             "status": status,
-            "qty": int(g(0)) if g(0) is not None else None,            # 委托数量
-            "filled_qty": int(g(1)) if g(1) is not None else 0,        # 成交数量
-            "price": g(2),                                             # 委托价格
-            "avg_price": g(3),                                         # 成交均价
-            "deal_id": str(int(g(5))) if g(5) is not None else None,   # 合同编号
+            "qty": qty_i,                       # 委托数量
+            "filled_qty": fill_i,               # 成交数量
+            "price": price_f,                   # 委托价格
+            "avg_price": avg_f,                 # 成交均价
+            "deal_id": deal_id,                 # 合同编号
         })
     return rows
 
@@ -255,6 +342,17 @@ def match_order_row(rows, code, side, qty=None):
 
     关键：只要候选行里存在**方向明确且相反**的行，就**不**回退到第 3 级 ——
     宁可返回 None（台账停在 submitted，诚实地表示"回读不到"），也不用错行。
+
+    ⚠️ 实测补充（2026-09-29 已成交卖单连拍 5 帧，逐帧核对 OCR 原文）
+    ----------------------------------------------------------------
+    **第 1/2 级几乎不会生效**：委托表的「操作」列 5/5 帧被 OCR 读坏
+    （「卖出」→ 'Sik' / '32h' / 'SH SS8aba' / 'Si SHBatae' / '32k'），
+    `side` 恒为 None → 实际走的**永远是第 3 级兜底**。
+    所以：
+      - 方向匹配是**保险**（防「同日同标的出现方向明确的多行」），不是主路径；
+      - 兜底命中时 `sync_fill` 会打一条告警，让「靠兜底匹配的」这件事在日志里可见；
+      - 真正的防错主力是**尾部锚定后的字段真值**（`_tail_six`），
+        它保证即便方向读不出，拿到的 qty/filled_qty/price/avg_price 也是对的。
 
     参数
     ----
