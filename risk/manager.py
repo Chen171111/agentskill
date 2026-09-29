@@ -4,6 +4,8 @@
 - 强制平掉触发止损/止盈的持仓；
 - 限制单标的权重上限与组合总仓位上限。
 """
+import math
+
 import config
 from .portfolio import PortfolioRisk
 
@@ -22,6 +24,20 @@ class RiskManager:
         if vol_target is None:
             vol_target = config.DEFAULT_VOL_TARGET
         self.portfolio = PortfolioRisk(dd_circuit=dd_circuit, vol_target=vol_target)
+
+    # ---- 熔断滞回状态的跨运行持久化（2026-09-29）----
+    def set_circuit_active(self, active: bool):
+        """恢复熔断滞回状态（由 runner 从 DB state 表读入）。
+
+        实盘每次 run_once 都新建 RiskManager/PortfolioRisk，`_cb_active`
+        实例状态不跨天 → 滞回带（10%~15%）在实盘从未生效。与 strategy_since
+        同一机制：runner 负责存取，本类只暴露状态。
+        """
+        self.portfolio._cb_active = bool(active)
+
+    def circuit_active(self) -> bool:
+        """当前熔断是否 active（供 runner 落库）。"""
+        return bool(self.portfolio._cb_active)
 
     def filter_weights(self, target_weights: dict, positions: dict, prices: dict,
                        nav_history=None, enforce_stops: bool = True) -> dict:
@@ -47,7 +63,10 @@ class RiskManager:
             # 已持有：检查止损/止盈（进攻型策略可关闭）
             if enforce_stops:
                 pos = positions.get(code)
-                if pos and pos.get("qty", 0) > 0 and code in prices:
+                # isfinite：nan 价时 ret<=-8%/ret>=30% 等比较全部为 False →
+                # 止损/止盈静默失效（2026-09-29，与 _pos_ok 的 nan 穿透同类）
+                if (pos and pos.get("qty", 0) > 0 and code in prices
+                        and math.isfinite(prices[code])):
                     cost = pos.get("cost", 0.0)
                     px = prices[code]
                     ret = (px / cost - 1.0) if cost > 0 else 0.0

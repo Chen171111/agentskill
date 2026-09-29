@@ -25,18 +25,29 @@ class PortfolioRisk:
         self._cb_active = False
 
     def _circuit(self, dd_depth: float) -> float:
-        """回撤熔断定仓（带滞回状态机）。"""
+        """回撤熔断定仓（带滞回状态机）。
+
+        2026-09-29 修复：滞回带曾完全失效
+        ----------------------------------
+        原实现把 dd_depth 直接喂给下面的 levels 循环，而 levels 的**最低档就是
+        _CB_TRIGGER（15%）** —— active 期间 dd 落回 (10%, 15%) 区间时循环落空、
+        返回 1.0，熔断立即解除，「≤10% 才恢复」的滞回带从未生效：回撤在 15%
+        边界附近往返时，仓位在 0.65 与 1.0 之间反复开关（whipsaw）。
+        修法：active 期间按 `max(dd, _CB_TRIGGER)` 查档 —— 只要还没恢复到
+        ≤10%，就至少维持进入熔断时的 0.65 档。
+        """
         if self._cb_active:
             if dd_depth <= _CB_RECOVER:
                 self._cb_active = False
                 return 1.0
+            eff = max(dd_depth, _CB_TRIGGER)      # 滞回：未恢复前不低于进入档
         else:
-            if dd_depth >= _CB_TRIGGER:
-                self._cb_active = True
-            else:
+            if dd_depth < _CB_TRIGGER:
                 return 1.0
+            self._cb_active = True
+            eff = dd_depth
         for trig, lvl in _CB_LEVELS:
-            if dd_depth >= trig:
+            if eff >= trig:
                 return lvl
         return 1.0
 
@@ -46,7 +57,9 @@ class PortfolioRisk:
             return 1.0
         rets = pd.Series(nav).pct_change().dropna().tail(20)
         realized = rets.std() * np.sqrt(_TRADING_DAYS)
-        if realized <= 0.001:
+        # isfinite：nav 含 NaN 时 std=nan，`nan <= 0.001` 为 False 会漏过去，
+        # 再把 nan 传给 np.clip 污染 scale（2026-09-29 与 _pos_ok 同一类穿透）。
+        if not np.isfinite(realized) or realized <= 0.001:
             return 1.0
         return float(np.clip(self.vol_target / realized, 0.0, 1.0))
 

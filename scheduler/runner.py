@@ -4,6 +4,7 @@ DailyRunner.run_once() 是自动化交易的核心入口：
     数据 → 因子 → 策略信号 → 风控 → 执行订单 → 持久化
 Scheduler 负责按 SCHEDULE.run_time 每日定时触发（收盘后）。
 """
+import math
 import time
 from datetime import datetime, date
 from pathlib import Path
@@ -16,7 +17,6 @@ from strategies.registry import create_strategy
 from risk.manager import RiskManager
 from account.portfolio import PortfolioAccount
 from trader.execution import ExecutionEngine
-from trader.broker import ThsBroker
 from storage.db import TradeDB
 
 DEFAULT_FACTORS = ["rsi", "macd_hist", "bias20", "sma_gap",
@@ -150,6 +150,15 @@ class DailyRunner:
         factors = compute_factors(panel, DEFAULT_FACTORS)
         last_date = panel.dates[-1]
         prices = {c: float(panel.get("close").loc[last_date, c]) for c in panel.codes}
+        # 【NaN/inf 入口闸门】2026-09-29：nan 的比较运算**全部返回 False**，
+        # 会静默穿透 _pos_ok 的全部判据（calc=nan 时五个判据全"通过"，实测复现）、
+        # 风控止损与回撤熔断，并把 nan 成本价写进账本（市值/净值全污染）。
+        # 行情价不有限 → 宁可拒单，不用不可信价格交易（与数据新鲜度守卫同一思路）。
+        _bad_px = [c for c, v in prices.items() if not math.isfinite(v)]
+        if _bad_px:
+            raise RuntimeError(
+                "行情价含 NaN/inf：{}（最新交易日 {}）。拒绝用不可信价格交易，"
+                "请检查 64 位 refresh_data 是否刷新完整。".format(_bad_px, last_date))
 
         # 【数据新鲜度守卫】行情必须已刷新到最近一个「已收盘交易日」。
         # 为什么要守：32 位 Python 装不了 akshare，刷数据必须由 64 位 Python 前置完成
@@ -181,6 +190,7 @@ class DailyRunner:
             _attempts = 1 + max(int(getattr(config, "RECONCILE_RETRY", 0) or 0), 0)
             _wait = float(getattr(config, "RECONCILE_RETRY_WAIT", 0) or 0)
             ok = False
+            _err = None                   # 最后一次异常（None = 全是"返回 False"型失败）
             for _i in range(_attempts):
                 snap_acc = (self.account.cash, self.account.frozen,
                             _copy.deepcopy(self.account.positions))
@@ -203,7 +213,9 @@ class DailyRunner:
             if not ok:
                 raise RuntimeError(
                     "下单前对账失败（持仓/资金读取未通过校验），拒绝下单"
-                    "（已重试 {} 次；请点掉同花顺弹窗、切到持仓页并保持窗口可见）".format(_attempts))
+                    "（已重试 {} 次；请点掉同花顺弹窗、切到持仓页并保持窗口可见）{}".format(
+                        _attempts,
+                        "；最后一次异常：{!r}".format(_err) if _err is not None else ""))
             print("[runner] 下单前对账完成：现金 {:.2f} 冻结 {:.2f} 持仓 {}".format(
                 self.account.cash, self.account.frozen,
                 {k: v.get("qty") for k, v in self.account.positions.items()}))
@@ -211,9 +223,10 @@ class DailyRunner:
         # 第一步 选股：仅在调仓日触发（与回测「每 N 日调仓」口径一致，非调仓日返回 None）
         since_before = self.strategy._since      # 影子策略必须从同一计数器出发
         raw_weights = self.strategy.generate_weights(last_date, factors, panel)
-        if not self.dry_run:
-            # 试算（dry_run）不得推进调仓计数器，否则几次试算就把「调仓日」提前了
-            self.db.set_state("strategy_since", str(self.strategy._since))
+        # ⚠️ strategy_since **不在这里落库**（2026-09-29）：原实现在下单前就写库，
+        # 若随后 rebalance/对账抛异常，计数已推进但订单没成交 → 下一个调仓日被
+        # 白白跳过（违背"只有成功运行才推进"）。改到本方法末尾订单落库之后。
+        # dry_run 全程不写库，试算不会推进计数器。
 
         if raw_weights is None:
             # 非调仓日：不重新选股、不清仓，仅记录当日净值
@@ -262,12 +275,20 @@ class DailyRunner:
                                    reason="" if ok else "20日动量≤0，剔除"))
 
         risk = RiskManager()
+        # 熔断滞回状态跨运行恢复（2026-09-29）：PortfolioRisk 的 _cb_active 是
+        # 实例状态，而实盘每次运行都新建实例 → 滞回带在实盘从未生效。与
+        # strategy_since 同一思路存 DB state 表；dry_run 只读不写。
+        risk.set_circuit_active(self.db.get_state("dd_circuit_active") == "1")
         # 组合级风控净值历史：DB 历史净值 + 当日总资产（接入回撤熔断 + 波动率目标）
         nav_history = self.db.load_equity_history()
         nav_history.append(self.account.total_equity(prices))
         weights = risk.filter_weights(qualified, self.account.positions, prices,
                                      nav_history=nav_history,
                                      enforce_stops=getattr(self.strategy, "stops_enabled", True))
+        if not self.dry_run:
+            # 熔断状态落库（非调仓日不走 filter_weights，状态自然保持不变）
+            self.db.set_state("dd_circuit_active",
+                              "1" if risk.circuit_active() else "0")
         empty = not bool(weights)   # 无合格标的 → 空仓
 
         # 第三步 下单（空仓时 ExecutionEngine 会自然清掉旧持仓）
@@ -301,8 +322,10 @@ class DailyRunner:
             for o in orders:
                 try:
                     self.broker.sync_fill(o)
-                except Exception:
-                    pass
+                except Exception as e:
+                    # 不静默（2026-09-29）：回读失败会让订单台账停在 submitted
+                    # （审计失真）。positions 有 reconcile 兜底，但这里必须留痕。
+                    print("[runner] ⚠️ 成交回读失败 {} {}：{}".format(o.code, o.id, e))
 
         # 持久化（dry_run 时全部跳过，保证试算零副作用）
         if not self.dry_run:

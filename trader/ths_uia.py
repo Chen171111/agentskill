@@ -22,6 +22,7 @@
 import time
 import ctypes
 import logging
+import math
 from threading import Lock
 
 import win32gui
@@ -130,7 +131,7 @@ class UiaThsBroker(Broker):
     # ================= 控件检索 =================
     def _win(self):
         if not self._hwnd or not win32gui.IsWindow(self._hwnd):
-            raise RuntimeError("ThsBroker 未连接（窗口句柄失效，请重新 connect）")
+            raise RuntimeError("UiaThsBroker 未连接（窗口句柄失效，请重新 connect）")
         return self._hwnd
 
     def _find_id(self, cid, root=None):
@@ -918,6 +919,11 @@ class UiaThsBroker(Broker):
                 return False
         if mv > 1.0:
             calc = self._pos_calc(pos, prices)
+            # NaN/inf 闸门（2026-09-29）：nan 的比较运算**全部返回 False**——
+            # 不挡它，下面判据 3（5% 闸门）与判据 4（幽灵分支 + 市值反证）会
+            # 全部静默放行，坏帧混过校验、nan 成本价写进账本（实测复现过该穿透）。
+            if not math.isfinite(calc):
+                return False
             if calc <= 0 or abs(calc - mv) / mv > 0.05:
                 return False
             # 判据 4：本地持仓消失 → 「幽灵放行」与「市值反证」两级（原理见 docstring）
@@ -1149,5 +1155,4 @@ class UiaThsBroker(Broker):
 # （2026-09-21 的「C沈鼓」丢行即为此类）。现在 selftest 可用真实 OCR 原文回归。
 # 这里 re-export 保持向后兼容：`from trader.ths_uia import parse_position` 照旧可用。
 from .ths_parse import (  # noqa: E402
-    _BAN_WORDS, _clean_code, _to_float, pos_frame_sane,
-    parse_confirm_text, parse_position, parse_trades)
+    pos_frame_sane, parse_confirm_text, parse_position, parse_trades)

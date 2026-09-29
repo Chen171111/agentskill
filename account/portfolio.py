@@ -3,6 +3,7 @@
 这是「实盘/模拟盘」的账户核心，与回测账户相互独立。
 """
 import config
+import math
 
 
 class PortfolioAccount:
@@ -38,7 +39,9 @@ class PortfolioAccount:
         mark 由 `UiaThsBroker.reconcile()` 用同花顺持仓表的「市价」列写入。
         """
         px = prices.get(code)
-        if px:
+        # isfinite 双保险（2026-09-29）：NaN 是 truthy，`if px` 挡不住它，
+        # 会把 nan 带进市值/净值。不有限时退回持仓 mark（最后已知价）。
+        if px and math.isfinite(px):
             return float(px)
         pos = self.positions.get(code)
         return float(pos.get("mark") or 0.0) if pos else 0.0

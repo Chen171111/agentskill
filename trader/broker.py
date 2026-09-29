@@ -6,7 +6,6 @@
   接入实盘时，实现新的 Broker 子类即可，无需改动上层执行逻辑。
 """
 import abc
-import itertools
 import time
 import uuid
 from datetime import datetime
@@ -25,10 +24,12 @@ def _is_a_stock(code: str) -> bool:
 class Order:
     """订单对象。side: buy/sell。"""
 
-    _ids = itertools.count(1)
-
     def __init__(self, code: str, side: str, qty: int, price: float, reason: str = ""):
-        self.id = "{}-{}".format(datetime.now().strftime("%Y%m%d%H%M%S"), next(self._ids))
+        # uuid 后缀（2026-09-29）：原「时间戳+进程内计数」在**两个进程同一秒**
+        # 下单时会生成相同 id → save_order 的 INSERT OR REPLACE 互相覆盖
+        # （并发运行/重试窗口期可复现）。
+        self.id = "{}-{}".format(datetime.now().strftime("%Y%m%d%H%M%S"),
+                                 uuid.uuid4().hex[:8])
         self.code = code
         self.side = side          # buy / sell
         self.qty = int(qty)       # 股数（A股 100 取整）
@@ -83,7 +84,9 @@ class PaperBroker(Broker):
 
     def submit(self, order: Order) -> Order:
         px = self.quotes.get(order.code)
-        if px is None or px <= 0:
+        # `not px > 0` 同时挡住 NaN（2026-09-29）：`nan <= 0` 为 False，
+        # 用 nan 价"成交"会把 nan 写进账户持仓成本。
+        if px is None or not px > 0:
             order.status = "rejected"
             return order
 

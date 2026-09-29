@@ -33,6 +33,7 @@ class ExecutionEngine:
         target_mv = {c: equity * w for c, w in target_weights.items() if w > 0}
 
         # 先卖出不在目标或需减仓的
+        sell_proceeds = 0.0          # 预估卖出回款（未扣费，保守）
         for code in list(account.positions.keys()):
             cur_qty = account.position_qty(code)
             if cur_qty <= 0:
@@ -45,8 +46,15 @@ class ExecutionEngine:
                 sell_qty = _round_lot(int(sell_mv / px)) if px > 0 else 0
                 if sell_qty > 0:
                     orders.append(Order(code, "sell", sell_qty, px, reason="减仓/清仓"))
+                    sell_proceeds += sell_qty * px
 
         # 再买入需加仓的
+        # ⚠️ cash_left 逐单扣减（2026-09-29）：真实券商 submit() 只返回
+        # submitted、不当场成交，account.cash 在**整批订单生成期间不会变**——
+        # 多笔买单都按交易前现金核算会**超配**（ broker 拒单/部分成交，
+        # 策略目标失真）。卖出回款按 A 股当日可用计入预算（先卖后买的提交
+        # 顺序也保证这一点）； PaperBroker 路径同样受益（宁少勿超）。
+        cash_left = account.cash + sell_proceeds
         for code, tgt_mv in target_mv.items():
             cur_qty = account.position_qty(code)
             px = prices.get(code, 0.0)
@@ -54,13 +62,14 @@ class ExecutionEngine:
                 continue
             cur_mv = cur_qty * px
             if tgt_mv > cur_mv:
-                buy_mv = min(tgt_mv - cur_mv, account.cash)
+                buy_mv = min(tgt_mv - cur_mv, cash_left)
                 buy_qty = _round_lot(int(buy_mv / px))
                 if buy_qty > 0:
-                    # 现金不足时按整手收敛
-                    while buy_qty > 0 and buy_qty * px * 1.001 > account.cash:
+                    # 现金不足时按整手收敛（1.001 含费用缓冲）
+                    while buy_qty > 0 and buy_qty * px * 1.001 > cash_left:
                         buy_qty -= 100
                     if buy_qty > 0:
+                        cash_left -= buy_qty * px * 1.001
                         orders.append(Order(code, "buy", buy_qty, px, reason="加仓/建仓"))
 
         # 提交执行

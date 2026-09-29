@@ -29,6 +29,7 @@ class BacktestAccount:
         self.sell_tax = float(cost.get("sell_tax_rate", 0.001))
         self.slippage = float(cost.get("slippage_rate", 0.0005))
         self.positions = {}   # {code: {"qty": int, "cost": float, "peak": float}}
+        self._last_px = {}    # {code: 最后已知价} —— 停牌日计价兜底（2026-09-29）
         self._dates = []
         self._equity = []
 
@@ -36,9 +37,29 @@ class BacktestAccount:
         p = self.positions.get(code)
         return p["qty"] if p else 0
 
+    def _px_of(self, code: str, prices: dict) -> float:
+        """计价用价：当日价 → 最后已知价 → 0（同时刷新 last-price）。
+
+        为什么需要兜底（2026-09-29）
+        ----------------------------
+        `engine._row` 会把 NaN（停牌）从行里**剔除**，原实现
+        `prices.get(c, 0.0)` 于是让停牌持仓当日按 **0 元**计价：
+          · `mark_to_close` 记的净值凭空蒸发该持仓全额 → 假回撤，
+            可能误触发 15% 回撤熔断；
+          · `trade()` 的 total 被低估 → 调仓日目标市值算小、买入偏少。
+        停牌只是"没有新报价"，不是"市值归零"。交易路径（买/卖要求
+        当日价 > 0）不受影响——没有实时价确实不能撮合。
+        """
+        px = prices.get(code)
+        if px and px == px:              # 非 None 且非 NaN
+            self._last_px[code] = px
+            return px
+        return self._last_px.get(code, 0.0)
+
     # ---- 市值 / 权益 ----
     def market_value(self, prices: dict) -> float:
-        return sum(p["qty"] * prices.get(c, 0.0) for c, p in self.positions.items())
+        return sum(p["qty"] * self._px_of(c, prices)
+                   for c, p in self.positions.items())
 
     def total(self, prices: dict = None) -> float:
         return self.cash + self.market_value(prices or {})
@@ -46,7 +67,7 @@ class BacktestAccount:
     def mark_to_close(self, date, prices: dict):
         """每日收盘：更新持仓峰值 + 记录总权益。"""
         for code, p in self.positions.items():
-            px = prices.get(code)
+            px = self._px_of(code, prices)
             if px and px > p["peak"]:
                 p["peak"] = px
         self._dates.append(date)
