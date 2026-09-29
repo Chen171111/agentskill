@@ -378,3 +378,45 @@ submit    → status: submitted
 - 同花顺客户端升级可能改变控件 ID / 弹窗结构；升级后先跑 `tools/ths_dump_tree.py` 复核。
 - 自动化下单前务必确认是**模拟盘**；切换实盘前需人工复核资金与持仓，并保留人工确认环节。
 - 输入框「追加语义」是最大的数据风险源，`_fill_order_form()` 里的「先点重填复位」不能省略。
+
+## 八、2026-09-29 全项目检验与修复（NaN 穿透 + 熔断滞回）
+
+检验方式：pyflakes 全量静态分析 + 三套测试基线 + 实盘链/研究线人工审查。
+完整问题清单（11 项，含暂未修复项）见 `.workbuddy/memory/2026-09-29.md`。
+
+### 1. NaN 行情价穿透全部校验（高危，已修）
+nan 的比较运算**全部返回 False** → `_pos_ok` 五个判据全"通过"（实测复现）、
+止损/熔断静默失效、nan 成本价经 reconcile 写进账本。六处防线：
+`runner` prices 入口 isfinite 闸门（主防线，不有限即拒单）→ `_pos_ok` calc
+闸门（校验器本体）→ `position_price` 退 mark 兜底 → `PaperBroker.submit`
+挡 nan 撮合 → `filter_weights` 止损判定前 isfinite → `_vol_target` std isfinite。
+回归：`tools/test_pos_ok.py` 场景 8（须 32 位）+ selftest「风控」组结构断言。
+
+### 2. 回撤熔断滞回状态机失效（中危，已修）
+两处缺陷叠加：① `_circuit` active 期间把 dd 直接喂 levels 循环，而最低档就是
+15% → dd 落回 (10%,15%) 区间时返回 1.0，熔断立即解除（「≤10% 才恢复」从未生效）；
+② 实盘每次运行新建 PortfolioRisk，`_cb_active` 实例状态不跨天。
+修复：① active 期间按 `max(dd, _CB_TRIGGER)` 查档，未恢复前不低于进入档；
+② 状态存 DB state 表 `dd_circuit_active`（`RiskManager.set_circuit_active`/
+`circuit_active`，runner 调仓日恢复+落库，dry_run 只读不写）。
+回归：selftest「风控」组行为断言（走 `scale(nav_history)` 公开 API）。
+
+### 3. 同日第二轮：检验发现的其余问题全部修复
+- **回测账户停牌 0 元计价**：`backtest/account.py` 加 `_last_px` 最后已知价兜底，
+  `market_value`/`mark_to_close`/`trade().total` 不再把停牌持仓按 0 元计
+  （防假回撤误触发熔断、防调仓日买入偏小）。⚠️ **会改动研究数值**，历史回测对比需重跑。
+- **runner 三处**：对账异常的根因写进 RuntimeError（`_err`，修前捕获后丢弃）；
+  `strategy_since` 改到订单落库之后才写库（修前下单前就写，崩溃会白丢一个调仓日）；
+  `sync_fill` 失败打印告警不再静默。
+- **execution 多笔买入超配现金**：`cash_left` 逐单扣减 + 卖出回款计入预算
+  （ths 模式 submit 不扣现金，旧实现多笔各按交易前现金核算会超配）。
+- **eval_candidate.py** 补 `from types import SimpleNamespace`（`--neighbors hold=N` 路径 NameError）。
+- **selftest point-in-time** 改双截止日循环（原 `CUT_B` 赋值后从未使用，第二段场景静默缺失）。
+- **Order.id** 改 uuid 后缀（原时间戳+进程内计数，跨进程同秒撞号会被 INSERT OR REPLACE 覆盖）。
+- pyflakes 全量清理：未用 import / 死局部变量 / 无占位 f-string（joinquant 平台代码除外），
+  现在 `python -m pyflakes .` 非 joinquant **零输出**。
+- 新增 selftest 检查：停牌计价（回测组）、现金预算（执行组）；`test_pos_ok.py` 加 NaN 场景（8/8）。
+
+### 4. 当前唯一 selftest 失败项（数据维护，非代码）
+`个股线数据新鲜度`：个股线 bars 落后 11 个自然日 → 跑
+`$PY tools/append_stock_bars.py --out data/stockbars --workers 8` 补齐（需联网抓取）。
