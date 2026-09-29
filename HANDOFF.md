@@ -8,8 +8,10 @@
 > 读第四节时以**核实后的版本**为准。
 
 > ⚠️ **本文件只覆盖 ETF 轮动线 + 同花顺下单链路。**
-> 2026-09-12 新增了**个股多因子模型**线，交接见 **`docs/HANDOFF_个股多因子.md`**
-> （研究报告见 `docs/个股多因子模型报告.md`）。两条线独立，别混。
+> 2026-09-29：**个股多因子研究线已整体迁至独立工作区 `e:\MyWorkAndProject\quant2`**
+> （代码 / 数据 / 文档 / 研究状态全部迁走，本仓库只剩 ETF 线）。个股线的交接与
+> 研究报告见 quant2 的 `docs/HANDOFF_个股多因子.md` 等；本节（含第八节）中
+> 涉及个股线的条目均为**历史记录**，对应文件已不在本仓库。
 
 ## 一、本次会话结论：**卡点已解决，强制下单成功**
 
@@ -315,6 +317,9 @@ submit    → status: submitted
 
 ## 四、下一步待办
 
+> ⚠️ **2026-09-29 按「会不会下错单」重排优先级**：先做下面第 **4** 条的 `Order` 语义核对
+> （它决定「按什么判成交」，做错会**静默错单**），再做卖出 / 撤单实测，最后才是 OCR 加固。
+
 1. **验证卖出链路**：控件 ID 与买入页相同，但尚未实盘跑过一笔卖出，建议用自有持仓小单验证。
 2. **`fetch_today_orders` / `fetch_position` 仍依赖 OCR**：表格是 `CVirtualGridCtrl`（自绘，UIA 无子项），
    现方案是「精确定位表格控件矩形 → 截图 → OCR → 按列序解析」。已修正列序
@@ -358,6 +363,15 @@ submit    → status: submitted
 
 - Python：**32 位** `E:\Python32\python.exe`（3.10.11），已装 `pywinauto 0.6.6`、`pywin32 312`、
   `Pillow 12.3.0`、`pytesseract 0.3.13`、`numpy`、`pandas`。
+- Python：**64 位** `E:\Python\python.exe`（3.14），负责刷行情（akshare 在用户 site-packages）
+  与跑 `tools/selftest.py`。
+  - ⚠️ **2026-09-29 校正**：`pyarrow 25.0.1` **已装在 `E:\Python\Lib\site-packages`**
+    （落盘时间 2026-09-29 13:57），**不再需要** `PYTHONPATH=%TEMP%\pyflakes_pkg` 兜底。
+    「E:\Python 缺 pyarrow」的旧记录已作废。
+  - pyarrow 对本仓库并非无关依赖：精灵大单 ETF 路线
+    （`strategies/builtin.py` 的 `needs_alt=True` → `pipeline.py:56` → `dataprovider/altdata.py:83`
+    的 `pd.read_parquet`）需要它。日常 14:50 链路（`refresh_data.py` 走 akshare/CSV）不需要。
+  - 静态检查 `python -m pyflakes` 仍未装进 `E:\Python`（在 `%TEMP%\pyflakes_pkg`，临时目录）。
 - OCR：`E:\Tesseract-OCR\tesseract.exe` + `chi_sim`。
 - 同花顺：经典版模拟炒股 9.60.61，客户端 `D:\同花顺软件\同花顺\xiadan.exe`，需已登录模拟会话。
 - 运行示例：
@@ -417,6 +431,74 @@ nan 的比较运算**全部返回 False** → `_pos_ok` 五个判据全"通过"�
   现在 `python -m pyflakes .` 非 joinquant **零输出**。
 - 新增 selftest 检查：停牌计价（回测组）、现金预算（执行组）；`test_pos_ok.py` 加 NaN 场景（8/8）。
 
-### 4. 当前唯一 selftest 失败项（数据维护，非代码）
-`个股线数据新鲜度`：个股线 bars 落后 11 个自然日 → 跑
-`$PY tools/append_stock_bars.py --out data/stockbars --workers 8` 补齐（需联网抓取）。
+### 4. 个股线数据陈旧（当日已补齐，随后随线迁出）
+`个股线数据新鲜度`：个股线 bars 落后 11 个自然日 → 当日已跑
+`tools/append_stock_bars.py` 补齐至 20260928（selftest 转 38/0/0 全绿）。
+2026-09-29 晚些时候个股线整体迁至 quant2，该检查项随线移除，
+本仓库 selftest 现为 **16 项 ETF 线 / 交易链检查**。
+
+## 九、2026-09-29 个股线残留清理与项目收尾
+
+个股线整体迁至 `quant2` 后，本仓库仍留有一批**无人引用**的文件（生成它们的代码已随线迁走）。
+当日清理完毕，磁盘回收 **4.1 GB**（612 个文件）。
+
+### 清理清单
+
+| 类别 | 路径 | 大小 | 判据 |
+|---|---|---|---|
+| 死缓存 | `data/cache/panel_*.parquet` ×3 | 4.0 GB | 本仓库**无任何代码**读写该路径；生成器 `panel_cache.py` 已随线迁走（只有 quant2 有）。`dataprovider/altdata.py` 读的是 `E:\MyWorkAndProject\精灵历史数据\metrics\etf_bigorder.parquet`，与此无关 |
+| 个股线数据 | `data/stocks/`、`stocks_backup_20260913/`、`stocks_backup_20260914/`、`stocks_repaired/` | 104 MB | 前三者在 `quant2/data/` 有同内容副本（190 / 190 / 11 文件）；两个 backup 属历史冗余 |
+| 个股线日志 | `state/` 下 `append_stock_bars_*.log`、`merge_stockbars_*.log`、`rebuild_tax10_*.log`、`rebuild_tax20_*.log`、`split_repairs.log` | 39 KB | 个股线专属运行日志，结论已收入本文件 §八 |
+| 孤儿字节码 | `__pycache__/*.pyc`（22 个） | — | `append_stock_bars` / `backtest_stock` / `fetch_stock_bfq` / `build_div_tax` / `diag_stock_*` / `verify_div_tax` / `stock_factors` 等**已删除模块**的 .pyc |
+
+**保留**：`state/trading.db` + 两个 backup（实盘账本）、`daily_run.log`、`last_run.json`、
+`alerts_archive/`、`diag_*`、`selftest_20260929.log`、`data/trade_calendar.csv`（两线共用）。
+
+### 流程：先隔离 → 验证 → 再删除
+
+不留「删完才发现坏了」的窗口：
+
+1. 全部移到**仓库外**同盘目录 `E:\MyWorkAndProject\quant\_trash_20260929`
+   （同盘 rename，瞬时、可回滚、**不碰 git**）
+2. 跑验证（见下）
+3. 验证通过后才 `rm -rf`
+
+### 验证结果
+
+| 检查 | 结果 |
+|---|---|
+| `tools/selftest.py` | **16 通过 / 0 失败 / 0 跳过** |
+| `python -m pyflakes .`（非 joinquant） | **零输出** —— 无悬空 import |
+| `E:\Python32\python.exe main.py --help` | 正常（32 位下单入口） |
+| `tools/refresh_data.py` | 正常（64 位刷数据入口） |
+| `tools/check_alerts.py` | 正常，读到最后一次运行 2026-09-28 20:36，退出码 0 |
+
+**顺带修（个股线迁走时遗留的悬空引用）**
+
+| 文件 | 问题 | 处理 |
+|---|---|---|
+| `tools/selftest.py` | 顶部 `import numpy as np` / `import pandas as pd` 全文零引用 | 删除 |
+| `factors/engine.py` | `_NEED_FIELDS` 里 11 个**对应因子已随 `stock_factors.py` 迁走**的死条目（`rev5`/`rev10`/`vol20`/`vol60`/`max20`/`skew20`/`turn20`/`turn60`/`illiq20`/`amp20`/`pv_corr20`） | 删除。`registry.FACTOR_FUNCS` 里已无这些名字（永不命中），且取值处是 `.get(name, ["close"])` 有默认值 → 删除**零功能影响** |
+| `tools/check_alerts.py` | `WEEKLY_ALERT` 告警逻辑及其注释，生产者 `tools/weekly_data.py` 已删 → **死代码**；措辞「个股线数据会滞后」已过时 | 整段删除。`state/WEEKLY_ALERT.txt` 实测不存在 → 不掩盖任何现存告警 |
+
+→ 恢复「`pyflakes` 非 joinquant 零输出」纪律。
+
+> ⚠️ **过程中暴露的 selftest 盲区（建议补，尚未做）**
+> 删掉 `WEEKLY_ALERT` 常量但漏删其引用块时，`selftest` 仍报 **16 / 0 / 0 全绿**，
+> 是 `pyflakes` 的 `undefined name` 抓到的。
+> 即 `tools/selftest.py` **不验证巡检入口本身能否运行**（`tools/check_alerts.py`、
+> `tools/daily_job.py`）。这两个是无人值守链路的**眼睛**，坏掉不会被任何检查发现。
+> 建议加一项「入口冒烟检查」：`check_alerts.py` 退出码 ∈ {0,1}、`daily_job.py --help` 可跑。
+
+### 未清理（有意保留）
+
+- `quant2/data/cache/panel_*.parquet` ×3（**4.2 GB**）：那是 **活缓存** —— `quant2/tools/panel_cache.py`
+  存在且会读它，删掉只会让下次研究重算，属**负收益**。真要省这 4.2 GB，须先确认当前研究参数
+  命中哪个 hash 再逐个删，不要盲删。
+- `quant2/data/` 其余 2.0 GB：个股线研究数据本体，**不该动**。
+
+### 结论
+
+本仓库现为**纯 ETF 轮动实盘线**：代码 14 MB、`data/` 92 KB、`state/` 399 KB。
+个股线的一切（代码 / 数据 / 文档 / 研究状态）只在 `E:\MyWorkAndProject\quant2`，
+两库物理隔离、互不回写（边界见 `quant2/docs/隔离工作空间说明.md`）。

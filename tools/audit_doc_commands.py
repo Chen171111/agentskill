@@ -2,24 +2,27 @@
 
 **为什么需要它**（2026-09-17 的教训）
 ------------------------------------
-项目里 28 份文档、69 个脚本，文档中的「复现命令」是**手写的**，
+项目里几十份文档、几十个脚本，文档中的「复现命令」是**手写的**，
 没有任何机制保证它和脚本的 `argparse` 定义一致。实际已经踩到：
 
-- `docs/项目运行手册.md` 写 `test_industry_neutral.py --topk 20`，
-  但该脚本定义的是 `--topn`（`--topk` 属 `backtest_stock.py`）→ **该命令直接 argparse 报错**
-- 送转口径变更后，4 个脚本加了 `--adj-mode`，但文档里的命令**没跟着加** →
-  照文档跑就会静默用默认口径（`correct`），**无法复现文档里的旧数字**
+- 文档里写脚本**不存在的参数**（如 `--topk` vs 实际定义的 `--topn`）
+  → **照文档跑直接 argparse 报错**
+- 脚本加了新口径参数（如 `--adj-mode`），但文档里的命令**没跟着加** →
+  照文档跑就会静默用默认口径，**无法复现文档里的旧数字**
 
 **这个脚本做什么**
 ------------------
 1. 从 `tools/*.py` 的源码里静态提取每个脚本的 `add_argument` 参数名（不 import，不执行）
-2. 扫描 `docs/*.md` + `joinquant/*.md` 里的 `$PY ...` 命令块（含 `\\` 续行）
-3. 交叉比对，报三类问题：
+2. 扫描 `docs/*.md` 里的 `$PY ...` 命令块（含 `\\` 续行）
+3. 交叉比对，报问题：
    - **A 未知参数**：命令里用了脚本没定义的 flag（照跑必报错）
-   - **B 口径未透传**：脚本有 `--adj-mode` 但该命令没带 → 静默用默认值
+   - **B 口径未透传**：脚本有口径参数但该命令没带 → 静默用默认值
    - **C 脚本不存在**：命令引用了不存在的文件
-4. 额外报 D：`--out/--out-prefix` 缺省，且缺省名与**历史 legacy 产物**同名 →
-   跑一次就把旧产物覆盖掉（本项目需要 A/B 对照，这是真损失）
+   - **D 缺 --out/--out-prefix**：默认写出名与历史产物同名 → 跑一次就覆盖旧证据
+
+> 📌 2026-09-29：个股多因子研究线（含其 `--adj-mode` 口径机器与 A/B 对照产物）
+> 已迁至独立工作区 `quant2`，由那边的 audit 覆盖；本文件的
+> `ADJ_SENSITIVE` / `AB_COMPARE` 因此清空，B/D 两类暂时恒为 0。
 
 **用法**
 -------
@@ -40,26 +43,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
 
 # 会消费股息率面板（dy_ttm/dy_fwd）的脚本 —— 这些脚本的 --adj-mode 必须显式传，
-# 否则口径不可复现（见 docs/个股线_送转调整口径缺陷.md §五·补·二·边界 1）
-ADJ_SENSITIVE = {
-    "test_dividend_factor.py", "backtest_dividend.py", "sweep_hyst.py",
-    "test_industry_neutral.py", "sweep_dividend_into_mf.py",
-    "diag_dividend_into_mf.py", "diag_industry_hyst_overlap.py",
-    "paper_track_dividend.py", "cmp_selection_overlap.py", "cmp_adj_mode.py",
-}
+# 否则口径不可复现。📌 2026-09-29：个股线已迁至 quant2，此表随线迁出（本地为空）。
+ADJ_SENSITIVE: set[str] = set()
 
-# 需要 A/B 对照的脚本：默认 --out 名一旦被新口径覆盖，旧口径证据就永久消失
-AB_COMPARE = {
-    "sweep_hyst.py": "results/hyst_sweep.csv",
-    "sweep_dividend_into_mf.py": "results/dividend_into_mf.csv",
-    "backtest_dividend.py": "results/dividend_backtest.csv",
-    "test_dividend_factor.py": "results/dividend_factor_ic.csv",
-    "diag_industry_hyst_overlap.py": "results/diag_ind_hyst_overlap.csv",
-    "diag_dividend_into_mf.py": "results/dividend_into_mf_diag.csv",
-}
+# 需要 A/B 对照的脚本：默认 --out 名一旦被新口径覆盖，旧口径证据就永久消失。
+# 📌 2026-09-29：随个股线迁至 quant2（本地为空）。
+AB_COMPARE: dict[str, str] = {}
 
 ARG_RE = re.compile(r'add_argument\(\s*"(--[A-Za-z0-9_-]+)"')
-CMD_RE = re.compile(r'\$PY\s+(?:-u\s+)?(tools/[A-Za-z0-9_]+\.py|joinquant/[A-Za-z0-9_]+\.py|main\.py)(.*)')
+CMD_RE = re.compile(r'\$PY\s+(?:-u\s+)?(tools/[A-Za-z0-9_]+\.py|main\.py)(.*)')
 
 
 def script_flags() -> dict[str, set[str]]:
@@ -73,9 +65,9 @@ def script_flags() -> dict[str, set[str]]:
 
 
 def doc_commands() -> list[dict]:
-    """扫 docs/ 与 joinquant/ 下的 markdown，抽出所有 $PY ... 命令（含续行与代码块）。"""
+    """扫 docs/ 下的 markdown，抽出所有 $PY ... 命令（含续行与代码块）。"""
     cmds = []
-    for sub in ("docs", "joinquant"):
+    for sub in ("docs",):
         d = os.path.join(ROOT, sub)
         if not os.path.isdir(d):
             continue
@@ -158,7 +150,7 @@ def main(argv=None) -> int:
         print("  " + t)
         print("=" * 100)
 
-    hdr(f"扫描范围：docs/ + joinquant/ 共 {len(cmds)} 条 $PY 命令"
+    hdr(f"扫描范围：docs/ 共 {len(cmds)} 条 $PY 命令"
         f"，tools/ 共 {len(flags_by_script)} 个脚本")
 
     hdr(f"A. 参数对不上（{len(problems['A_未知参数'])} 条）")
