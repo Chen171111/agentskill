@@ -55,7 +55,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tools.fetch_stock_bfq import COLS, fetch_one, to_symbol  # noqa: E402
+from tools.fetch_stock_bfq import COLS, fetch_one  # noqa: E402
 
 _lock = threading.Lock()
 
@@ -159,8 +159,8 @@ def main(argv=None) -> int:
     print(f"已最新 {uptodate:,} 只 ｜ 待追加 {len(todo):,} 只"
           f" ｜ 无分页文件跳过 {len(nopart):,} 只")
     if nopart:
-        print(f"    （无分页文件的是原抓取就失败的，多为退市股；"
-              f"如确需补齐请用 fetch_stock_bfq.py fetch --force）")
+        print("    （无分页文件的是原抓取就失败的，多为退市股；"
+              "如确需补齐请用 fetch_stock_bfq.py fetch --force）")
     if not todo:
         print("\n✅ 全部已是最新，无需追加。")
         return 0

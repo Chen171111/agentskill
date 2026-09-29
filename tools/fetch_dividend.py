@@ -215,7 +215,6 @@ def cmd_check(args) -> int:
 
     n_year = df.year.nunique()
     n_code = df.code.nunique()
-    years = sorted(df.year.unique())
     ok_year = n_year >= 5
     ok_code = n_code >= 3000
     print(f"\n  判据 ① 跨度 ≥5 年：{n_year} 年 → {'✅ 通过' if ok_year else '❌ 不足'}")

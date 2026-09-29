@@ -31,7 +31,6 @@ import json
 import os
 import sys
 import time
-from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -185,7 +184,6 @@ def portfolio_metrics(df, dates, by_date, args) -> dict:
                                 if args.tax_rate else None),
                        tax_rate=args.tax_rate)
     m = metrics(eq.equity)
-    rows = by_date.get(dates[-1])
     nh = meta.get("avg_hold", 0) or 1
     turn = (int((tr.side == "buy").sum()) / (len(eq) / TRADING_DAYS) / nh) if len(tr) else 0.0
     exp = industry_exposure(df, plan, topn=args.topn)

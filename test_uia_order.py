@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 _HERE = Path(__file__).resolve().parent
 _LOG_PATH = str(_HERE / "uia_order_run.log")
 
-from trader.ths_uia import UiaThsBroker, _ID_CODE, _ID_NAME, _ID_PRICE, _ID_QTY, _ID_MAXQTY
+from trader.ths_uia import UiaThsBroker, _ID_CODE, _ID_QTY
 from trader.broker import Order
 
 CODE = "510880.SH"
@@ -125,7 +125,7 @@ if __name__ == "__main__":
     with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
         try:
             code = main()
-        except Exception as e:
+        except Exception:
             import traceback
             traceback.print_exc()
             code = 1

@@ -24,7 +24,6 @@ direction 一律为 +1。
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 
 from .registry import register_factor
 

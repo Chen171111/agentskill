@@ -217,7 +217,6 @@ def industry_exposure(df: pd.DataFrame, plan: dict, *, topn: int) -> pd.DataFram
     code_arr = df.code.values
     in_uni = df._in_uni.values
     ind_all = df["ind_l1"].values
-    date_arr = df.date.values
     by_date = df.groupby("date", sort=False).indices
 
     recs = []
@@ -480,9 +479,6 @@ def main(argv=None) -> int:
                              min_dy=args.min_dy, max_dy=args.max_dy,
                              min_div3=args.min_div3)
         exps[lbl] = industry_exposure(df, pl, topn=args.topn[0])
-        if mode == "topn":
-            pl_base = pl
-
     exp = exps["基线 topn"]
     if not exp.empty:
         print("\n  集中度对照（HHI 越大越集中；市场基线 ≈ 1/行业数）：")
@@ -501,7 +497,7 @@ def main(argv=None) -> int:
         print("  " + "{:<16}{:>10.3f}{:>11.1f}%{:>14}".format(
             "全市场", cc["市场HHI"], cc["市场前3行业占比"], "—"))
 
-        print(f"\n  ── 基线 topn 的行业权重明细（按组合权重降序，前 12）")
+        print("\n  ── 基线 topn 的行业权重明细（按组合权重降序，前 12）")
         print("  " + "{:<12}{:>10}{:>10}{:>10}{:>10}".format(
             "行业", "组合权重", "市场权重", "超配pp", "组合持仓数"))
         print("  " + "-" * 52)
@@ -509,7 +505,7 @@ def main(argv=None) -> int:
             print("  " + "{:<12}{:>9.1f}%{:>9.1f}%{:>+10.1f}{:>10.1f}".format(
                 r_.行业, r_.组合权重 * 100, r_.市场权重 * 100, r_.超配pp,
                 r_.组合持仓数))
-        print(f"\n  ── 基线 topn 的低配（超配pp 最小，前 6）")
+        print("\n  ── 基线 topn 的低配（超配pp 最小，前 6）")
         print("  " + "{:<12}{:>10}{:>10}{:>10}".format(
             "行业", "组合权重", "市场权重", "超配pp"))
         print("  " + "-" * 42)

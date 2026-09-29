@@ -143,7 +143,7 @@ def main(argv=None) -> int:
     else:
         print("  ⚠️ 结论：**窗口内历史被改写 → 必须整批重跑**")
         print("     ⚠️ 不要分批跑：分批会让产物**混合两个快照**（本项目明令禁止）。")
-        print(f"     命令：$PY tools/run_reruns.py --from R1 --force")
+        print("     命令：$PY tools/run_reruns.py --from R1 --force")
     print("=" * 96)
 
     # ---- 4) 写「复核凭证」—— 让 run_reruns --list 的 mtime 误报能自我说明 ----

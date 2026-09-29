@@ -47,7 +47,7 @@ CASES = [
 def main() -> int:
     config.TRADING_COST.clear()
     config.TRADING_COST.update(REAL_COST)
-    print(f"阈值（risk/portfolio.py）：")
+    print("阈值（risk/portfolio.py）：")
     print(f"  回撤熔断  触发 {_CB_TRIGGER:.0%}  恢复 {_CB_RECOVER:.0%}  "
           f"分档 {[(f'{t:.0%}', l) for t, l in _CB_LEVELS]}")
     print(f"  波动率目标  {config.DEFAULT_VOL_TARGET:.0%}")

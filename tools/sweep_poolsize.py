@@ -40,8 +40,7 @@ MIN_AMOUNTS = (3e7, 1e8)
 # 成本模型统一到 tools/costs.py（**单一来源**，勿在此重定义 —— 铁律 14）。
 # ⚠️ 本文件曾是**唯一的分叉点**：`NOMINAL_FEE` 停在 0.0003（万3），
 # 导致 `BREAK_EVEN_TICKET` 被算成 16,667 元（正确 10,000 元）。收敛后不会再复发。
-from tools.costs import (BREAK_EVEN_TICKET, MIN_COMMISSION,  # noqa: E402
-                         NOMINAL_FEE)
+from tools.costs import BREAK_EVEN_TICKET  # noqa: E402
 
 
 def main(argv=None) -> int:
@@ -115,7 +114,7 @@ def main(argv=None) -> int:
         for _, x in r.iterrows():
             print("  {:>8.0f} {:>9.2f} {:>7.2f} {:>7.2f} {:>11,.0f}".format(
                 x.平均持仓, x.tilt_min, x.夏普比率, x.最大回撤, x.资金门槛万元))
-        print(f"\n门槛 = 16,667 元 × 平均持仓数")
+        print("\n门槛 = 16,667 元 × 平均持仓数")
         print(f"结果已写出 {args.out}")
     return 0
 

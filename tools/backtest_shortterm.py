@@ -39,7 +39,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tools.backtest_stock import build_features, metrics, TRADING_DAYS  # noqa: E402
+from tools.backtest_stock import build_features, metrics  # noqa: E402
 
 
 # ============================================================ 因子构建
@@ -406,7 +406,6 @@ def main(argv=None) -> int:
 
 
 def _print_metrics(tag, m, eq):
-    yrs = len(eq) / TRADING_DAYS
     total = eq.iloc[-1] / eq.iloc[0] - 1
     print("  {:<16} 年化 {:>7.2f}%  累计 {:>9.2f}%  波动 {:>6.2f}%  "
           "夏普 {:>5.2f}  回撤 {:>7.2f}%  卡玛 {:>5.2f}".format(

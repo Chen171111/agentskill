@@ -54,7 +54,6 @@ def main(argv=None) -> int:
     L = _load(args.legacy, "legacy")
     C = _load(args.correct, "correct")
     both = pd.concat([L, C], ignore_index=True)
-    key = ["区间", "模式", "N"]
 
     print("=" * 100)
     print("  送转调整口径对照：legacy（现行）vs correct（价值中性）")

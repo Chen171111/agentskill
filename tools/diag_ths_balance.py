@@ -44,7 +44,7 @@ def main():
         fh.write(s + "\n")
 
     import win32gui
-    from trader.ths_uia import UiaThsBroker, parse_position, parse_trades
+    from trader.ths_uia import UiaThsBroker, parse_trades
 
     L("资金栏/成交明细诊断  {}".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     broker = UiaThsBroker()

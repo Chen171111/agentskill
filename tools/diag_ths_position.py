@@ -40,7 +40,6 @@ def _log(fh, *a):
 def dump_grids(broker, fh):
     """枚举所有 CVirtualGridCtrl：可见性 + 矩形 + 自身文本，判断表格选取是否正确。"""
     import win32gui
-    import win32api
     from trader import ths_uia as T
 
     _log(fh, "\n===== [A] 全部 CVirtualGridCtrl 实例 =====")
@@ -83,7 +82,6 @@ def dump_shot(broker, fh, idx, save_png=True):
     import pytesseract
     from PIL import ImageGrab
     from trader.ths_uia import parse_position
-    from trader import ths_uia as T
 
     _log(fh, "\n===== [C{}] 第 {} 次拍摄 =====".format(idx, idx))
     broker._switch("query")

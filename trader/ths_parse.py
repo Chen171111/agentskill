@@ -15,7 +15,8 @@
 拆出来后，`selftest` 能用**真实 OCR 原文**做回归断言（夹具见
 `tools/test_ths_parse.py`），不必再依赖人肉复现。
 
-向后兼容：`trader.ths_uia` 仍 re-export 这里的所有名字，
+向后兼容：`trader.ths_uia` 仍 re-export 这里的**公开解析 API**
+（`parse_position` / `parse_trades` / `pos_frame_sane` / `parse_confirm_text`），
 `from trader.ths_uia import parse_position` 照旧可用。
 """
 import re

@@ -96,7 +96,7 @@ def main(argv=None) -> int:
               f"t={t:+.1f}  (n日={len(r)})")
 
     # ---------------- 2) 变体扫描 ----------------
-    print(f"\n=== 2. 组合变体扫描（topk/hold 可变）===")
+    print("\n=== 2. 组合变体扫描（topk/hold 可变）===")
     print("=" * 108)
     variants = [
         ("全8因子 topk200 等权", ALL8, 200, 5, False, "equal"),

@@ -1,7 +1,6 @@
 """策略基类与横截面排名工具。"""
 import abc
 
-import numpy as np
 import pandas as pd
 
 

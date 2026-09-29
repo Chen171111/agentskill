@@ -143,8 +143,8 @@ def rebuild(bars: pd.DataFrame, events, tax_rate: float = 0.0) -> pd.DataFrame:
         print(f"  红利税率 {tax_rate*100:.0f}%：全样本分红对日收益的累计贡献 "
               f"{div_gross*100:,.0f} 点 → {div_net*100:,.0f} 点"
               f"（被税吃掉 {drag*100:,.0f} 点，占 {drag/max(div_gross,1e-9)*100:.1f}%）")
-        print(f"     注：这是**未加权、未复利**的原始点数，仅供量级参考；"
-              f"对策略年化的真实影响以回测为准")
+        print("     注：这是**未加权、未复利**的原始点数，仅供量级参考；"
+              "对策略年化的真实影响以回测为准")
     return out
 
 

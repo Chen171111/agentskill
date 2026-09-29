@@ -30,7 +30,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -60,13 +59,12 @@ def _forward_returns(store, codes, rows):
     out = {}
     for variant in ("live", "shadow"):
         w_by_date = {r["date"]: r["weights"] for r in rows if r["variant"] == variant}
-        curve, wsum_prev = [], None
+        curve = []
         for i, dt in enumerate(dates[:-1]):
             nxt = dates[i + 1]
             w = w_by_date.get(dt) or {}
             if not w:
                 curve.append((dt, 0.0, 0.0))
-                wsum_prev = None
                 continue
             # 执行日 = 下一个交易日
             fut = px.index[px.index > dt]
@@ -82,7 +80,6 @@ def _forward_returns(store, codes, rows):
             port_r = float((r.reindex(list(w.keys())) * pd.Series(w)).sum(skipna=True))
             invested = float(sum(w.values()))
             curve.append((dt, port_r, invested))
-            wsum_prev = invested
         out[variant] = curve
     return out
 

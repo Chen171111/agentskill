@@ -53,7 +53,6 @@ def run(codes, topk, trend_window, s, e):
                                       "trend_window": trend_window})
     eq = r["result"].equity
     eq = eq["equity"] if "equity" in eq.columns else eq
-    ret = eq.pct_change().dropna()
     years = len(eq) / TD
     cum = eq.iloc[-1] / eq.iloc[0] - 1
     ann = (1 + cum) ** (1 / years) - 1 if years > 0 else 0.0

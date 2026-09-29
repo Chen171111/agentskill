@@ -101,7 +101,6 @@ def main(argv=None) -> int:
     code_arr = df.code.values
     in_uni = df._in_uni.values
     dy_all = df[args.dy_col].values
-    nd3_all = df["n_div3"].values
 
     print(f"日线 {len(df):,} 行 / {df.code.nunique():,} 只 ｜ 调仓日 {len(dates[::args.hold])} 个"
           f" ｜ adj_mode={args.adj_mode}")
