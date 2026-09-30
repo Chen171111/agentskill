@@ -14,6 +14,8 @@
 覆盖成 `ok:false`，导致本脚本次日误报「自动交易失败」。修法见 `tools/daily_job.py`。）
 
 退出码：0 = 一切正常；1 = 有问题（失败 / 到点没跑 / 存在告警文件）
+有问题时还会尝试发告警邮件（config/mail_alert.json 未配置则静默跳过；
+同一天、问题清单相同只发一次，标记 state/alert_mail_sent.json）。
 """
 import json
 import sys
@@ -37,6 +39,55 @@ DATA_ALERT = STATE / "DATA_ALERT.txt"
 # 计划任务设定：周一~周五 14:50，留出运行时间，15:10 之后判定"今天还没跑"
 RUN_HHMM = (14, 50)
 GRACE_MIN = 20
+
+# 告警邮件去重标记：同一天、问题清单相同 → 只发一次。
+SENT_MARK = STATE / "alert_mail_sent.json"
+
+
+def _maybe_mail(problems, notes):
+    """有问题时发告警邮件（config/mail_alert.json 未配置则静默跳过）。
+
+    为什么：2026-09-30 的教训 —— 计划任务被整个删掉、14:50 从未触发，
+    「跑了但失败」的邮件告警（daily_job）根本没机会发出；
+    而本脚本当时只写本机退出码，靠外部巡检才被发现。
+    「到点没跑」这类故障必须由体检脚本自己走邮件通道（人不在场也能收到）。
+
+    去重：同一天、问题清单相同 → 只发一次，避免巡检反复运行时刷邮箱；
+    问题清单有变化（新问题出现）→ 再次发送并覆盖标记。
+    """
+    today = date.today().strftime("%Y%m%d")
+    try:
+        prev = json.loads(SENT_MARK.read_text(encoding="utf-8"))
+        if prev.get("date") == today and prev.get("problems") == problems:
+            print("\n[邮件] 今日同问题已告警过，跳过重复发送（{}）".format(SENT_MARK.name))
+            return
+    except Exception:
+        prev = None
+    try:
+        from tools.mail_alert import send
+        body = "agentskill 自动交易体检发现问题（{}）：\n\n".format(
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        body += "问题：\n" + "\n".join("  ✗ " + p for p in problems) + "\n\n"
+        body += "备注：\n" + "\n".join(notes) + "\n\n"
+        body += ("排查入口：state/daily_run.log ｜ 本脚本：tools/check_alerts.py\n"
+                 "任务在册核对：双击 check_schedule.bat（只读）\n"
+                 "若「到点没跑」持续出现，用 tools/schedule/register_task.ps1 重注册。")
+        ok = send("[agentskill] 自动交易异常 " + today, body)
+    except Exception as e:
+        print("\n[邮件] 发送出错（不影响退出码）：{}".format(e))
+        return
+    if ok:
+        try:
+            SENT_MARK.write_text(
+                json.dumps({"date": today, "problems": problems},
+                           ensure_ascii=False, indent=2),
+                encoding="utf-8")
+        except Exception:
+            pass
+        print("\n[邮件] 告警已发送（同日同问题去重，标记 {}）".format(SENT_MARK.name))
+    else:
+        print("\n[邮件] 未启用/未发送（检查 config/mail_alert.json；"
+              "模板见 config/mail_alert.example.json）")
 
 
 def _load_status():
@@ -128,6 +179,7 @@ def main():
         for p in problems:
             print("  ✗ {}".format(p))
         print("\n排查入口：state/daily_run.log ｜ 数据问题看 state/DATA_ALERT.txt")
+        _maybe_mail(problems, notes)
         return 1
     print("\n[正常] 最近一次运行成功，且今天没有到点未跑的情况。")
     return 0
