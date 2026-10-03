@@ -409,6 +409,55 @@ def _etf_limit_modeled():
     assert "rnd = 3 if" in src, "基金涨跌停价必须按 0.001 精度取整（否则误拦合法开盘）"
 
 
+
+
+@check('风控', "禁止新增静默吞异常（except: pass 必须显式登记白名单）")
+def _no_new_silent_except():
+    """⚠️ 2026-10-03 新增（验收共性建议）。
+
+    本项目所有历史大坑的共同点都是「**破坏是静默的，而发现靠运气**」。
+    `except Exception: pass` 是静默的最小单元：网络失败、文件损坏、解析错误
+    全部被吞成「看起来没发生」。存量 35 处已按文件登记基线
+    （UIA 自动化的探测性操作占大头，属可接受；trader/ths_uia.py 例外）。
+
+    规则：
+    · **白名单外**的文件出现 `except: pass` → 直接 FAIL（先修或登记）；
+    · **白名单内**的文件允许 ≤ 基线数（新增即超限 FAIL，删改不受限）——
+      迫使新增吞异常的人显式来这里登记，与「已知残留显式登记」同一哲学。
+    """
+    import ast as _ast
+
+    baseline = {'dataprovider/adjust.py': 1, 'dataprovider/calendar.py': 1, 'main.py': 2, 'scheduler/runner.py': 1, 'test_uia_order.py': 1, 'tools/check_alerts.py': 4, 'tools/daily_job.py': 4, 'tools/mail_alert.py': 1, 'tools/refresh_data.py': 1, 'tools/repair_etf_adjust.py': 1, 'tools/sweep_etf_pool_expand.py': 1, 'tools/ths_dump_tree.py': 2, 'trader/ths_uia.py': 15}   # {文件: 允许处数上限}
+    bad = []
+    total = 0
+    skip = {".git", "__pycache__", ".workbuddy", "results", "data", "state",
+             "deliverables", "docs", "node_modules", ".venv"}
+    for dp, dns, fns in os.walk(ROOT):
+        dns[:] = [d for d in dns if d not in skip]
+        for fn in sorted(fns):
+            if not fn.endswith(".py"):
+                continue
+            path = os.path.join(dp, fn)
+            rel = os.path.relpath(path, ROOT).replace("\\", "/")
+            try:
+                tree = _ast.parse(open(path, encoding="utf-8").read())
+            except Exception:
+                continue
+            n = sum(1 for node in _ast.walk(tree)
+                    if isinstance(node, _ast.ExceptHandler)
+                    and len(node.body) == 1 and isinstance(node.body[0], _ast.Pass))
+            if not n:
+                continue
+            total += n
+            allow = baseline.get(rel, 0)
+            if n > allow:
+                bad.append("{}: {} 处（基线 {}）".format(rel, n, allow))
+    assert not bad, (
+        "出现新的静默吞异常（except: pass）。它会把失败伪装成「没发生」——"
+        "本项目历史大坑的共同点。处理：改成显式记录（print/logging/raise），"
+        "确属「纯探测性可吞」则到 selftest 的 baseline 里登记文件与处数：\n  "
+        + "\n  ".join(bad))
+
 @check("回测", "停牌持仓按最后已知价计价，不按 0 元（防假回撤误触发熔断）")
 def _backtest_suspension_valuation():
     """2026-09-29：`engine._row` 会把 NaN（停牌）从行里剔除，原
