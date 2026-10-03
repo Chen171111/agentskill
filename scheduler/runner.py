@@ -229,18 +229,100 @@ class DailyRunner:
         # dry_run 全程不写库，试算不会推进计数器。
 
         if raw_weights is None:
-            # 非调仓日：不重新选股、不清仓，仅记录当日净值
+            # 【每日止损检查（2026-10-02 验收修复 Q-01/D-2）】
+            # 原实现非调仓日直接 return —— 而止损判据在 filter_weights 里，
+            # 只有调仓日才被调用 → 熔断降仓持有期（最长 60 个交易日）内
+            # 个股止损/止盈/回撤止盈**全部失效**，与回测 engine.py「每个交易日
+            # 检查止损、触发则强平」不同构。现在非调仓日也执行止损检查：
+            #   · 只做个股止损/止盈/回撤止盈（与回测 engine 的非调仓日行为一致）；
+            #   · **不做**动量质检与组合级 scale（那两样回测也只在调仓日做）；
+            #   · 进攻型策略（stops_enabled=False）跳过，仅靠组合级防守。
+            stops = set()
+            if getattr(self.strategy, "stops_enabled", True):
+                stops = RiskManager().stop_codes(self.account.positions, prices)
+
+            if not stops:
+                # 无止损触发：维持原行为 —— 不重新选股、不清仓，仅记录当日净值
+                snap = self.account.snapshot(prices)
+                if not self.dry_run:
+                    self.db.set_state("strategy_since", str(self.strategy._since))
+                    self.db.save_equity(last_date, snap["cash"], snap["market_value"],
+                                        snap["total_equity"])
+                    self.db.save_positions(self.account.positions)
+                return {
+                    "status": "ok", "date": last_date, "strategy": self.strategy_name,
+                    "rebalanced": False, "target_weights": {}, "final_weights": {},
+                    "selection": [], "evaluation": [], "empty": True,
+                    "orders": [], "account": snap, "dry_run": self.dry_run,
+                }
+
+            # 触发止损 → 目标权重 = 持仓各标的的当前市值权重（止损标的置 0）。
+            # 非止损标的 tgt_mv == cur_mv（同一价格同一数量算出）→ rebalance 的
+            # 整手化会算出 0 股、不动它们；止损标的权重 0 → 清仓卖出。
+            print("[runner] ⚠️ 非调仓日触发止损/止盈：{}（每日止损检查，"
+                  "与回测 engine 同构）".format(sorted(stops)))
+            equity = self.account.total_equity(prices)
+            if equity <= 0:
+                snap = self.account.snapshot(prices)
+                return {
+                    "status": "ok", "date": last_date, "strategy": self.strategy_name,
+                    "rebalanced": False, "target_weights": {}, "final_weights": {},
+                    "selection": [], "evaluation": [], "empty": True,
+                    "orders": [], "account": snap, "dry_run": self.dry_run,
+                }
+            weights = {}
+            for code, p in self.account.positions.items():
+                if p.get("qty", 0) <= 0 or code not in prices:
+                    continue
+                w = p["qty"] * prices[code] / equity
+                weights[code] = 0.0 if code in stops else w
+
+            executor = ExecutionEngine(self.broker) if self.broker else ExecutionEngine()
+            orders = executor.rebalance(self.account, weights, prices)
+
+            # 下单后立即落库（与调仓日路径同一纪律：报单 → 落库 → 对账 → 回填 → upsert）
+            if not self.dry_run:
+                for o in orders:
+                    self.db.save_order(o)
+            # 对账（同花顺模式）：回读真实持仓/资金，杜绝双账本
+            if self.broker is not None and hasattr(self.broker, "reconcile"):
+                try:
+                    try:
+                        self.broker.reconcile(self.account, prices)
+                    except TypeError:
+                        self.broker.reconcile(self.account)
+                except Exception as e:
+                    print("[runner] 止损单对账失败: {}".format(e))
+            # 回读真实成交（当日委托只回读一次，与调仓日路径同款优化）
+            if self.broker is not None and hasattr(self.broker, "sync_fill"):
+                rows = None
+                if hasattr(self.broker, "fetch_today_orders"):
+                    try:
+                        rows = self.broker.fetch_today_orders()
+                    except Exception as e:
+                        print("[runner] ⚠️ 当日委托回读失败（改由逐笔重试）：{}".format(e))
+                for o in orders:
+                    try:
+                        self.broker.sync_fill(o, rows=rows)
+                    except Exception as e:
+                        print("[runner] ⚠️ 成交回读失败 {} {}：{}".format(o.code, o.id, e))
+            # 终态落库 + 持仓/净值（strategy_since 不推进：止损不是调仓）
             snap = self.account.snapshot(prices)
             if not self.dry_run:
+                for o in orders:
+                    self.db.save_order(o)
                 self.db.set_state("strategy_since", str(self.strategy._since))
+                self.db.save_positions(self.account.positions)
                 self.db.save_equity(last_date, snap["cash"], snap["market_value"],
                                     snap["total_equity"])
-                self.db.save_positions(self.account.positions)
             return {
                 "status": "ok", "date": last_date, "strategy": self.strategy_name,
-                "rebalanced": False, "target_weights": {}, "final_weights": {},
-                "selection": [], "evaluation": [], "empty": True,
-                "orders": [], "account": snap, "dry_run": self.dry_run,
+                "rebalanced": True, "reason": "daily_stop_loss",
+                "target_weights": {c: round(w, 4) for c, w in weights.items()},
+                "final_weights": {c: round(w, 4) for c, w in weights.items()},
+                "selection": [], "evaluation": [], "empty": False,
+                "orders": [o.to_dict() for o in orders],
+                "account": snap, "dry_run": self.dry_run,
             }
 
         raw_weights = raw_weights or {}   # 调仓日（空 dict 表示清仓）
@@ -295,6 +377,16 @@ class DailyRunner:
         executor = ExecutionEngine(self.broker) if self.broker else ExecutionEngine()
         orders = executor.rebalance(self.account, weights, prices)
 
+        # 【2026-10-02 验收修复（与 quant2 Q-02 同款）】下单后**立即**落库：
+        # 此前 save_order 在 reconcile + sync_fill（UIA 回读慢操作）之后，
+        # 若进程在此期间崩溃/被杀，已真实报出的订单在本地台账无任何记录
+        # → 下次运行把同一批目标再报一次（重复下单）。
+        # 现在：报单 → 立即落库（含 submitted/error 中间态）→ 对账 → 回填
+        # → 末尾按 order.id upsert 终态（save_order 为 INSERT OR REPLACE）。
+        if not self.dry_run:
+            for o in orders:
+                self.db.save_order(o)
+
         # 账本对账（同花顺模式）：回读真实持仓/资金校正本地账户，杜绝双账本
         post_synced = True          # 下单后账本是否已用券商真值校正
         if self.broker is not None and hasattr(self.broker, "reconcile"):
@@ -343,7 +435,7 @@ class DailyRunner:
         # 持久化（dry_run 时全部跳过，保证试算零副作用）
         if not self.dry_run:
             for o in orders:
-                self.db.save_order(o)          # 成交回读结果照常入库（orders 是事实记录）
+                self.db.save_order(o)          # 回填后 upsert 终态（与上方首落的 id 相同；orders 是事实记录）
             self.db.set_state("strategy_since", str(self.strategy._since))
             if post_synced:
                 self.db.save_positions(self.account.positions)
@@ -373,9 +465,17 @@ class DailyRunner:
 
 
 def _n_days_ago(end: str, n: int) -> str:
+    """把「n 个交易日」折算成自然日起点（供实盘面板窗口取数）。
+
+    ⚠️ 2026-10-02 验收修复（Q-02/D-1）：系数 1.6 → 1.9，余量 +20 → +30 天。
+    实测旧系数下 200 日窗口实含 229 个交易日，对 MA200 仅富余 29 根（13%）；
+    长假（春节+休市）叠加或 gate_window 调到 250 时 rolling(200) 会返回 NaN
+    → 趋势门静默失效。新系数折算约 1.9×200+30=410 自然日 ≈ 273 交易日，
+    富余 36%。配套：selftest 断言「窗口系数 ≥ 1.9」（防回退）。
+    """
     from datetime import timedelta
     d = datetime.strptime(str(end), "%Y%m%d")
-    return (d - timedelta(days=int(n * 1.6) + 20)).strftime("%Y%m%d")
+    return (d - timedelta(days=int(n * 1.9) + 30)).strftime("%Y%m%d")
 
 
 class Scheduler:

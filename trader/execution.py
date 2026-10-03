@@ -72,15 +72,23 @@ class ExecutionEngine:
                         cash_left -= buy_qty * px * 1.001
                         orders.append(Order(code, "buy", buy_qty, px, reason="加仓/建仓"))
 
-        # 提交执行
+        # 提交执行（逐单隔离，2026-10-02 验收修复 P1-4）
         placed = []
         for o in orders:
-            self.broker.submit(o)
+            try:
+                self.broker.submit(o)
+            except Exception as e:
+                # 逐单隔离：任一单 submit 抛异常不得中断整批 —— 否则已提交到券商的
+                # 订单既不返回也不落库（runner 的 save_order 只保存返回的 placed），
+                # 表现为「既丢单又可能在下次运行重复下单」。
+                # ⚠️ submit 抛异常 ≠ 委托未报出：UiaThsBroker 是「先点确认、再读回执」，
+                # 超时/读回执失败时委托可能已在券商侧成立 → 必须保留订单、标记 error，
+                # 让台账留下「报过但状态未知」的痕迹，由 sync_fill/reconcile 事后澄清。
+                o.status = "error"
+                o.reason = "{} [submit异常:{}]".format(o.reason or "", str(e)[:150]).strip()
             if o.status == "filled":
                 # 本地撮合（PaperBroker）：立即计入账户
                 account.apply_fill(o, o.filled_price)
-            if o.status in ("filled", "submitted"):
-                # 真实券商（同花顺）返回 submitted，成交以 sync_fill/reconcile 回读为准，
-                # 但订单本身必须落库，否则台账会丢单
-                placed.append(o)
+            # 无论终态如何一律返回（rejected/error 同样是发生过的事实，必须落台账）
+            placed.append(o)
         return placed

@@ -250,7 +250,9 @@ def _print_run_result(result):
         print("  （无调仓）")
     for o in result.get("orders", []):
         print("  {} {} {}股 @ {:.2f} 手续费 {:.2f}".format(
-            o["side"], o["code"], o["qty"], o["filled_price"], o["fee"]))
+            o["side"], o["code"], o["qty"],
+            o["filled_price"] or o["price"],   # 真实券商路径 filled_price 有意为 None（ths_uia:631），须兜底
+            o["fee"]))
     acc = result.get("account", {})
     print("\n账户: 现金 {:.2f}  市值 {:.2f}  总资产 {:.2f}".format(
         acc.get("cash", 0), acc.get("market_value", 0), acc.get("total_equity", 0)))

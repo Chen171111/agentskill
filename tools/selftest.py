@@ -336,6 +336,53 @@ def _runner_finite_and_circuit_state():
         "RiskManager 必须暴露熔断状态的存取方法（供 runner 持久化）"
 
 
+@check("风控", "实盘面板窗口系数 ≥ 1.9（MA200 趋势门不得静默失效）")
+def _runner_window_margin():
+    """⚠️ 2026-10-02 新增（验收 Q-02/D-1）。
+
+    `_n_days_ago(end, 200)` 把「200 交易日」折算成自然日窗口。旧系数 1.6
+    实测仅含 229 交易日（对 MA200 富余 29 根，13%）—— 长假叠加或 gate_window
+    调大后 rolling(200) 返回 NaN → 趋势门静默失效、行为与回测漂移。
+    现要求：系数 ≥ 1.9（富余 36%），且策略层的 MA 失效告警不得被删。
+    """
+    import re
+    src = open(os.path.join(ROOT, "scheduler", "runner.py"), encoding="utf-8").read()
+    m = re.search(r"n \* (\d\.\d)\D*\+ (\d+)", src)
+    assert m, "找不到 _n_days_ago 的窗口系数"
+    assert float(m.group(1)) >= 1.9, (
+        "实盘窗口系数 {} 低于 1.9 —— MA200 类长均线在长假/窗口调大后会静默 NaN".format(m.group(1)))
+    bsrc = open(os.path.join(ROOT, "strategies", "builtin.py"), encoding="utf-8").read()
+    assert bsrc.count("趋势门不生效") >= 2, (
+        "_breadth 返回 None 时必须打印告警（两处实现都不许静默）")
+
+
+@check("风控", "非调仓日每日止损已接线 + 止损判据单一来源")
+def _daily_stop_loss_wired():
+    """⚠️ 2026-10-02 新增（验收 Q-01/D-2）。
+
+    原实现止损判据内联在 filter_weights 里、只在调仓日被调用 → 非调仓日
+    （含熔断持有期最长 60 交易日）个股止损全部失效，与回测 engine「每日
+    检查止损」不同构。修复后要求三件事同时成立：
+      1. RiskManager.stop_codes 存在（判据唯一实现）；
+      2. filter_weights 复用 stop_codes（判据不分叉）；
+      3. runner 非调仓日分支（raw_weights is None）调用 stop_codes。
+    """
+    msrc = open(os.path.join(ROOT, "risk", "manager.py"), encoding="utf-8").read()
+    assert "def stop_codes(" in msrc, "RiskManager 缺少 stop_codes（止损判据单一来源）"
+    assert "stops = self.stop_codes(positions, prices) if enforce_stops else set()" in msrc, (
+        "filter_weights 必须复用 stop_codes（否则止损判据分叉）")
+    src = open(os.path.join(ROOT, "scheduler", "runner.py"), encoding="utf-8").read()
+    i_none = src.find("if raw_weights is None:")
+    assert i_none != -1, "找不到非调仓日分支"
+    # 分支范围 = 起点 → 「raw_weights = raw_weights or {}」（调仓日接管的标记行）
+    i_end = src.find("raw_weights = raw_weights or {}", i_none)
+    assert i_end != -1, "找不到非调仓日分支的结束标记"
+    seg = src[i_none:i_end]
+    assert "stop_codes" in seg and "daily_stop_loss" in seg, (
+        "非调仓日分支必须做每日止损检查（与回测 engine 同构），"
+        "触发时按 reason=daily_stop_loss 走下单路径")
+
+
 @check("回测", "停牌持仓按最后已知价计价，不按 0 元（防假回撤误触发熔断）")
 def _backtest_suspension_valuation():
     """2026-09-29：`engine._row` 会把 NaN（停牌）从行里剔除，原
@@ -504,6 +551,98 @@ def _positions_mark_roundtrip():
         assert got2["510880.SH"]["mark"] == 0.0, f"旧行 mark 应为 0：{got2}"
         db2.save_positions(got2)
         assert db2.load_positions()["510880.SH"]["qty"] == 1600
+
+
+# ============================ 巡检入口（check_alerts） ============================
+@check("巡检", "非交易日也要判「最近一个交易日无运行记录」（防节假日假阴性）")
+def _check_alerts_holiday_blindspot():
+    """2026-10-01（国庆）实测：计划任务已被删除，`check_alerts.py` 却输出
+    「[正常]」并返回 0 —— 因为它只在 `is_trading_day(today)` 为真时才判
+    「到点没跑」，节假日直接跳过判定 → **假阴性**（当天靠外部只读核查才发现）。
+
+    修复：按交易日历回溯出「最近一个交易日」，非交易日同样以它为基准比对
+    `last_run.json` 的 date。本检查钉住六种情形，既防假阴性也防假阳性
+    （周末/节假日误报，2026-09-25 中秋曾因误报被专门修过一次）。
+    """
+    import datetime as _dt
+    import io
+    from contextlib import redirect_stdout
+
+    import tools.check_alerts as ca
+    from dataprovider.calendar import is_trading_day
+
+    real_date, real_dt, real_status, real_mail = \
+        ca.date, ca.datetime, ca._load_status, ca._maybe_mail
+    try:
+        def probe(y, m, d, status):
+            class _D(_dt.date):
+                @classmethod
+                def today(cls):
+                    return cls(y, m, d)
+
+            class _DT(_dt.datetime):
+                @classmethod
+                def now(cls, tz=None):
+                    return cls(y, m, d, 15, 10, 0)          # 已过 14:50+20min 宽限
+
+            ca.date, ca.datetime = _D, _DT
+            ca._load_status = lambda: status
+            ca._maybe_mail = lambda p, n: None
+            with redirect_stdout(io.StringIO()):
+                rc = ca.main()
+            return rc
+
+        def st(date_s, ok=True):
+            return {"ts": date_s[:4] + "-" + date_s[4:6] + "-" + date_s[6:] + " 14:50:09",
+                    "date": date_s, "ok": ok, "exit_code": 0, "summary": "x"}
+
+        # 日历基准（09-25 中秋停市；10-01~10-07 国庆停市）
+        assert ca._prev_trading_day(_dt.date(2026, 10, 1), is_trading_day) \
+            == _dt.date(2026, 9, 30), "10-01 的上一交易日应为 09-30"
+        assert ca._prev_trading_day(_dt.date(2026, 9, 26), is_trading_day) \
+            == _dt.date(2026, 9, 24), "09-26(六) 的上一交易日应为 09-24（09-25 中秋停市）"
+
+        # ① 国庆·最后运行 09-29（上一交易日 09-30 无记录）→ 必须报
+        assert probe(2026, 10, 1, st("20260929")) == 1, \
+            "非交易日 + 上一交易日无记录 → 必须报（原实现返回 0，假阴性）"
+        # ② 国庆·最后运行 09-30 → 不得报
+        assert probe(2026, 10, 1, st("20260930")) == 0
+        # ③ 国庆·当天写了 skipped 记录 → 不得报
+        s = st("20261001"); s["skipped"] = "non-trading-day"
+        assert probe(2026, 10, 1, s) == 0
+        # ④ 周六·最后运行 09-24（正是上一交易日）→ 不得报（防节假日误报复发）
+        assert probe(2026, 9, 26, st("20260924")) == 0
+        # ⑤ 周六·最后运行 09-23（缺 09-24）→ 必须报
+        assert probe(2026, 9, 26, st("20260923")) == 1
+        # ⑥ 交易日 09-29·最后运行 09-29 → 不得报
+        assert probe(2026, 9, 29, st("20260929")) == 0
+    finally:
+        ca.date, ca.datetime = real_date, real_dt
+        ca._load_status, ca._maybe_mail = real_status, real_mail
+
+
+@check("巡检", "巡检入口自身可跑通（check_alerts.py 不抛异常且退出码 ∈ {0,1}）")
+def _check_alerts_entrypoint():
+    """`check_alerts.py` / `daily_job.py` 这类入口此前不在自检范围内
+    （HANDOFF §九 记为遗留）。入口一旦因导入错/语法错直接崩掉，
+    无人发现 → 自动交易异常就没人报了。这里只做冒烟：能跑完、退出码合法。
+    注意：**不建任何文件**——`_maybe_mail` 打桩，`config/mail_alert.json`
+    未启用时本来也不会发信。
+    """
+    import io
+    from contextlib import redirect_stdout
+
+    import tools.check_alerts as ca
+
+    real_mail = ca._maybe_mail
+    try:
+        ca._maybe_mail = lambda p, n: None
+        with redirect_stdout(io.StringIO()) as buf:
+            rc = ca.main()
+    finally:
+        ca._maybe_mail = real_mail
+    assert rc in (0, 1), f"退出码只允许 0/1，实得 {rc}"
+    assert "自动交易体检" in buf.getvalue(), "体检输出头缺失，入口可能没跑到主流程"
 
 
 # ============================ 主流程 ============================

@@ -39,6 +39,42 @@ class RiskManager:
         """当前熔断是否 active（供 runner 落库）。"""
         return bool(self.portfolio._cb_active)
 
+    def stop_codes(self, positions: dict, prices: dict) -> set:
+        """返回触发个股止损/止盈/回撤止盈的持仓 code 集合。
+
+        ⚠️ 2026-10-02 验收修复（Q-01/D-2）新增 —— 止损判据的**单一来源**。
+
+        原先止损判据只写在 filter_weights() 内部，而 filter_weights 只在
+        **调仓日**被 runner 调用 → 非调仓日（含熔断降仓持有期，最长 60 个
+        交易日）个股止损/止盈**全部失效**，与回测 engine.py「每日检查止损」
+        不同构。本方法把判据提出来，供两条路径共用：
+          · 调仓日路径：filter_weights() 过滤目标权重时复用；
+          · 非调仓日路径：runner 每日止损检查直接调用。
+        """
+        out = set()
+        for code, pos in (positions or {}).items():
+            if not pos or pos.get("qty", 0) <= 0 or code not in prices:
+                continue
+            px = prices[code]
+            # isfinite：nan 价时 ret<=-8% 等比较全部为 False →
+            # 止损静默失效（2026-09-29，与 _pos_ok 的 nan 穿透同类）
+            if not math.isfinite(px):
+                continue
+            cost = pos.get("cost", 0.0)
+            if cost <= 0:
+                continue
+            ret = px / cost - 1.0
+            # 回撤止盈：从持仓期最高价回落
+            peak = pos.get("peak", cost)
+            drawdown = (px / peak - 1.0) if peak > 0 else 0.0
+            if ret <= self.stop_loss:      # 触发止损 -> 清仓
+                out.add(code)
+            elif ret >= self.take_profit:  # 触发止盈 -> 清仓
+                out.add(code)
+            elif ret > 0 and drawdown <= -self.trailing_stop:  # 回撤止盈
+                out.add(code)
+        return out
+
     def filter_weights(self, target_weights: dict, positions: dict, prices: dict,
                        nav_history=None, enforce_stops: bool = True) -> dict:
         """根据当前持仓与成本，过滤/修正目标权重。
@@ -53,6 +89,8 @@ class RiskManager:
         {code: weight} 风控修正后的目标权重
         """
         out = {}
+        # 个股止损/止盈判据统一走 stop_codes()（单一来源，2026-10-02）
+        stops = self.stop_codes(positions, prices) if enforce_stops else set()
         for code, w in target_weights.items():
             if w <= 0:
                 continue
@@ -60,28 +98,10 @@ class RiskManager:
             if w > self.max_position_weight:
                 w = self.max_position_weight
 
-            # 已持有：检查止损/止盈（进攻型策略可关闭）
-            if enforce_stops:
-                pos = positions.get(code)
-                # isfinite：nan 价时 ret<=-8%/ret>=30% 等比较全部为 False →
-                # 止损/止盈静默失效（2026-09-29，与 _pos_ok 的 nan 穿透同类）
-                if (pos and pos.get("qty", 0) > 0 and code in prices
-                        and math.isfinite(prices[code])):
-                    cost = pos.get("cost", 0.0)
-                    px = prices[code]
-                    ret = (px / cost - 1.0) if cost > 0 else 0.0
-                    # 回撤止盈：从持仓期最高价回落
-                    peak = pos.get("peak", cost)
-                    drawdown = (px / peak - 1.0) if peak > 0 else 0.0
-                    if ret <= self.stop_loss:      # 触发止损 -> 清仓
-                        out[code] = 0.0
-                        continue
-                    if ret >= self.take_profit:    # 触发止盈 -> 清仓
-                        out[code] = 0.0
-                        continue
-                    if ret > 0 and drawdown <= -self.trailing_stop:  # 回撤止盈
-                        out[code] = 0.0
-                        continue
+            # 已持有且触发止损/止盈（进攻型策略 enforce_stops=False 可关闭）
+            if code in stops:
+                out[code] = 0.0
+                continue
 
             out[code] = w
 

@@ -201,5 +201,16 @@ def market():
 if __name__ == "__main__":
     import webbrowser
     import threading
+    # ⚠️ 2026-10-02 验收修复（P1-5）：未设置 ACCESS_TOKEN 时 /api/* 完全开放。
+    # 本地 127.0.0.1 使用风险可控，但 share.bat 的公网隧道会把这套接口（含
+    # /api/status 的真实持仓）暴露到公网 → 启动时必须醒目提示；
+    # share.bat 已改为未设 token 拒绝启动。
+    if not config.ACCESS_TOKEN:
+        print("=" * 72)
+        print("⚠️  警告：未设置 AGENTSKILL_TOKEN，/api/* 接口当前【无鉴权】。")
+        print("    本地使用可接受；但【严禁】在此状态下运行 share.bat 公网隧道")
+        print("    （会把真实持仓 /api/status 与可触发的 /api/backtest 暴露公网）。")
+        print("    设置方法：set AGENTSKILL_TOKEN=<随机长字符串> 后再启动。")
+        print("=" * 72)
     threading.Timer(1.2, lambda: webbrowser.open("http://127.0.0.1:8000/")).start()
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")

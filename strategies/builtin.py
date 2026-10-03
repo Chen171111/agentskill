@@ -84,18 +84,44 @@ class EtfRotationStrategy(MomentumStrategy):
         self.gate_threshold = float(gate_threshold)
         self.gate_topk = int(gate_topk)
 
+
+    def _warn_breadth_na(self, why: str):
+        """广度算不出来时告警（每个策略实例只打一次，防回测前段刷屏）。
+
+        回测起始的前 gate_window 个交易日 MA 不足是**预期行为**（本方法不打扰）；
+        若实盘运行中出现，说明面板窗口不够 —— 检查 runner._n_days_ago 的系数
+        （应为 1.9）。趋势门失效期间按弱势保守分支处理。
+        """
+        if getattr(self, "_breadth_na_warned", False):
+            return
+        self._breadth_na_warned = True
+        print("[trend_gate] ⚠️ 广度计算失败（本次运行仅提示一次）：{} —— "
+              "趋势门不生效，按弱势保守分支处理。回测起始段属预期；"
+              "实盘出现请检查面板窗口（runner._n_days_ago 系数应为 1.9）。".format(why))
+
     def _breadth(self, panel, date):
-        """跨截面广度：站上自身 MA(gate_window) 的标的占比，0~1。"""
+        """跨截面广度：站上自身 MA(gate_window) 的标的占比，0~1。
+
+        ⚠️ 2026-10-02 验收修复（Q-02/D-1）：返回 None（数据不足算不出 MA）时
+        **不再静默**。原实现 None → 调用方当作「弱势」处理，趋势门悄悄失效，
+        无人知晓——面板窗口不足（长假/窗口被调大）时实盘行为与回测漂移。
+        现在显式打印告警（会进 daily_run.log / 回测 stdout），便于事后追查。
+        """
         close = panel.get("close")
         if close is None or date not in close.index:
+            self._warn_breadth_na("面板无 close 或日期不在区间")
             return None
         ma = close.rolling(self.gate_window).mean()
         if date not in ma.index:
+            self._warn_breadth_na("日期不在 MA 区间")
             return None
         row_c = close.loc[date]
         row_m = ma.loc[date]
         valid = row_c.notna() & row_m.notna()
         if valid.sum() == 0:
+            self._warn_breadth_na(
+                "MA(gate_window={}) 全为 NaN —— 面板窗口不足以覆盖均线（需 ≥ {} 个交易日）"
+                .format(self.gate_window, self.gate_window))
             return None
         return float((row_c[valid] > row_m[valid]).sum() / valid.sum())
 
@@ -231,18 +257,44 @@ class TechOffensiveStrategy(Strategy):
         self.factor_fast = "momentum{}".format(window_fast)
         self.factor_slow = "momentum{}".format(window_slow)
 
+
+    def _warn_breadth_na(self, why: str):
+        """广度算不出来时告警（每个策略实例只打一次，防回测前段刷屏）。
+
+        回测起始的前 gate_window 个交易日 MA 不足是**预期行为**（本方法不打扰）；
+        若实盘运行中出现，说明面板窗口不够 —— 检查 runner._n_days_ago 的系数
+        （应为 1.9）。趋势门失效期间按弱势保守分支处理。
+        """
+        if getattr(self, "_breadth_na_warned", False):
+            return
+        self._breadth_na_warned = True
+        print("[trend_gate] ⚠️ 广度计算失败（本次运行仅提示一次）：{} —— "
+              "趋势门不生效，按弱势保守分支处理。回测起始段属预期；"
+              "实盘出现请检查面板窗口（runner._n_days_ago 系数应为 1.9）。".format(why))
+
     def _breadth(self, panel, date):
-        """跨截面广度：站上自身 MA(gate_window) 的标的占比，0~1。"""
+        """跨截面广度：站上自身 MA(gate_window) 的标的占比，0~1。
+
+        ⚠️ 2026-10-02 验收修复（Q-02/D-1）：返回 None（数据不足算不出 MA）时
+        **不再静默**。原实现 None → 调用方当作「弱势」处理，趋势门悄悄失效，
+        无人知晓——面板窗口不足（长假/窗口被调大）时实盘行为与回测漂移。
+        现在显式打印告警（会进 daily_run.log / 回测 stdout），便于事后追查。
+        """
         close = panel.get("close")
         if close is None or date not in close.index:
+            self._warn_breadth_na("面板无 close 或日期不在区间")
             return None
         ma = close.rolling(self.gate_window).mean()
         if date not in ma.index:
+            self._warn_breadth_na("日期不在 MA 区间")
             return None
         row_c = close.loc[date]
         row_m = ma.loc[date]
         valid = row_c.notna() & row_m.notna()
         if valid.sum() == 0:
+            self._warn_breadth_na(
+                "MA(gate_window={}) 全为 NaN —— 面板窗口不足以覆盖均线（需 ≥ {} 个交易日）"
+                .format(self.gate_window, self.gate_window))
             return None
         return float((row_c[valid] > row_m[valid]).sum() / valid.sum())
 
