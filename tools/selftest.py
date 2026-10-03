@@ -418,6 +418,11 @@ def _etf_limit_modeled():
     for lit in ("= 0.20", "= 0.10", "= 0.30"):
         assert lit not in esrc, (
             "engine.py 仍含分档字面量 {}（分档唯一来源是 tools/limit_rules.py）".format(lit))
+    # 已知残留显式登记（与 quant2 同哲学：检查没报 ≠ 没问题）
+    lr = open(os.path.join(ROOT, "tools", "limit_rules.py"), encoding="utf-8").read()
+    assert "ST / *ST" in lr and "未建模" in lr, (
+        "limit_rules.py 丢失「ST ±5% 档未建模」的显式登记 —— "
+        "已知残留不许静默消失（需要 point-in-time ST 快照数据源才能根治）")
     # 池内可交易标的分档断言：ETF/个股的档位必须可判定（指数允许 None，
     # 池定义允许混入基准指数，run/simulate 入口有 validate_tradeable 拦截）
     import config as _cfg
