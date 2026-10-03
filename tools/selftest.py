@@ -383,6 +383,32 @@ def _daily_stop_loss_wired():
         "触发时按 reason=daily_stop_loss 走下单路径")
 
 
+@check("风控", "ETF 涨跌停分档已建模：默认 10%、双创 20%、基金按 0.001 精度")
+def _etf_limit_modeled():
+    """⚠️ 2026-10-02 新增（验收 P1-1）。
+
+    原实现 _limit_pct 对 ETF 返回 None（注释误写「ETF/基金无涨跌停」，
+    与 docs/参考_A股ETF涨跌幅限制.md 冲突）→ 回测中一字涨停开盘可照常买入，
+    README 收益数字系统性偏乐观（实测修复使累计收益 28.39%→19.15%）。
+    本检查防止：①有人把 ETF 档改回 None；②双创名单/前缀被误删；
+    ③基金涨跌停价精度退回 0.01（会把 9.9% 合法开盘误拦）。
+    """
+    import sys as _sys
+    _sys.path.insert(0, ROOT)
+    from backtest.engine import BacktestEngine
+    f = BacktestEngine._limit_pct
+    assert f("510300.SH") == 0.10, "主板宽基 ETF 应为 10%"
+    assert f("513100.SH") == 0.10, "跨境 ETF 应为 10%"
+    assert f("518880.SH") == 0.10, "商品 ETF 应为 10%"
+    assert f("159928.SZ") == 0.10, "深市普通 ETF 应为 10%"
+    assert f("159915.SZ") == 0.20, "创业板 ETF 应为 20%（显式名单）"
+    assert f("588000.SH") == 0.20, "科创板 ETF 应为 20%（588 前缀）"
+    assert f("600519.SH") == 0.10 and f("300750.SZ") == 0.20 and f("688981.SH") == 0.20, \
+        "个股分档不得被 ETF 修复波及"
+    src = open(os.path.join(ROOT, "backtest", "engine.py"), encoding="utf-8").read()
+    assert "rnd = 3 if" in src, "基金涨跌停价必须按 0.001 精度取整（否则误拦合法开盘）"
+
+
 @check("回测", "停牌持仓按最后已知价计价，不按 0 元（防假回撤误触发熔断）")
 def _backtest_suspension_valuation():
     """2026-09-29：`engine._row` 会把 NaN（停牌）从行里剔除，原

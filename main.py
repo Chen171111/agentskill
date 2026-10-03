@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import (RECOMMENDED_POOLS, DEFAULT_STRATEGY, DEFAULT_START, DEFAULT_END,
-                    DEFAULT_TOP_K, DEFAULT_REBALANCE, DEFAULT_DD_CIRCUIT, ensure_dirs,
+                    DEFAULT_REBALANCE, DEFAULT_DD_CIRCUIT, ensure_dirs,
                     THS_EXE_PATH)
 from analysis.metrics import format_metrics
 
@@ -330,11 +330,13 @@ def main():
     sp.set_defaults(func=cmd_ths_check)
 
     args = p.parse_args()
-    # topk 默认值按策略类定义下沉：tech_offensive 用 4（2026-09 样本外验证），
-    # 其余策略沿用 DEFAULT_TOP_K=5。--topk 显式传入时优先。
-    if getattr(args, "topk", None) is None:
-        args.topk = (4 if getattr(args, "strategy", "") == "tech_offensive"
-                     else DEFAULT_TOP_K)
+    # topk 未显式传入时保持 None 透传（2026-10-02 验收修复 P1-3）：
+    # pipeline.run_backtest 对 None 不注入 → 各策略类定义的默认值生效
+    # （etf_rotation=5、momentum 族=3、tech_offensive=4、lianban_lead=1）。
+    # 原实现在这里无条件替换成 DEFAULT_TOP_K（tech_offensive 特判 4），
+    # 使 lianban_lead 的设计 topk=1 永远不生效、momentum 族被强制成 5 ——
+    # 与 pipeline 注释「topk=None 时不注入，回落各策略类默认」直接矛盾。
+    # README 的回测命令均显式传 --topk，不受本修复影响。
     args.func(args)
 
 

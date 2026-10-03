@@ -129,12 +129,37 @@ class BacktestEngine:
         r = df.loc[date]
         return {c: r[c] for c in r.index if r[c] == r[c]}
 
-    @staticmethod
-    def _limit_pct(code):
-        """个股涨跌停幅度。ETF/基金无涨跌停返回 None。"""
+    # ---- ETF 涨跌停分档（2026-10-02 验收修复 P1-1）----
+    # 制度依据：docs/参考_A股ETF涨跌幅限制.md（沪深交易所交易规则一手梳理）。
+    # ETF 默认 ±10%；「双创」ETF（跟踪指数成份股仅为创业板/科创板股票）±20%。
+    # 深交所按「基金名单」公布适用 20% 的基金，代码前缀无法自动区分
+    # （深市 ETF 全部 159 开头，创业板 ETF 与普通 ETF 混排）→ 显式名单维护；
+    # 沪市科创板 ETF 统一 588/589 开头，按前缀判定。
+    # ⚠️ 名单维护制：扩池纳入新的双创 ETF 若不在此名单，其 20% 涨停日会被按
+    # 10% 档漏判（偏乐观）——扩池时必须同步补录（见 docs 同名文档 §2.2）。
+    _ETF_LIMIT_20 = frozenset({
+        "159915",   # 创业板ETF（易方达）
+        "159780",   # 双创ETF（华夏）
+        "159781",   # 双创ETF（招商）
+    })
+    _ETF_20_PREFIX = ("588", "589")   # 沪市科创板 ETF
+
+    @classmethod
+    def _limit_pct(cls, code):
+        """涨跌停幅度：个股按板块分档；ETF 默认 10%、双创 20%（显式名单+前缀）。
+
+        原实现对非个股一律返回 None（注释误写「ETF/基金无涨跌停」——与本项目
+        自己的权威文档冲突），导致回测中 ETF 可在「一字涨停开盘」照常买入，
+        可成交性被系统性高估、README 实测收益偏乐观。
+        """
         kind = classify_code(code)
+        base = code.upper().split(".")[0]
+        if kind == "etf":
+            if base.startswith(cls._ETF_20_PREFIX) or base in cls._ETF_LIMIT_20:
+                return 0.20
+            return 0.10
         if kind != "stock":
-            return None
+            return None   # 指数等不可交易标的（validate_tradeable 已前置拦截，双保险）
         cu = code.upper()
         if cu.startswith("688") or cu.startswith("300") or cu.startswith("301"):
             return 0.20   # 科创板/创业板
@@ -154,16 +179,20 @@ class BacktestEngine:
                 continue
             limit = self._limit_pct(code)
             if limit is None:
-                continue  # ETF/基金无涨跌停
+                continue  # 指数等不可交易标的（ETF 现已按 10%/20% 分档建模）
+            # 涨跌停价四舍五入精度：股票 0.01 元、基金 0.001 元
+            # （docs/参考_A股ETF涨跌幅限制.md §一：基金按 0.001 取整）。
+            # 若 ETF 也按 2 位取整，门槛会被压低 → 9.9% 涨幅的合法开盘被误拦。
+            rnd = 3 if classify_code(code) == "etf" else 2
             pc = prev_close.loc[date, code] if prev_close is not None and date in prev_close.index else None
             if pc is None or pc != pc or pc <= 0:
                 continue
             oc = open_px.get(code)
             if oc is None:
                 continue
-            if oc >= round(pc * (1 + limit), 2):
+            if oc >= round(pc * (1 + limit), rnd):
                 buy_blocked.add(code)
-            if oc <= round(pc * (1 - limit), 2):
+            if oc <= round(pc * (1 - limit), rnd):
                 sell_blocked.add(code)
         return buy_blocked, sell_blocked
 
@@ -203,6 +232,14 @@ class BacktestEngine:
 
             # 3) 今日收盘后决策（生成下一开盘的调仓目标）
             weights = self.strategy.generate_weights(date, self.factors, self.panel)
+            # 【单标的上限】2026-10-02 验收修复（P1-2）：策略的 max_weight 此前
+            # 赋值后全仓无读取（死参数）——README §四 把「单标的上限」列为风控
+            # 组件，但回测链路完全没有单标的约束，风险平价路径在标的少/低波动
+            # 时单标的权重可远超 30%。实盘侧由 RiskManager.filter_weights 同款
+            # clip（config.RISK.max_position_weight），此处对齐同一口径（单一来源）。
+            if weights:
+                _mw = float(config.RISK.get("max_position_weight", 0.30))
+                weights = {c: min(w, _mw) for c, w in weights.items()}
             # None=非调仓日不动作；空 dict=调仓日清仓（趋势过滤全破位/情绪门空仓）
             if weights is not None:
                 if self.stability_min_overlap is not None:
