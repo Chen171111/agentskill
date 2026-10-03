@@ -48,11 +48,30 @@ def _vol_ratio(px: dict, window=5):
     return v / v.rolling(window).mean()
 
 
-def _zt_daily(px: dict, thr: float = 0.098):
+def _zt_thr(code=None):
+    """涨停判据阈值：按标的分档取单一来源（tools/limit_rules），留 0.2pp 容差。
+
+    2026-10-03 验收修复（P2-10）：原硬编码 9.8% 容差阈值只对主板 10% 成立 ——
+    双创（20%）漏判涨停、ST（5%）误判。ST ±5% 档仍未建模（无 point-in-time
+    ST 快照，quant2 已同款登记为已知残留）。
+    """
+    if code:
+        from tools.limit_rules import limit_of
+        lim = limit_of(code)
+        if lim is not None:
+            return lim - 0.002
+    return 0.10 - 0.002   # 主板档 − 容差（code 不可用时的回退）
+
+
+def _zt_daily(px: dict, thr: float = None):
+    if thr is None:
+        thr = _zt_thr(px.get("code"))
     return (px["close"].pct_change() >= thr).astype(int)
 
 
-def _lianban(px: dict, thr: float = 0.098):
+def _lianban(px: dict, thr: float = None):
+    if thr is None:
+        thr = _zt_thr(px.get("code"))
     zt = _zt_daily(px, thr)
     run = zt.cumsum() - zt.cumsum().where(zt == 0).ffill().fillna(0)
     return run.where(zt > 0, 0)

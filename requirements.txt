@@ -1,7 +1,8 @@
+# 研究/回测主依赖（纯 Python 跨平台）
+# 2026-10-03 验收修复（Q-03）：交易链路依赖拆至 requirements-ths.txt ——
+# pywin32 等在非 Windows 环境装不上，混在一起会把纯研究用户挡在门外。
 akshare>=1.14.0
 pandas>=1.5.0
 numpy>=1.23.0
 fastapi>=0.100.0
 uvicorn>=0.23.0
-# 可选：接入同花顺客户端(含模拟炒股)下单时安装
-# easytrader

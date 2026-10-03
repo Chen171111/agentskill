@@ -406,7 +406,26 @@ def _etf_limit_modeled():
     assert f("600519.SH") == 0.10 and f("300750.SZ") == 0.20 and f("688981.SH") == 0.20, \
         "个股分档不得被 ETF 修复波及"
     src = open(os.path.join(ROOT, "backtest", "engine.py"), encoding="utf-8").read()
-    assert "rnd = 3 if" in src, "基金涨跌停价必须按 0.001 精度取整（否则误拦合法开盘）"
+    assert "limit_price_round" in src, (
+        "engine 涨跌停价必须走单一来源 limit_price_round（基金 0.001 精度，"
+        "否则误拦合法开盘）")
+    # 分档单一来源：backtest/factors 不得再出现自己的分档字面量
+    # （0.10/0.20/0.30/0.098 —— 出现即意味着又分叉了）
+    for f in ("backtest/engine.py", "factors/registry.py"):
+        s = open(os.path.join(ROOT, *f.split("/")), encoding="utf-8").read()
+        assert "0.098" not in s, f + " 仍硬编码涨停阈值 0.098（应走 tools/limit_rules）"
+    esrc = open(os.path.join(ROOT, "backtest", "engine.py"), encoding="utf-8").read()
+    for lit in ("= 0.20", "= 0.10", "= 0.30"):
+        assert lit not in esrc, (
+            "engine.py 仍含分档字面量 {}（分档唯一来源是 tools/limit_rules.py）".format(lit))
+    # 池内可交易标的分档断言：ETF/个股的档位必须可判定（指数允许 None，
+    # 池定义允许混入基准指数，run/simulate 入口有 validate_tradeable 拦截）
+    import config as _cfg
+    from tools.limit_rules import limit_of as _lo
+    from dataprovider.store import classify_code as _cc
+    undecidable = [c for pool in _cfg.RECOMMENDED_POOLS.values() for c in pool
+                   if _cc(c) in ("etf", "stock") and _lo(c) is None]
+    assert not undecidable, "推荐池含分档不可判定的可交易标的: {}".format(undecidable)
 
 
 

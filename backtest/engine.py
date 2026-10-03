@@ -11,11 +11,10 @@ from risk.portfolio import PortfolioRisk
 
 _TRADING_DAYS = getattr(config, "TRADING_DAYS_PER_YEAR", 244)
 
-# 回撤熔断参数（带滞回的极端保险，只对深回撤反应，避免浅阈值反复"打脸"）
-# 降仓档位：(回撤幅度阈值 → 仓位系数)，从深到浅排列
-_CB_LEVELS = [(0.25, 0.0), (0.20, 0.40), (0.15, 0.65)]
-_CB_TRIGGER = 0.15    # 进入熔断的回撤幅度（≥15% 才启动）
-_CB_RECOVER = 0.10    # 退出熔断的回撤幅度（≤10% 才恢复，滞回带 5%）
+# 回撤熔断常量已收敛到 risk/portfolio.py（2026-10-03）：此处原有一份逐字
+# 副本，且经实测是死代码（本文件内无引用；真源 risk/portfolio.py，
+# selftest 的熔断滞回检查也直接针对那边）。README 声称「回测与实盘共享
+# 同一套」，常量必须只有一份。
 
 
 class BacktestResult:
@@ -129,41 +128,14 @@ class BacktestEngine:
         r = df.loc[date]
         return {c: r[c] for c in r.index if r[c] == r[c]}
 
-    # ---- ETF 涨跌停分档（2026-10-02 验收修复 P1-1）----
-    # 制度依据：docs/参考_A股ETF涨跌幅限制.md（沪深交易所交易规则一手梳理）。
-    # ETF 默认 ±10%；「双创」ETF（跟踪指数成份股仅为创业板/科创板股票）±20%。
-    # 深交所按「基金名单」公布适用 20% 的基金，代码前缀无法自动区分
-    # （深市 ETF 全部 159 开头，创业板 ETF 与普通 ETF 混排）→ 显式名单维护；
-    # 沪市科创板 ETF 统一 588/589 开头，按前缀判定。
-    # ⚠️ 名单维护制：扩池纳入新的双创 ETF 若不在此名单，其 20% 涨停日会被按
-    # 10% 档漏判（偏乐观）——扩池时必须同步补录（见 docs 同名文档 §2.2）。
-    _ETF_LIMIT_20 = frozenset({
-        "159915",   # 创业板ETF（易方达）
-        "159780",   # 双创ETF（华夏）
-        "159781",   # 双创ETF（招商）
-    })
-    _ETF_20_PREFIX = ("588", "589")   # 沪市科创板 ETF
+    # ---- 涨跌停分档已收敛到 tools/limit_rules.py（2026-10-03 单一来源）----
+    # 本类不再持有分档字面量；ETF 双创名单/前缀、北交所、精度规则见该模块。
 
-    @classmethod
-    def _limit_pct(cls, code):
-        """涨跌停幅度：个股按板块分档；ETF 默认 10%、双创 20%（显式名单+前缀）。
-
-        原实现对非个股一律返回 None（注释误写「ETF/基金无涨跌停」——与本项目
-        自己的权威文档冲突），导致回测中 ETF 可在「一字涨停开盘」照常买入，
-        可成交性被系统性高估、README 实测收益偏乐观。
-        """
-        kind = classify_code(code)
-        base = code.upper().split(".")[0]
-        if kind == "etf":
-            if base.startswith(cls._ETF_20_PREFIX) or base in cls._ETF_LIMIT_20:
-                return 0.20
-            return 0.10
-        if kind != "stock":
-            return None   # 指数等不可交易标的（validate_tradeable 已前置拦截，双保险）
-        cu = code.upper()
-        if cu.startswith("688") or cu.startswith("300") or cu.startswith("301"):
-            return 0.20   # 科创板/创业板
-        return 0.10       # 主板
+    @staticmethod
+    def _limit_pct(code):
+        """涨跌停幅度（委托单一来源 tools/limit_rules.limit_of）。"""
+        from tools.limit_rules import limit_of
+        return limit_of(code)
 
     def _blocked(self, date, open_px, prev_close, volume):
         """当日不可成交集合：停牌 + 一字涨停(买不进) / 一字跌停(卖不出)。"""
@@ -180,10 +152,9 @@ class BacktestEngine:
             limit = self._limit_pct(code)
             if limit is None:
                 continue  # 指数等不可交易标的（ETF 现已按 10%/20% 分档建模）
-            # 涨跌停价四舍五入精度：股票 0.01 元、基金 0.001 元
-            # （docs/参考_A股ETF涨跌幅限制.md §一：基金按 0.001 取整）。
-            # 若 ETF 也按 2 位取整，门槛会被压低 → 9.9% 涨幅的合法开盘被误拦。
-            rnd = 3 if classify_code(code) == "etf" else 2
+            # 涨跌停价取整精度：股票 0.01 元、基金 0.001 元（单一来源 limit_rules）
+            from tools.limit_rules import limit_price_round
+            rnd = limit_price_round(code)
             pc = prev_close.loc[date, code] if prev_close is not None and date in prev_close.index else None
             if pc is None or pc != pc or pc <= 0:
                 continue

@@ -8,15 +8,23 @@ import config
 
 class TradeDB:
     def __init__(self, db_path=None):
-        self.db_path = str(db_path or config.DB_PATH)
-        self.db_path = str(config.DB_PATH) if not db_path else str(db_path)
+        self.db_path = str(db_path) if db_path else str(config.DB_PATH)
         self._init_schema()
 
     def _conn(self):
         self.db_path_parent = __import__("pathlib").Path(self.db_path).parent
         self.db_path_parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
+        # timeout=10 + WAL（2026-10-03 验收修复顺手项 Q-09）：daily_job 与
+        # 手动重入/面板并发时等待锁而非立即抛 database is locked；
+        # WAL 允许读写并行，降低长读（净值历史）阻塞写入的概率。
+        conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError as e:
+            # 不静默吞（selftest 禁新增 except: pass）：WAL 未生效会悄悄改变
+            # 并发行为，必须留痕 —— 常见于只读目录/旧 SQLite 版本。
+            print("[TradeDB] ⚠️ WAL 不可用（退回默认日志模式）: {}".format(e))
         return conn
 
     @contextmanager

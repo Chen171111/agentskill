@@ -30,6 +30,7 @@ def compute_factors(panel, factor_names: List[str] = None) -> Dict[str, pd.DataF
         per_code = {}
         for code in panel.codes:
             px = {f: df[code] for f, df in cols.items()}
+            px["code"] = code    # 2026-10-03：涨停类因子需按 code 分档取涨跌停幅度（P2-10）
             per_code[code] = fn(px)
         out[name] = pd.DataFrame(per_code, index=dates).sort_index()
     return out

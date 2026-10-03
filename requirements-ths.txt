@@ -1,0 +1,10 @@
+# 交易链路依赖（同花顺 UIA 模拟盘）—— 研究用不到，可跳过
+# 2026-10-03 验收修复（Q-03）：原全部混在 requirements.txt，但 pywin32 等
+# 在非 Windows 环境装不上，会把纯研究用户挡在门外。安装：
+#     pip install -r requirements-ths.txt
+# 可选：easytrader（ThsBroker 备用通道；当前主链路用 UiaThsBroker，不装也能跑）
+pywinauto
+pywin32
+Pillow
+pytesseract
+# easytrader

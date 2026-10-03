@@ -1,0 +1,46 @@
+# 跨平台 CI：只跑「不依赖 Windows/同花顺/本地数据」的检查层。
+# 2026-10-03 建立。selftest 里的券商读取/巡检等检查项依赖 win32 与本机
+# 状态文件，在本环境不可跑 —— 完整回归仍在开发机执行 `tools/selftest.py`。
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 主依赖跨平台可装；交易链路依赖（pywin32 等）在 requirements-ths.txt，
+      # CI 不装 —— 这正是 2026-10-03 拆分 requirements 的原因。
+      - name: Install research deps
+        run: pip install -r requirements.txt
+
+      # 第 1 层：全仓语法（最便宜的回归网，历史踩过「提交时语法错误」）
+      - name: Syntax check (all .py)
+        run: python -m compileall -q .
+
+      # 第 2 层：文档命令审计（CLI 契约：参数/依赖链/落盘产物，纯文本+AST）
+      - name: Doc command audit
+        run: python tools/audit_doc_commands.py
+
+      # 第 3 层：涨跌停单一来源冒烟（分档正确性跨平台可验证）
+      - name: Limit rules smoke
+        run: |
+          python - <<'PY'
+          import sys; sys.path.insert(0, '.')
+          from tools.limit_rules import limit_of
+          assert limit_of("510300.SH") == 0.10
+          assert limit_of("159915.SZ") == 0.20
+          assert limit_of("588000.SH") == 0.20
+          assert limit_of("300750.SZ") == 0.20
+          assert limit_of("000300.SH") is None
+          print("limit_rules OK")
+          PY
