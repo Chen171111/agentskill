@@ -90,7 +90,10 @@ TRADING_COST = {
 #
 # 对回测的影响：ETF 轮动线年化 **−0.28pp**（最低佣金惩罚随资金变小而变大）。
 # 大多数 `tools/` 脚本本来就显式传 `init_cash=100_000.0`，此次改动只影响漏传的路径。
-INIT_CASH = 100_000.0
+#
+# 2026-10-02 代码验收（Q-07）补：与 quant2 的 `QUANT_VIRTUAL_CAPITAL` 口径对齐，
+# 支持环境变量覆盖，避免换档位必须改代码。env 未设时行为与原来完全一致。
+INIT_CASH = float(os.environ.get("QUANT_VIRTUAL_CAPITAL", 100_000.0))
 
 # 同花顺经典版客户端路径（模拟炒股下单用；需已登录、窗口保持打开不可最小化）
 THS_EXE_PATH = r"D:\同花顺软件\同花顺\xiadan.exe"
