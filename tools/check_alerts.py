@@ -13,13 +13,22 @@
 （2026-09-18 21:02 一次额外的手动运行失败，曾把当天 14:50 计划任务的**成功**记录
 覆盖成 `ok:false`，导致本脚本次日误报「自动交易失败」。修法见 `tools/daily_job.py`。）
 
-退出码：0 = 一切正常；1 = 有问题（失败 / 到点没跑 / 存在告警文件）
+退出码：0 = 一切正常；1 = 有问题（失败 / 到点没跑 / 最近一个交易日无记录 / 存在告警文件）
 有问题时还会尝试发告警邮件（config/mail_alert.json 未配置则静默跳过；
 同一天、问题清单相同只发一次，标记 state/alert_mail_sent.json）。
+
+**非交易日也判定「最近一个交易日有没有跑」（2026-10-01 补）**
+----------------------------------------------------------------
+2026-10-01（国庆）实测踩坑：计划任务已被删除，但本脚本因 `is_trading_day()` 为 False
+而**跳过**「到点没跑」判定 → 照常输出「[正常]」并返回 0，属**假阴性**。
+（当天靠外部巡检的只读核查才发现任务早已消失。）
+→ 新增按交易日历回溯的「最近一个交易日无运行记录」判定：**不看今天是不是交易日**，
+  只要已过 14:50+宽限，就以「最近一个交易日」为基准比对 `last_run.json` 的 date。
+  这条检查不依赖计划任务接口（本机非提权下读不到任务库），纯日历推算，无假阳性。
 """
 import json
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -97,6 +106,23 @@ def _load_status():
         return None
 
 
+def _prev_trading_day(today, is_trading_day, lookback=30):
+    """今天（含）往前第一个交易日。
+
+    非交易日也要能回答「上一交易日是几号」——2026-10-01 的假阴性就是
+    「节假日干脆不判定」造成的，所以这里必须能跨节假日回溯。
+    """
+    d = today
+    for _ in range(lookback):
+        try:
+            if is_trading_day(d):
+                return d
+        except Exception:
+            return None
+        d -= timedelta(days=1)
+    return None
+
+
 def main():
     from dataprovider.calendar import is_trading_day
 
@@ -113,6 +139,11 @@ def main():
         notes.append("交易日历不可用（{}），跳过「到点没跑」判定".format(e))
     # 到点没跑：今天是交易日、且已过 14:50+宽限，但最后一次运行不是今天
     due = now.hour * 60 + now.minute >= (RUN_HHMM[0] * 60 + RUN_HHMM[1] + GRACE_MIN)
+    # 今天（含）往前第一个交易日 —— 非交易日也要有基准，否则节假日会漏检（见文件头说明）
+    prev_td = _prev_trading_day(today, is_trading_day) if not trading else today
+    if not trading and prev_td is not None:
+        notes.append("今天（{}）是非交易日；「最近一个交易日」判定基准 = {}".format(
+            today.strftime("%Y-%m-%d"), prev_td.strftime("%Y-%m-%d")))
 
     st = _load_status()
     if st is None:
@@ -134,6 +165,19 @@ def main():
                     "今天是交易日且已过 {}:{}，但今天没有运行记录（最近一次是 {}）"
                     "—— 计划任务可能没触发".format(
                         RUN_HHMM[0], RUN_HHMM[1], st.get("ts")))
+
+        # 最近一个交易日无运行记录 —— **不看今天是不是交易日**（2026-10-01 补）。
+        # 为什么：国庆假期里计划任务被删，上面那条因 is_trading_day()=False 被跳过，
+        # 脚本照常报「正常」，把「任务已从本机消失」这类硬故障漏掉了。
+        # 只有已过 14:50+宽限才判，避免盘中（运行前）误报。
+        # 只在「今天非交易日」时判，避免与上面那条交易日判定重复报同一件事。
+        if due and (not trading) and prev_td is not None:
+            last_date = str(st.get("date") or "")
+            if last_date and last_date < prev_td.strftime("%Y%m%d"):
+                problems.append(
+                    "最近一个交易日 {} 没有运行记录（最近一次是 {}）"
+                    "—— 计划任务可能没触发、或已被删除".format(
+                        prev_td.strftime("%Y-%m-%d"), st.get("ts")))
 
     if ALERT.exists():
         if trading:
@@ -179,9 +223,10 @@ def main():
         for p in problems:
             print("  ✗ {}".format(p))
         print("\n排查入口：state/daily_run.log ｜ 数据问题看 state/DATA_ALERT.txt")
+        print("若怀疑「到点没跑」：双击 check_schedule.bat 只读核对任务是否还在册。")
         _maybe_mail(problems, notes)
         return 1
-    print("\n[正常] 最近一次运行成功，且今天没有到点未跑的情况。")
+    print("\n[正常] 最近一次运行成功；无告警文件，也没有「到点未跑 / 最近一个交易日无记录」的情况。")
     return 0
 
 
