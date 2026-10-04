@@ -389,7 +389,8 @@ def _etf_limit_modeled():
 
     原实现 _limit_pct 对 ETF 返回 None（注释误写「ETF/基金无涨跌停」，
     与 docs/参考_A股ETF涨跌幅限制.md 冲突）→ 回测中一字涨停开盘可照常买入，
-    README 收益数字系统性偏乐观（实测修复使累计收益 28.39%→19.15%）。
+    README 收益数字系统性偏乐观（该修复使累计收益 28.39%→24.60%，随后
+    max_weight 接线 → 19.15%、2026-10-04 N-1 趋势门 warmup 修复 → 33.43%）。
     本检查防止：①有人把 ETF 档改回 None；②双创名单/前缀被误删；
     ③基金涨跌停价精度退回 0.01（会把 9.9% 合法开盘误拦）。
     """
@@ -750,6 +751,65 @@ def _numeric_snapshot_cost():
     o_sell_stk = Order("600519.SH", "sell", 1000, 10.0)
     br.submit(o_sell_stk)
     assert round(o_sell_stk.fee, 6) == 14.995                # 5.0（兜底）+ 印花税 9.995
+
+
+@check("数值", "趋势门/Faber MA 接入 warmup close_full（N-1：slice 后 rolling 从起点重数）")
+def _numeric_trend_gate_warmup():
+    """⚠️ 2026-10-04 N-1（主人复跑发现）：回测 panel 是 warmup 面板 slice 后的
+    区间视图，_breadth / Faber 用 `close.rolling(gate_window)` 会**从区间起点
+    重新数** —— MA200 前 200 个交易日全 NaN，趋势门静默失效走弱势保守分支
+    （回测前 ~10 个月），而 factors 早已用 warmup 数据算好 —— 同一套 warmup
+    机制，一处用了一处没用。修复：pipeline 挂 `close_full`，策略均线窗口经
+    `close_for_ma()` 优先取 warmup 完整数据（rolling 是后看窗口，无前视）。
+
+    本项做**行为级**对照断言（静态断言防回退，行为断言防「接错数据」）：
+    同一份合成面板，「不挂 close_full」时区间首日广度必须为 None（复现旧病）、
+    「挂 close_full」时必须为数值（趋势门自区间首日即生效）。
+    """
+    import numpy as _np
+    import pandas as _pd
+
+    from dataprovider.panel import Panel
+    from strategies.base import close_for_ma
+    from strategies.builtin import EtfRotationStrategy
+
+    pipe = open(os.path.join(ROOT, "pipeline.py"), encoding="utf-8").read()
+    assert 'panel.fields["close_full"] = panel_full.get("close")' in pipe, (
+        "pipeline.py 未挂载 close_full —— N-1 修复被回退？")
+    bsrc = open(os.path.join(ROOT, "strategies", "builtin.py"), encoding="utf-8").read()
+    assert "close_for_ma(panel)" in bsrc, (
+        "strategies/builtin.py 未走 close_for_ma —— 均线窗口又绕回了 slice 后 close？")
+
+    warm_n, run_n, gate_w = 260, 100, 200
+    dates = _pd.date_range("2025-01-01", periods=warm_n + run_n,
+                           freq="B").strftime("%Y%m%d")
+    rng = _np.random.default_rng(42)
+    close = _pd.DataFrame(
+        100.0 + _np.cumsum(rng.normal(0.0, 1.0, (warm_n + run_n, 3)), axis=0),
+        index=dates, columns=["A", "B", "C"])
+    full = Panel({"close": close.copy(), "rate": close.pct_change()},
+                 ["A", "B", "C"], {})
+    panel = full.slice(dates[warm_n])
+    strat = EtfRotationStrategy(rebalance_every=5)
+    first = panel.dates[0]
+
+    # 旧病复现：不挂 close_full，区间首日 MA(gate_w) 全 NaN → 广度 None
+    assert close_for_ma(panel) is panel.get("close")
+    assert strat._breadth(panel, first) is None, (
+        "不挂 close_full 时区间首日广度应为 None（旧病），实际可计算 —— "
+        "合成数据或回退形态变了，检查本断言再更新")
+
+    # 修复形态：挂 close_full 后，区间首日广度即可计算，且 MA 只用当日及更早数据
+    panel.fields["close_full"] = full.get("close")
+    assert close_for_ma(panel) is panel.get("close_full")
+    b = strat._breadth(panel, first)
+    assert b is not None and 0.0 <= b <= 1.0, (
+        "挂 close_full 后区间首日趋势门应生效，实际 {}".format(b))
+    hist = full.get("close")["A"].loc[:first].tail(gate_w)
+    ma_expect = float(hist.mean())
+    ma_got = float(close_for_ma(panel)["A"].rolling(gate_w).mean().loc[first])
+    assert abs(ma_got - ma_expect) < 1e-9, (
+        "MA 计算引入了前视：{} != {}（应为截至当日数据的均值）".format(ma_got, ma_expect))
 
 
 @check("巡检", "非交易日也要判「最近一个交易日无运行记录」（防节假日假阴性）")

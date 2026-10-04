@@ -56,6 +56,16 @@ def run_backtest(codes, strategy="momentum", start=None, end=None,
         from dataprovider.altdata import attach_bigorder
         panel = attach_bigorder(panel)
 
+    # 2026-10-04 N-1（主人复跑发现）：把 warmup 完整 close 挂为 close_full。
+    # 趋势门 MA(gate_window) / Faber 过滤 MA(trend_window) 是后看窗口，与 factors
+    # 同受 warmup 影响 —— 此前策略拿到的是 slice 后的 panel，rolling(200) 从区间
+    # 起点重新数，前 200 个交易日全 NaN，趋势门静默失效走弱势保守分支（回测前
+    # ~10 个月）。factors 早在 warmup 期间算好了值（下方 reindex），均线类窗口
+    # 却没用上 —— 同一套 warmup 机制，一处用了一处没用。
+    # 无前视：rolling 只消费 date 及更早数据，warmup 前缀不含未来信息。
+    # 策略侧统一经 strategies.base.close_for_ma() 取用；实盘面板无此字段，行为不变。
+    panel.fields["close_full"] = panel_full.get("close")
+
     bench_code = benchmark or codes[0]
     bench_df = store.read(bench_code, start=start, end=end)
     bench_close = bench_df["close"].reindex(panel.dates)

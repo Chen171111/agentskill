@@ -1,7 +1,7 @@
 """内置策略：动量、均值回归、双均线、多因子、连板龙头。"""
 import pandas as pd
 
-from .base import Strategy, weighted_score, rank_snapshot, volatility_weighted
+from .base import Strategy, weighted_score, rank_snapshot, volatility_weighted, close_for_ma
 
 
 class MomentumStrategy(Strategy):
@@ -36,7 +36,7 @@ class MomentumStrategy(Strategy):
         codes = score.sort_values(ascending=False).head(self.topk).index.tolist()
         # 绝对趋势过滤（Faber）：只保留站上自身均线的标的，趋势破坏则剔除
         if self.trend_window:
-            close = panel.get("close")
+            close = close_for_ma(panel)
             if close is not None and date in close.index:
                 ma = close.rolling(self.trend_window).mean()
                 if date in ma.index:
@@ -88,16 +88,20 @@ class EtfRotationStrategy(MomentumStrategy):
     def _warn_breadth_na(self, why: str):
         """广度算不出来时告警（每个策略实例只打一次，防回测前段刷屏）。
 
-        回测起始的前 gate_window 个交易日 MA 不足是**预期行为**（本方法不打扰）；
-        若实盘运行中出现，说明面板窗口不够 —— 检查 runner._n_days_ago 的系数
-        （应为 1.9）。趋势门失效期间按弱势保守分支处理。
+        2026-10-04 N-1 修复后：回测经 close_for_ma() 用 warmup 完整数据算 MA，
+        起始段「前 gate_window 个交易日全 NaN」**不再属预期** —— 若回测中
+        仍出现本告警，说明 warmup 期数据本身不足（400 自然日 ≈ 260 交易日
+        < gate_window）或数据缺失。实盘运行中出现则说明面板窗口不够 ——
+        检查 runner._n_days_ago 的系数（应为 1.9）。趋势门失效期间按弱势
+        保守分支处理。
         """
         if getattr(self, "_breadth_na_warned", False):
             return
         self._breadth_na_warned = True
         print("[trend_gate] ⚠️ 广度计算失败（本次运行仅提示一次）：{} —— "
-              "趋势门不生效，按弱势保守分支处理。回测起始段属预期；"
-              "实盘出现请检查面板窗口（runner._n_days_ago 系数应为 1.9）。".format(why))
+              "趋势门不生效，按弱势保守分支处理。回测中 MA 已接入 warmup 完整数据"
+              "（close_full），起始段不应再出现；若出现说明 warmup 期数据不足"
+              "或实盘面板窗口不够（runner._n_days_ago 系数应为 1.9）。".format(why))
 
     def _breadth(self, panel, date):
         """跨截面广度：站上自身 MA(gate_window) 的标的占比，0~1。
@@ -106,8 +110,13 @@ class EtfRotationStrategy(MomentumStrategy):
         **不再静默**。原实现 None → 调用方当作「弱势」处理，趋势门悄悄失效，
         无人知晓——面板窗口不足（长假/窗口被调大）时实盘行为与回测漂移。
         现在显式打印告警（会进 daily_run.log / 回测 stdout），便于事后追查。
+
+        ⚠️ 2026-10-04 N-1 修复：close 改经 close_for_ma() —— 回测时优先用
+        pipeline 挂载的 warmup 完整 close_full，MA 不再「从区间起点重新数」，
+        回测起始段广度即可计算（此前前 gate_window 个交易日全 NaN、趋势门
+        失效走保守分支）。实盘面板无 close_full，行为不变。
         """
-        close = panel.get("close")
+        close = close_for_ma(panel)
         if close is None or date not in close.index:
             self._warn_breadth_na("面板无 close 或日期不在区间")
             return None
@@ -147,7 +156,7 @@ class EtfRotationStrategy(MomentumStrategy):
         codes = score.sort_values(ascending=False).head(eff_topk).index.tolist()
         # 绝对趋势过滤（Faber）：只保留站上自身均线的标的，趋势破坏则剔除
         if self.trend_window:
-            close = panel.get("close")
+            close = close_for_ma(panel)
             if close is not None and date in close.index:
                 ma = close.rolling(self.trend_window).mean()
                 if date in ma.index:
@@ -261,16 +270,20 @@ class TechOffensiveStrategy(Strategy):
     def _warn_breadth_na(self, why: str):
         """广度算不出来时告警（每个策略实例只打一次，防回测前段刷屏）。
 
-        回测起始的前 gate_window 个交易日 MA 不足是**预期行为**（本方法不打扰）；
-        若实盘运行中出现，说明面板窗口不够 —— 检查 runner._n_days_ago 的系数
-        （应为 1.9）。趋势门失效期间按弱势保守分支处理。
+        2026-10-04 N-1 修复后：回测经 close_for_ma() 用 warmup 完整数据算 MA，
+        起始段「前 gate_window 个交易日全 NaN」**不再属预期** —— 若回测中
+        仍出现本告警，说明 warmup 期数据本身不足（400 自然日 ≈ 260 交易日
+        < gate_window）或数据缺失。实盘运行中出现则说明面板窗口不够 ——
+        检查 runner._n_days_ago 的系数（应为 1.9）。趋势门失效期间按弱势
+        保守分支处理。
         """
         if getattr(self, "_breadth_na_warned", False):
             return
         self._breadth_na_warned = True
         print("[trend_gate] ⚠️ 广度计算失败（本次运行仅提示一次）：{} —— "
-              "趋势门不生效，按弱势保守分支处理。回测起始段属预期；"
-              "实盘出现请检查面板窗口（runner._n_days_ago 系数应为 1.9）。".format(why))
+              "趋势门不生效，按弱势保守分支处理。回测中 MA 已接入 warmup 完整数据"
+              "（close_full），起始段不应再出现；若出现说明 warmup 期数据不足"
+              "或实盘面板窗口不够（runner._n_days_ago 系数应为 1.9）。".format(why))
 
     def _breadth(self, panel, date):
         """跨截面广度：站上自身 MA(gate_window) 的标的占比，0~1。
@@ -279,8 +292,13 @@ class TechOffensiveStrategy(Strategy):
         **不再静默**。原实现 None → 调用方当作「弱势」处理，趋势门悄悄失效，
         无人知晓——面板窗口不足（长假/窗口被调大）时实盘行为与回测漂移。
         现在显式打印告警（会进 daily_run.log / 回测 stdout），便于事后追查。
+
+        ⚠️ 2026-10-04 N-1 修复：close 改经 close_for_ma() —— 回测时优先用
+        pipeline 挂载的 warmup 完整 close_full，MA 不再「从区间起点重新数」，
+        回测起始段广度即可计算（此前前 gate_window 个交易日全 NaN、趋势门
+        失效走保守分支）。实盘面板无 close_full，行为不变。
         """
-        close = panel.get("close")
+        close = close_for_ma(panel)
         if close is None or date not in close.index:
             self._warn_breadth_na("面板无 close 或日期不在区间")
             return None
@@ -464,7 +482,7 @@ class BigOrderEtfStrategy(EtfRotationStrategy):
 
         # Faber 绝对趋势过滤
         if self.trend_window:
-            close = panel.get("close")
+            close = close_for_ma(panel)
             if close is not None and date in close.index:
                 ma = close.rolling(self.trend_window).mean()
                 if date in ma.index:

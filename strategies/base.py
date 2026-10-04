@@ -4,6 +4,27 @@ import abc
 import pandas as pd
 
 
+def close_for_ma(panel):
+    """均线类**后看窗口**（趋势门 MA / Faber 过滤）取 close 的统一入口。
+
+    优先用 pipeline 挂载的 `close_full`（warmup 完整收盘价），回落 slice 后的 close。
+
+    为什么（2026-10-04 N-1，主人复跑发现）：回测 panel 是 warmup 面板 slice 之后
+    的区间视图，`close.rolling(gate_window)` 会**从区间起点重新数** —— MA200
+    前 200 个交易日全 NaN，趋势门静默失效走弱势保守分支（回测前 ~10 个月），
+    与「factors 保留 warmup 算好的值」的既有机制不一致。本函数把均线窗口接到
+    同一份 warmup 数据上。**无前视**：rolling 只消费 date 及更早的数据，
+    warmup 前缀不含任何未来信息 —— 与 factors 用 panel_full 计算再 reindex 完全同构。
+
+    实盘 runner 构造的面板没有 `close_full` 字段，自然回落 slice 后 close，
+    行为不变（实盘面板窗口本就按 1.9 系数预留）。
+    """
+    cf = panel.get("close_full")
+    if cf is not None:
+        return cf
+    return panel.get("close")
+
+
 def volatility_weighted(codes, panel, date, lookback=20):
     """风险平价权重：按各标的近 lookback 日波动率倒数分配权重（抑制高波动标的）。
 
