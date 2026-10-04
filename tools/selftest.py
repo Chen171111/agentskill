@@ -426,11 +426,22 @@ def _etf_limit_modeled():
     # 池内可交易标的分档断言：ETF/个股的档位必须可判定（指数允许 None，
     # 池定义允许混入基准指数，run/simulate 入口有 validate_tradeable 拦截）
     import config as _cfg
-    from tools.limit_rules import limit_of as _lo
+    from tools.limit_rules import limit_of as _lo, ETF_LIMIT_20 as _l20, \
+        ETF_LIMIT_10_CONFIRMED as _l10
     from dataprovider.store import classify_code as _cc
     undecidable = [c for pool in _cfg.RECOMMENDED_POOLS.values() for c in pool
                    if _cc(c) in ("etf", "stock") and _lo(c) is None]
     assert not undecidable, "推荐池含分档不可判定的可交易标的: {}".format(undecidable)
+    # 名单守护（2026-10-04）：深市 ETF 档位无法从代码前缀判定 → 必须人工
+    # 确认后显式归入 20% 或 10% 名单。扩池纳入新深市 ETF 而未归类时 FAIL。
+    unclassified = [c for pool in _cfg.RECOMMENDED_POOLS.values() for c in pool
+                    if c.startswith("159")
+                    and c.split(".")[0] not in _l20
+                    and c.split(".")[0] not in _l10]
+    assert not unclassified, (
+        "池内深市 ETF 未做档位归类（深交所按基金名单公布 20% 档，代码前缀"
+        "无法判定）：{} —— 人工核对跟踪指数后归入 limit_rules 的 "
+        "ETF_LIMIT_20 或 ETF_LIMIT_10_CONFIRMED".format(unclassified))
 
 
 
@@ -653,6 +664,94 @@ def _positions_mark_roundtrip():
 
 
 # ============================ 巡检入口（check_alerts） ============================
+@check("数值", "回测引擎端到端快照（合成数据，防「改坏选股/成交逻辑仍全绿」）")
+def _numeric_snapshot_engine():
+    """⚠️ 2026-10-04 新增（验收遗留：零单元测试 → 数值快照）。
+
+    此前全部检查项都是**结构断言**（代码里有某行/常量一致）——把选股逻辑
+    改错、成交方向写反，selftest 照样全绿。本项用**合成确定性数据**真跑
+    回测引擎全链路（信号 → 调仓 → 涨跌停/停牌 → PaperBroker 成本 → 净值），
+    断言终值精确等于快照。合成数据：两标的动量**反相**振荡（强制换手），
+    快照对「选股方向写反」「调仓计数错」「成本口径漂移」全部敏感。
+    改变引擎任何数值行为导致快照失配时：先判断是「改坏了」还是「有意改口径」
+    —— 后者必须重跑受影响回测并更新文档数字后，再同步更新这里的快照值。
+    """
+    import numpy as _np
+    import pandas as _pd
+    from dataprovider.panel import Panel
+    from factors.engine import compute_factors
+    from strategies.registry import create_strategy
+    from backtest.engine import BacktestEngine
+
+    n = 150
+    dates = [str(20240101 + i) for i in range(n)]
+    codes = ["510300.SH", "159915.SZ"]
+    t = _np.arange(n)
+    close = _pd.DataFrame({
+        "510300.SH": 4.0 * (1 + 0.12 * _np.sin(t / 15.0)),
+        "159915.SZ": 2.0 * (1 + 0.12 * _np.sin(t / 15.0 + _np.pi)),
+    }, index=dates)
+    panel = Panel({"close": close, "open": close * 0.999,
+                   "volume": _pd.DataFrame(1e6, index=dates, columns=codes)},
+                  codes, {"etf": codes})
+    factors = compute_factors(panel, ["momentum20"])
+    strat = create_strategy("etf_rotation", topk=1, rebalance_every=5,
+                            risk_parity=False, trend_gate=False, trend_window=0)
+    eng = BacktestEngine(panel, factors, strat, init_cash=100_000.0, dd_circuit=False)
+    res = eng.run()
+    final_value = float(res.equity["value"].iloc[-1])
+    hold_changes = sum(1 for i in range(1, len(res.holdings))
+                       if sorted(res.holdings[dates[i]]) !=
+                          sorted(res.holdings[dates[i - 1]]))
+    assert round(final_value, 2) == 113497.04, (
+        "引擎端到端快照失配：{} != 113497.04（合成数据不变时，这是引擎数值行为"
+        "被改动的信号）".format(final_value))
+    assert hold_changes == 4, (
+        "换手次数 {} != 4（选股/动量方向被改坏的信号）".format(hold_changes))
+
+
+@check("数值", "止损/止盈/回撤止盈判据数值（account 与 RiskManager 双路径一致）")
+def _numeric_snapshot_stops():
+    """⚠️ 2026-10-03 起止损判据单一来源在 RiskManager.stop_codes，
+    回测走 account.stop_loss_codes —— 本项把两条路径的**数值行为**同时锁住：
+    阈值（-8%/+30%/-15%）、peak 回撤口径、nan 穿透防护。"""
+    from backtest.account import BacktestAccount
+    from risk.manager import RiskManager
+    acc = BacktestAccount(init_cash=100_000.0)
+    acc.trade({"600519.SH": 0.5}, {"600519.SH": 10.0}, set(), set())
+    rm = RiskManager()
+    px = lambda v: {"600519.SH": v}
+    assert acc.stop_loss_codes(px(10.5)) == set()          # +4.9% 未触发
+    assert rm.stop_codes(acc.positions, px(10.5)) == set()
+    assert acc.stop_loss_codes(px(9.15)) == {"600519.SH"}   # −8.6% 止损
+    assert rm.stop_codes(acc.positions, px(9.15)) == {"600519.SH"}
+    assert acc.stop_loss_codes(px(13.05)) == {"600519.SH"}  # +30% 止盈
+    acc.positions["600519.SH"]["peak"] = 14.0
+    assert acc.stop_loss_codes(px(11.7)) == {"600519.SH"}   # 距峰 −16.4% 回撤止盈
+    assert rm.stop_codes(acc.positions, px(11.7)) == {"600519.SH"}
+
+
+@check("数值", "PaperBroker 成本精确数值（佣金/最低佣金/印花税/滑点）")
+def _numeric_snapshot_cost():
+    """⚠️ 成本口径曾是本项目最大翻车点（万3 vs 万5 分叉）。
+    本项把引擎撮合层的费用公式锁到**精确分**：最低佣金兜底、ETF 免印花税、
+    个股卖出印花税、滑点方向（买高卖低）。"""
+    from trader.broker import PaperBroker, Order
+    br = PaperBroker()
+    br.update_quotes({"510300.SH": 10.0, "600519.SH": 10.0})
+    o_buy = Order("510300.SH", "buy", 1000, 10.0)
+    br.submit(o_buy)
+    assert round(o_buy.filled_price, 6) == 10.005           # 滑点：买贵 0.05%
+    assert round(o_buy.fee, 6) == 5.0025                     # 10005×万5（>5 元最低佣金）
+    o_sell_etf = Order("510300.SH", "sell", 1000, 10.0)
+    br.submit(o_sell_etf)
+    assert round(o_sell_etf.filled_price, 6) == 9.995        # 滑点：卖贱
+    assert round(o_sell_etf.fee, 6) == 5.0                   # 4.9975 → 最低佣金 5 元；ETF 免印花税
+    o_sell_stk = Order("600519.SH", "sell", 1000, 10.0)
+    br.submit(o_sell_stk)
+    assert round(o_sell_stk.fee, 6) == 14.995                # 5.0（兜底）+ 印花税 9.995
+
+
 @check("巡检", "非交易日也要判「最近一个交易日无运行记录」（防节假日假阴性）")
 def _check_alerts_holiday_blindspot():
     """2026-10-01（国庆）实测：计划任务已被删除，`check_alerts.py` 却输出
