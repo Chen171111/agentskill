@@ -78,9 +78,23 @@ class DailyRunner:
         latest = self.db.load_latest_equity()
         if latest:
             self.account.cash = float(latest.get("cash", self.account.cash))
-        self.strategy = create_strategy(strategy, **_filter_kwargs(
-            strategy, topk=topk, rebalance_every=rebalance,
-            trend_window=config.TREND_LIVE))
+        # topk=None 时**不注入**，让策略类定义的默认值生效 —— 与
+        # `pipeline.run_backtest`（`if topk is not None: kw.setdefault(...)`）保持同一口径。
+        #
+        # ⚠️ 2026-10-09 修复（2026-10-02 P1-3 的漏网）：
+        #     P1-3 把 CLI 的 topk 改成「未显式传入则 None 透传」，但 None 守卫
+        #     只加在 pipeline.run_backtest，**实盘 DailyRunner 漏了** ——
+        #     None 被 _filter_kwargs 原样传给策略 → self.topk = None →
+        #     调仓日 `eff_topk = max(1, min(eff_topk, n))` 抛
+        #     TypeError: '<' not supported between instances of 'int' and 'NoneType'。
+        #     危害加倍：调仓每 5 次**成功**运行才发生，而失败不推进计数器 →
+        #     一旦踩中，之后每个交易日都是调仓日、每天都崩，自动化彻底停摆。
+        #     实测：10-02 改动 → 10-08（第 19 次，非调仓）正常 →
+        #     10-09（第 20 次，调仓）崩，当日 14:50 无成交。
+        _skw = {"rebalance_every": rebalance, "trend_window": config.TREND_LIVE}
+        if topk is not None:
+            _skw["topk"] = topk
+        self.strategy = create_strategy(strategy, **_filter_kwargs(strategy, **_skw))
         self._shadow = None          # 影子策略（并行验证用，惰性创建）
         # 恢复调仓计数（跨运行持久化，与回测「每 N 日调仓」口径一致）
         saved_since = self.db.get_state("strategy_since")

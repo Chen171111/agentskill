@@ -824,6 +824,7 @@ def _check_alerts_holiday_blindspot():
     """
     import datetime as _dt
     import io
+    import pathlib as _pathlib
     from contextlib import redirect_stdout
 
     import tools.check_alerts as ca
@@ -831,6 +832,7 @@ def _check_alerts_holiday_blindspot():
 
     real_date, real_dt, real_status, real_mail = \
         ca.date, ca.datetime, ca._load_status, ca._maybe_mail
+    real_paths = (ca.ALERT, ca.STATUS_MANUAL, ca.ALERT_MANUAL, ca.DATA_ALERT)
     try:
         def probe(y, m, d, status):
             class _D(_dt.date):
@@ -846,6 +848,13 @@ def _check_alerts_holiday_blindspot():
             ca.date, ca.datetime = _D, _DT
             ca._load_status = lambda: status
             ca._maybe_mail = lambda p, n: None
+            # ⚠️ 2026-10-09 修：原先 probe 会读**真实的** state/ALERT.txt —— 只要
+            # 当时存在真实告警（10-09 那次真实运行失败正好留了一个），情形 ⑥
+            # （交易日 + 当天有运行记录 → 不得报）就会**假失败**，把真实告警
+            # 误当成判定逻辑的回归。本检查针对的是「到点没跑」判定，与告警文件
+            # 无关 → 一律指向不存在的路径，让检查与环境解耦。
+            ca.ALERT = ca.STATUS_MANUAL = ca.ALERT_MANUAL = ca.DATA_ALERT = \
+                _pathlib.Path(ROOT) / "state" / "_selftest_no_such_alert.txt"
             with redirect_stdout(io.StringIO()):
                 rc = ca.main()
             return rc
@@ -877,6 +886,7 @@ def _check_alerts_holiday_blindspot():
     finally:
         ca.date, ca.datetime = real_date, real_dt
         ca._load_status, ca._maybe_mail = real_status, real_mail
+        ca.ALERT, ca.STATUS_MANUAL, ca.ALERT_MANUAL, ca.DATA_ALERT = real_paths
 
 
 @check("巡检", "巡检入口自身可跑通（check_alerts.py 不抛异常且退出码 ∈ {0,1}）")
@@ -901,6 +911,64 @@ def _check_alerts_entrypoint():
         ca._maybe_mail = real_mail
     assert rc in (0, 1), f"退出码只允许 0/1，实得 {rc}"
     assert "自动交易体检" in buf.getvalue(), "体检输出头缺失，入口可能没跑到主流程"
+
+
+# ============================ 调度 / 参数注入 ============================
+@check("调度", "topk=None 不得覆盖策略默认值（2026-10-09 实盘事故）")
+def _topk_none_not_injected():
+    """2026-10-02 的 P1-3 把 CLI 的 topk 改成「未传即 None 透传」，
+    但 None 守卫只加在 pipeline.run_backtest，**实盘 DailyRunner 漏了** ——
+    None 经 _filter_kwargs 原样传给策略 → self.topk=None → 调仓日
+    `eff_topk = max(1, min(eff_topk, n))` 抛
+    TypeError: '<' not supported between instances of 'int' and 'NoneType'。
+
+    因调仓每 5 次**成功**运行才发生，而失败不推进计数器，该 bug 从 10-02
+    潜伏到 10-09 首个调仓日才爆，一爆就天天爆（自动化彻底停摆）。
+
+    三项断言：① 静态：runner 保留 None 守卫；② 构造：不注入 topk 时落到类默认；
+    ③ 行为：调仓日 generate_weights 必须跑完并产出权重；④ 显式 None 立即拒绝。
+    """
+    import numpy as _np
+    import pandas as _pd
+
+    from dataprovider.panel import Panel
+    from scheduler.runner import _filter_kwargs
+    from strategies.builtin import EtfRotationStrategy
+    from strategies.registry import create_strategy
+
+    # ① 静态防回退
+    rsrc = open(os.path.join(ROOT, "scheduler", "runner.py"), encoding="utf-8").read()
+    assert "if topk is not None:" in rsrc, (
+        "scheduler/runner.py 的 topk=None 守卫被回退 —— 实盘调仓日会 TypeError（2026-10-09）")
+
+    # ② 不注入 topk → 落到类默认 5，而不是 None
+    st_def = create_strategy("etf_rotation", **_filter_kwargs(
+        "etf_rotation", rebalance_every=5, trend_window=60))
+    assert isinstance(st_def.topk, int) and st_def.topk == 5, (
+        f"etf_rotation 不注入 topk 时应为类默认 5，实际 {st_def.topk!r}")
+
+    # ③ 行为级：调仓日必须能算完（用关掉趋势门/过滤的确定性夹具，只验 topk 分支）
+    n = 120
+    dates = _pd.date_range("2025-01-01", periods=n, freq="B").strftime("%Y%m%d")
+    rng = _np.random.default_rng(11)
+    close = _pd.DataFrame(100.0 + _np.cumsum(rng.normal(0.0, 1.0, (n, 3)), axis=0),
+                          index=dates, columns=["A", "B", "C"])
+    panel = Panel({"close": close, "rate": close.pct_change()}, ["A", "B", "C"], {})
+    factors = {"momentum20": close.pct_change(20)}
+    st = EtfRotationStrategy(rebalance_every=5, trend_window=None, trend_gate=False)
+    st._since = 4                       # 下一次 _is_rebalance() → 5 → 本次为调仓日
+    w = st.generate_weights(dates[-1], factors, panel)
+    assert isinstance(w, dict) and w, f"调仓日应产出非空权重，实际 {w!r}"
+
+    # ④ 快速失败：显式 None 必须当场拒绝，而不是拖到 5 个交易日后的调仓日
+    # 注意：这里**不能**写 `except ValueError: pass` —— 同一文件里有「禁止静默吞异常」
+    # 检查（_no_new_silent_except，基线不含本文件），而且本意正是断言它抛错。
+    raised = False
+    try:
+        EtfRotationStrategy(topk=None)
+    except ValueError:
+        raised = True
+    assert raised, "Strategy(topk=None) 应立刻 raise ValueError（快速失败）"
 
 
 # ============================ 主流程 ============================

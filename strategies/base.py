@@ -57,6 +57,14 @@ class Strategy(abc.ABC):
 
     def __init__(self, topk: int = 3, rebalance_every: int = 5, max_weight: float = 0.30,
                  max_total: float = 0.90, **kwargs):
+        # 快速失败：topk=None 不是「用默认值」，而是**覆盖**掉类默认值，
+        # 并且要到调仓日才在 max(1, min(None, n)) 处抛 TypeError（2026-10-09 实盘事故：
+        # 因每 5 次成功运行才调仓，bug 潜伏 5 个交易日后才爆，一爆就天天爆）。
+        # 调用方要「用类默认」就**不要注入 topk**，不要注入 None。
+        if topk is None:
+            raise ValueError(
+                "Strategy(topk=None) 非法：None 会覆盖类默认值，并在调仓日抛 TypeError。"
+                "请改为不注入 topk（见 scheduler/runner.py 与 pipeline.py 的 None 守卫）。")
         self.topk = topk
         self.rebalance_every = rebalance_every
         self.max_weight = max_weight
