@@ -176,3 +176,119 @@
   现场探头文件 `state/_sched_probe.txt` 已清理，未污染仓库。
 - 时效（关键）：节后首个交易日 **2026-10-08（周四）**。**必须 10-07 前双击 `install_schedule.bat` 重注册**，
   否则 10-08 将连续第二个交易日丢运行。累计已丢 09-30 一次（非调仓日，仅少一条净值记录）。
+
+## 2026-10-05 17:18
+- 运行 `tools/check_alerts.py`，退出码 **1（异常）**。基准交易日 = 2026-09-30（今天为国庆假期非交易日），该日无运行记录；
+  最近一次运行仍为 **2026-09-29 14:50:09，exit=0**。
+- 双证据核查（脚本 + PowerShell 只读）：`QuantPanorama_DailyRun` → **NOT FOUND**；
+  全机 196 条任务中**动作引用 agentskill 的 = 0**；`C:\Windows\System32\Tasks` 递归匹配 Panorama/Quant = **NONE**；
+  `state/` 自 09-30 起无任何文件被修改；无 ALERT.txt / DATA_ALERT.txt。
+- 定性：**「到点没跑（任务被删）」类**，非程序失败、非同花顺窗口问题。
+  即 10-01 发现第二次消失后**仍未重注册**，09-30 起持续中断（累计丢 09-30 一个交易日，非调仓日）。
+- **新发现（重要）**：quant2 的两条任务 `QuantSelect_PaperTrack` / `QuantSelect_RefreshData` **已于 10-05 被重新注册**
+  （State=Ready、StartBoundary=2026-10-05T18:30/19:00、LastRunTime=11/30/1999「从未运行」）→ 说明重注册动作只覆盖了 quant2，
+  **漏掉了 agentskill 的 `QuantPanorama_DailyRun`**。可直接据此向主人定位「还差哪一条」。
+- 已发告警邮件至 <邮箱略>，主题 `[agentskill] 自动交易异常 2026-10-05`（含根因/修复办法/最近成功时间/关键片段 + quant2 对照发现）。
+- 未重跑下单、未改动持仓与交易状态。现场探头文件 `state/_sched_probe*.txt` 已清理，`git status` 干净，未污染仓库。
+- 时效（关键）：节后首个交易日 **2026-10-08（周四）**。**须在 10-07 前双击 `install_schedule.bat` 重注册**，
+  否则 10-08 将连续第二个交易日丢运行。
+- 复用要点：`Get-ScheduledTask` 返回的任务若在子文件夹下，`C:\Windows\System32\Tasks` **根目录**列举会漏（须 `-Recurse`，
+  或用 `TaskPath` 输出）；本次 quant2 任务即在根目录列举中「消失」但实际存在。
+
+## 2026-10-06 20:53
+- 运行 `tools/check_alerts.py`，退出码 **1（异常）**。基准交易日 = 2026-09-30（今天为国庆假期非交易日），该日无运行记录；
+  最近一次运行仍为 **2026-09-29 14:50:09，exit=0**。
+- **新情况：计划任务已被重新注册（10-06 01:01，elevated=1，`install_schedule.log` 记 OK + on-disk verified），
+  且今天 14:50 确实触发了** —— `State=Ready`、`LastRunTime=2026/10/06 14:50:00`、`NextRunTime=2026/10/07 14:50`、
+  `MissedRuns=0`；`LastTaskResult=0` 是假象（bat 末行 `echo [done] exit=%errorlevel%` 把真实退出码冲成了 0）。
+  ⇒ **不再是「任务被删/到点没跑」类**。
+- **今天 14:50 的真实结果：交易链路未执行、收尾异常。** 属新故障类型，与前几类都不同：
+  · Step1 行情刷新**成功**（11 只 ETF 刷新到 20260930，体检通过、无 DATA_ALERT.txt）；
+  · 其后日志出现 `The system cannot find the path specified.` + `[done] exit=3`；
+  · `state/last_run.json` **未更新**（仍 09-29）、无 `state/ALERT.txt` ⇒ `daily_job.py` → `main.py` 整段**一次都没跑起来**，
+    今天**没有任何下单动作**（无重复下单风险，仅丢当日机会）。
+- 诊断已排除项（均实测）：非「同花顺窗口未找到」、非「对账失败」、非「行情陈旧」、非「任务被删」。
+  `exit=3` 在本仓库唯一来源是 `refresh_data.py` 的「体检不通过」分支，但该分支的告警文件与日志块**都不存在**，
+  且本次复刻跑 refresh **返回 0** ⇒ 该 3 并非来自体检失败，**来源未定论**。
+  另实测：本机 `cmd.exe` 与 Python 报同类错误**都是中文**，日志里却是**英文** ⇒ 这句英文非 cmd/python 所出，疑为第三方/系统组件。
+  **未做**：没有（也不该）重跑 `daily_job.py` 真实链路去复现，避免污染 last_run.json / 产生下单。
+- 已发告警邮件至 <邮箱略>，主题 `[agentskill] 自动交易异常 2026-10-06`（含根因/修复办法/最近成功时间/关键片段）。
+- 未重跑下单、未改动持仓与交易状态。现场探针文件（`state/_probe_*.bat|log`、`state/_sched_probe_1006.txt`）已清理，
+  `git status` 干净（仅 .workbuddy 记忆改动）。
+- 时效（关键）：节后首个交易日 **2026-10-08（周四）14:50**。须在 10-08 前确认 14:50 能跑通，否则连续丢第 2 个交易日。
+- 复用要点（本次新学）：① `daily_run.bat` 的 `LastTaskResult=0` **不可信**，判成败必须看 `state/last_run.json` + 日志 `[done] exit=`；
+  ② 判定「交易步骤是否真跑过」的最快硬证据 = `state/last_run.json` 的 mtime 是否被今天更新；
+  ③ 本机 Bash 里 `cmd //c <bat>` 可执行，但**必须把 bat 写成 ASCII + CRLF**（UTF-8 会被 cmd 按 GBK 解析、整行错乱）。
+
+## 2026-10-07 16:55
+- 运行 `tools/check_alerts.py`，退出码 **1（异常）**。基准交易日 = 2026-09-30（今天为国庆假期非交易日），该日无运行记录；
+  最近一次运行仍为 **2026-09-29 14:50:09，exit=0**。
+- 计划任务只读核查：**在册且已触发**（`State=Ready`、`LastRunTime=2026/10/7 14:50:00`、`NextRunTime=2026/10/8 14:50:00`、
+  `MissedRuns=0`；Execute=`cmd.exe`，Arguments=`/c "...\agentskill\daily_run.bat"`）⇒ 非「到点没跑/任务被删」类。
+- **今天 14:50 与 10-06 同因失败：交易步骤没启动。** `state/daily_run.log` 尾部：Step1 行情刷新成功（11 只 ETF 到 20260930，
+  无 DATA_ALERT.txt）→ 紧跟 `The system cannot find the path specified.` → `[done] exit=3`；`daily_job.py` 侧**零输出**；
+  `state/last_run.json` mtime 仍为 09-29 ⇒ 交易链路一次都没跑起来（无下单动作，仅丢机会）。已连续第 2 个交易日。
+- **根因已确证（订正 10-06 的「来源未定论」）：`daily_run.bat` 的脚本回归，不是环境问题。**
+  机制：该文件第 2 行 `chcp 65001`，而 **cmd.exe 解析批处理时按字节偏移读取自身字节**；文件里一旦有非 ASCII 字节，
+  解析器会**错位并静默弄坏后面的行**。10-04 提交 `17ed764` 给该文件加了一段 12 行**中文注释**，正好触发：
+  末尾 `"%PY32%" -u tools\daily_job.py` 被解析成非法路径 → cmd 报 `The system cannot find the path specified.`、errorlevel=3。
+  ⇒ 上一轮「英文错误非 cmd 所出」的推断**是错的**：cmd 在 CP65001 下确实会回退输出英文。
+- **本机复现（关键方法，务必复用）**：把真实 `daily_run.bat` 逐字复制到仓库根、只把两条 python 调用换成无害 `-c "print(...)"`，
+  再用 **Python `subprocess.run(['cmd.exe','/c', probe])`** 跑（本机 Bash 直调 `cmd //c` 已被安全策略拦截，**Python subprocess 是合规通道**）：
+  · 保留中文注释 → 输出 `The system cannot find the path specified.` + `[done] exit=3`，Step2 无输出（与线上日志逐字一致）；
+    cmd stderr 直报 `'负责驱动同花顺' is not recognized...`、`'机时：set' is not recognized...` → 直接证实解析器错位。
+  · 注释改纯英文 → 两步均执行、`[done] exit=0`、stderr 空。
+  · 探针必须放在**仓库根**（否则 `%~dp0` 变化导致 cwd 错位、再次误报 path not found）。
+- **已修（工作区未提交）**：把 `daily_run.bat` 的中文注释块换成英文说明，**全文件 0 个非 ASCII 字节，逻辑一行未改**；
+  文件头写明「本文件必须保持纯 ASCII，禁止写中文」的约束与本次根因。复验按修复后真实文件结构跑探针 → exit=0。
+  **未提交、未推送**（改动落在交易链路文件上，留给你先看 `git diff` 再决定；回退只需 `git checkout -- daily_run.bat`）。
+- 已发告警邮件至 <邮箱略>，主题 `[agentskill] 自动交易异常 2026-10-07`（根因/修复办法/最近成功时间/关键片段）。
+- 未重跑下单、未改动持仓与交易状态。探针文件（`state/_probe_*`、`state/_sched_probe_1007*`、`state/_evt_1007.txt`、根目录 `_probe_real.bat`）已全部清理。
+- 时效（关键）：10-08（周四）是节后首个交易日 14:50。修复已就位，**请在 10-08 收盘后核对** `state/last_run.json` 的 mtime 变为 10-08
+  且日志出现 `[done] exit=0`；若仍失败则需另查。
+- 复用要点（本次新增）：① **bat + `chcp 65001` + 任何非 ASCII 字节 = 解析错位**，bat 一律纯 ASCII；
+  ② 诊断 cmd 行为请用 Python subprocess 复现，别靠猜；③ 探针要紧贴真实文件结构且放在同一目录层级。
+
+## 2026-10-08 19:58（节后首个交易日 — 关键验证日）
+- 运行 `tools/check_alerts.py`，退出码 **0（正常）**。最近一次运行 **2026-10-08 14:50:05，exit=0**，
+  总资产 <金额略>（现金 <金额略> + 市值 <金额略>）。无 ALERT.txt / DATA_ALERT.txt。
+- **✅ 10-07 的修复已实机验证生效。** 10-06/10-07 连续两日失败的特征（`The system cannot find the path specified.`
+  + `[done] exit=3` + `daily_job.py` 零输出）**本次完全消失**：日志出现完整流程
+  （行情刷新 → `[ths] 读表前清理了 1 个弹窗` → 对账完成 `现金 <金额略> 持仓 <持仓略>`
+  → `[daily_job] OK` → `[done] exit=0`）。`daily_run.bat` 非 ASCII 字节 = **0**（修复未回退）。
+- 双证据核查（脚本 + PowerShell 只读，缺一不可）：
+  · 脚本 rc=0，且 **非节假日** —— 10-01 引入的「最近一个交易日无记录」判定本日正常放行（无假阴性）。
+  · `QuantPanorama_DailyRun` **FOUND=YES**、`State=Ready`、`LastRunTime=2026/10/8 14:50:00`、
+    `NextRunTime=2026/10/9 14:50:00`、`MissedRuns=0`、`StartBoundary=2026-10-06T14:50`（与 10-06 重注册一致）
+    ⇒ 非「到点没跑 / 任务被删」类。全机引用 agentskill 的任务 = 1 条（本任务），无重复注册。
+- 当日为**非调仓日**（第 19 次成功运行，下次调仓还需 1 次），仅记录净值，未产生下单。
+- 结论：**正常，未发邮件。** 这是自 09-29 以来首次「程序跑通 + 任务在册」双绿的完整交易日运行
+  （10-01/10-02/10-05/10-06/10-07 五次连续异常已终结）。
+- 未重跑下单、未改动持仓与交易状态。探针文件 `state/_sched_probe_1008.txt` 已清理，`git status` 干净
+  （仅 .workbuddy 记忆改动 + 上一轮未提交的 `daily_run.bat` 修复）。
+- **待主人决策（不急）**：`daily_run.bat` 的纯 ASCII 修复**仍在工作区未提交**（改动落在交易链路文件上，
+  按惯例留给主人先看 `git diff` 再决定；回退只需 `git checkout -- daily_run.bat`）。本次已由线上运行证伪了必要性。
+- 复用要点：双证据仍需并行跑；`daily_run.bat` 的 `LastTaskResult` 依旧不可信（bat 末行 `echo [done] exit=%errorlevel%`
+  会冲成 0），判成败看 `state/last_run.json` 的 mtime + 日志 `[done] exit=`。
+
+## 2026-10-09 18:31（周五，调仓日）
+- 运行 `tools/check_alerts.py`，退出码 **1（异常）**，`state/ALERT.txt` 存在。
+  最近一次运行 **2026-10-09 14:50:08，exit=1**；最近一次成功仍为 **2026-10-08 14:50:01，exit=0**，总资产 <金额略>。
+- 计划任务只读核查：FOUND=YES、Ready、LastRun=2026/10/9 14:50、NextRun=2026/10/12 14:50、Missed=0
+  ⇒ 非「到点没跑/任务被删」类。行情侧正常（11 只 ETF 到 20260930，无 DATA_ALERT.txt）；同花顺对账**已通过**。
+- **新故障类型：调仓日代码崩溃（`topk=None` 埋雷），非环境问题、非同花顺窗口/对账问题。**
+  崩点 `strategies/builtin.py:154` `eff_topk = max(1, min(eff_topk, n))`：
+  `TypeError: '<' not supported between instances of 'int' and 'NoneType'`。
+  根因：10-02 的 P1-3 把 CLI `--topk` 改成「未显式传入则 None 透传」，None 守卫**只加在 `pipeline.run_backtest`**，
+  实盘 `DailyRunner`（`scheduler/runner.py`）漏加 → `self.topk=None`。
+  放大机制：调仓每 5 次**成功**运行才发生、**失败不推进计数器** → 一旦踩中则此后每个交易日都判为调仓日、天天崩。
+  时序：10-02 改动 → 10-06/07/08 非调仓（10-08 exit=0）→ 10-09 第 20 次 = 首个调仓日爆。
+- **修复已由当日工作完成并提交 `09299f4`（未推送，`master` ahead 1）**：runner 加 None 守卫 + `base.py` 快速失败
+  + selftest 回归项。本次巡检**离线复验**该回归项（直接调用 `selftest._topk_none_not_injected()`）→ PASS。
+- 账本只读核对：`strategy_since=19`（未推进）、`orders` 仍 10 笔、`last_run.json` ok=false → **今日无成交**；
+  周一 10-12 14:50 将作为调仓日自动补做。equity 最新行 date=20261008、ts=2026-10-09 15:01:07（当日回滚中重算）。
+- 已发告警邮件至 <邮箱略>，主题 `[agentskill] 自动交易异常 2026-10-09`（根因/修复办法/最近成功时间/关键片段）。
+- 未重跑下单、未改动持仓与交易状态。本巡检未改动任何仓库文件（除记忆/日志）。`git status` 仅剩旧有未提交项
+  （`daily_run.bat` 的 ASCII 修复、`docs/事故_20261009_调仓日崩溃.md` 未跟踪）。
+- 复用要点：① 「退出码 1 + 任务在册 + 对账通过」⇒ 一定要往**代码**里查，不要往环境上靠（当日文档已订正
+  「关了同花顺所以失败」的错误归因）；② 校验修复时可用**离线**调用 selftest 单项函数，避免任何真实链路副作用。
