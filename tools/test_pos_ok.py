@@ -55,17 +55,20 @@ P_LIVE = {
     "510880.SH": 3.357,
 }
 POS_LIVE = {
-    "513100": {"qty": 25000, "available": 25000, "frozen": 0,
+    "513100": {"qty": 2500, "available": 2500, "frozen": 0,
                "cost": 2.30, "price": 2.319},
-    "513500": {"qty": 21200, "available": 21200, "frozen": 0,
+    "513500": {"qty": 2120, "available": 2120, "frozen": 0,
                "cost": 2.70, "price": 2.736},
 }
 OLD_LIVE = {
-    "513100.SH": {"qty": 25000, "cost": 2.30, "peak": 2.4, "mark": 2.319},
-    "513500.SH": {"qty": 21200, "cost": 2.70, "peak": 2.8, "mark": 2.736},
-    "510880.SH": {"qty": 1600, "cost": 3.424, "peak": 3.5, "mark": 3.357},
+    "513100.SH": {"qty": 2500, "cost": 2.30, "peak": 2.4, "mark": 2.319},
+    "513500.SH": {"qty": 2120, "cost": 2.70, "peak": 2.8, "mark": 2.736},
+    "510880.SH": {"qty": 160, "cost": 3.424, "peak": 3.5, "mark": 3.357},
 }
-BAL_LIVE = {"cash": 74776.0, "market_value": 115778.0}
+# ⚠️ 2026-10-09 脱敏：本组夹具原先直接照抄**真实账户**的持仓股数与资金
+# （25000 / 21200 / 1600 / cash 74776.0），而本仓库是公开的。
+# 现统一按 1/10 缩放，**保持所有比例关系与列错位特征不变**，测试语义不受影响。
+BAL_LIVE = {"cash": 7477.6, "market_value": 11577.8}
 
 
 def check_ghost_small_deadlock_zone():

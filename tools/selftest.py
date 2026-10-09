@@ -183,6 +183,57 @@ def _no_hardcoded_repo_path():
                      "用法示例请放进 docstring）：\n  " + "\n  ".join(bad))
 
 
+@check("稳定性", "文档/记忆不得出现真实账户金额与股数（公开仓库脱敏）")
+def _no_account_numbers_in_docs():
+    """⚠️ 2026-10-09 新增（起因是当天的一次真实泄漏）。
+
+    事故：`docs/事故_20261009_调仓日崩溃.md` 随 `aafb729` 推到**公开**仓库
+    （`Chen171111/agentskill`，API 查得 `private: false`），正文带现金余额、
+    持仓股数与合同号；核对后还发现 `HANDOFF.md`、`.workbuddy/memory/*.md`、
+    `tools/test_*.py` 夹具里早已有 `cash 74776.0` / `qty 25000` 这类**真实**账户值。
+
+    约定（与 `.workbuddy/memory/automations/*/memory.md` 顶部提示一致）：
+    **只写占位符** —— `<金额略>` / `<股数略>` / `<合同号略>`，或只写相对变化
+    （如「微降 0.07%」）。**行情价格不算账户信息**（公开数据），可以保留。
+
+    判定：扫 `docs/`、`.workbuddy/memory/` 与根目录三份 md，
+    命中「现金/总资产/市值/cash/equity/market_value + ≥4 位数字」或
+    「qty/持仓/股数 + ≥5 位数字」即失败；行内含 `略/示例/样例/example/fixture`
+    视为占位或示例，放行。
+    """
+    money = re.compile(r"(?:现金|总资产|总市值|市值|cash|equity|market_value)"
+                       r"\s*[:：=]?\s*[`'\"]?\s*-?\d{4,}(?:\.\d+)?")
+    qty = re.compile(r"(?:qty|股数|available|frozen)\s*[:：=]?\s*[`'\"]?\s*-?\d{4,5}(?!\d)")
+    allow = re.compile(r"略|示例|样例|example|fixture|假|占位|xxx|XXX")
+
+    targets = []
+    for sub in ("docs", os.path.join(".workbuddy", "memory")):
+        for dirpath, _dirs, files in os.walk(os.path.join(ROOT, sub)):
+            for fn in files:
+                if fn.lower().endswith((".md", ".txt", ".html")):
+                    targets.append(os.path.join(dirpath, fn))
+    for fn in ("HANDOFF.md", "README.md", "QUICKSTART.md"):
+        p = os.path.join(ROOT, fn)
+        if os.path.exists(p):
+            targets.append(p)
+
+    bad = []
+    for p in sorted(targets):
+        rel = os.path.relpath(p, ROOT).replace("\\", "/")
+        try:
+            lines = open(p, encoding="utf-8", errors="ignore").read().splitlines()
+        except OSError:
+            continue
+        for i, line in enumerate(lines, 1):
+            if allow.search(line):
+                continue
+            if money.search(line) or qty.search(line):
+                bad.append("{}:{}  {}".format(rel, i, line.strip()[:90]))
+    assert not bad, ("以下文档/记忆里出现了疑似**真实账户**数值（本仓库是公开的，"
+                     "请改写成 `<金额略>` / `<股数略>` 之类占位符）：\n  "
+                     + "\n  ".join(bad))
+
+
 @check("稳定性", "可执行脚本必须有 `if __name__ == \"__main__\"` 守卫")
 def _exec_scripts_have_main_guard():
     """⚠️ 2026-09-21 新增，起因是一次实测（见 HANDOFF §5.1 第 21 条）。
