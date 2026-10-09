@@ -4,12 +4,23 @@ set PYTHONIOENCODING=utf-8
 set PYTHONUNBUFFERED=1
 cd /d "%~dp0"
 rem ---------------------------------------------------------------
-rem  双解释器约定（2026-10-04 可用环境变量覆盖，默认本机路径）：
-rem    PY64 = 64 位 Python，负责拉数据（需 akshare）
-rem    PY32 = 32 位 Python，负责驱动同花顺 UIA（akshare 装不上 32 位，
-rem           而同花顺客户端是 32 位进程，UIA 消息级驱动必须同位数）
-rem  换机时：set PYTHON64=D://py//python.exe & set PYTHON32=D://py32//python.exe
-rem  （或写进系统环境变量，本文件不改）
+rem  [!!] THIS FILE MUST STAY PURE ASCII. DO NOT WRITE CHINESE HERE.
+rem  Why (2026-10-07, root-caused): this file runs "chcp 65001" above, but
+rem  cmd.exe still reads its own batch bytes with a drifting file pointer.
+rem  Any non-ASCII byte in this file desynchronises the parser, which then
+rem  silently mangles LATER lines. A Chinese comment block added on 10-04
+rem  did exactly that: the PY32 call at the bottom got corrupted, cmd
+rem  printed "The system cannot find the path specified." and the whole
+rem  trading step never ran (exit=3) on 10-06 / 10-07.
+rem  Verified: same script with ASCII-only comments runs both steps, exit=0.
+rem ---------------------------------------------------------------
+rem  Dual-interpreter convention (override via env vars, default = this machine):
+rem    PY64 = 64-bit Python, fetches market data (needs akshare)
+rem    PY32 = 32-bit Python, drives the THS client via UIA (akshare has no
+rem           32-bit build; the THS client is a 32-bit process, so UIA
+rem           message-level driving must match bitness)
+rem  To port: set PYTHON64=D:\py\python.exe & set PYTHON32=D:\py32\python.exe
+rem  (or set them as system env vars; this file stays untouched)
 rem ---------------------------------------------------------------
 if "%PYTHON64%"=="" set "PY64=E:\Python\python.exe"
 if not "%PYTHON64%"=="" set "PY64=%PYTHON64%"
