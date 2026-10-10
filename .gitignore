@@ -29,4 +29,4 @@ config/mail_alert.json
 debug.log
 # 同花顺下单测试的运行时产物（重跑 test_uia_order.py 即可复现，不入库）
 uia_order_run.log
-uia_order_submitted.png
+uia_order_*.png

@@ -81,7 +81,8 @@ def check_ghost_small_deadlock_zone():
     calc = B._pos_calc(POS_LIVE, P_LIVE)
     missing, ghosts = B._missing_positions(POS_LIVE, OLD_LIVE, P_LIVE)
     assert len(ghosts) == 1 and ghosts[0][0] == "510880.SH", ghosts
-    assert abs(missing - 5371.2) < 1e-6, missing
+    # 160 股 × 3.357 = 537.12（2026-10-09 脱敏按 1/10 缩放后的值，原 5,371.20）
+    assert abs(missing - 537.12) < 1e-6, missing
     assert missing / BAL_LIVE["market_value"] < 0.05, \
         "夹具必须踩在 5% 死锁区内（否则测不到修订点）"
     assert calc + missing <= BAL_LIVE["market_value"] * 1.05, \
