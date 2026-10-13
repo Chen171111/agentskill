@@ -292,3 +292,32 @@
   （`daily_run.bat` 的 ASCII 修复、`docs/事故_20261009_调仓日崩溃.md` 未跟踪）。
 - 复用要点：① 「退出码 1 + 任务在册 + 对账通过」⇒ 一定要往**代码**里查，不要往环境上靠（当日文档已订正
   「关了同花顺所以失败」的错误归因）；② 校验修复时可用**离线**调用 selftest 单项函数，避免任何真实链路副作用。
+
+## 2026-10-12 15:35（周一，调仓日 — 修复验证日）
+- 运行 `tools/check_alerts.py`，退出码 **0（正常）**。最近一次运行 **2026-10-12 14:50:31，exit=0**，
+  总资产 <金额略>（现金 <金额略> + 市值 <金额略>）。无 ALERT.txt / DATA_ALERT.txt。
+- 双证据只读核查：`QuantPanorama_DailyRun` FOUND=YES、Ready、LastRun=2026/10/12 14:50、NextRun=2026/10/13 14:50、
+  Missed=0、Execute/WorkingDirectory 均指向 `E:\MyWorkAndProject\quant\agentskill` ⇒ 非「到点没跑/任务被删」类。
+  全机引用 agentskill 的任务仅 1 条，无重复注册。
+- **关键：今天是调仓日，且跑通了。** `last_run.json` `rebalanced=true`；第 11 笔委托 `513100.SH sell 1100` 状态 `filled` @2.400
+  （equity 第 20 行，ts=2026-10-12 14:51:49）。⇒ 10-09 的 `topk=None` 崩溃修复（提交 `09299f4`）**已由调仓日实机验证生效**
+  （10-09 曾因该 bug 崩溃、当日无成交，周一自动补做成功）。
+- 策略信号基准交易日 = 20261009（14:50 运行时用上一交易日收盘），持仓/权重正常。
+- 结论：正常，未发邮件。未重跑下单、未改动持仓与交易状态。探针文件 `state/_sched_probe_1012.txt` 已清理，`git status` 干净。
+- 遗留观察（非故障，未处理）：`state/` 堆积历史诊断产物（`diag_order_ocr/`、`diag_shots/`、`diag_position_*`、
+  `_*_probe.py`、多份 `trading_*.db` 备份）；10-09 失败运行留下的 2 笔 `submitted` 委托仍在账本中；
+  日志仍有 `[ths_uia] 委托行「操作」列未读出（OCR 已知缺陷）` 提示，已有兜底匹配。
+
+## 2026-10-13 15:10（周二，非调仓日）
+- 运行 `tools/check_alerts.py`，退出码 **0（正常）**。最近一次运行 **2026-10-13 14:50:07，exit=0**，
+  总资产 <金额略>（现金 <金额略> + 市值 <金额略>）。无 ALERT.txt / DATA_ALERT.txt。
+- 双证据只读核查：`QuantPanorama_DailyRun` FOUND=YES、Ready、LastRun=2026/10/13 14:50、NextRun=2026/10/14 14:50、
+  Missed=0、Execute/WorkingDirectory 均指向 `E:\MyWorkAndProject\quant\agentskill` ⇒ 非「到点没跑/任务被删」类。
+  全机引用 agentskill 的任务仅 1 条，无重复注册。
+- 当日为**非调仓日**（第 21 次成功运行，下次调仓还需 4 次），仅记录净值，未产生下单。
+  日志完整：行情刷新（11 只 ETF 到 20261012，体检通过）→ 清理 1 个弹窗 → 对账完成（持仓 513100.SH / 513500.SH）
+  → `[daily_job] OK` → `[done] exit=0`。
+- 结论：正常，未发邮件。未重跑下单、未改动持仓与交易状态。探针文件已清理（本次写 %TEMP%，未落 state/），
+  `git status` 干净（仅记忆改动）。
+- 连续正常：10-12（调仓日，`09299f4` 修复实机验证）→ 10-13（非调仓日），两连绿。
+- 复用要点：探针文件本次写到 `$env:TEMP` 而非 `state/`，避免污染公开仓库 —— 后续沿用。

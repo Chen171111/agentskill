@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>QuantPanorama · 量化数据全景</title>
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<!-- echarts 本地化（2026-10-13）：dashboard 是本地工具，不依赖公网 CDN -->
+<script src="vendor/echarts.min.js"></script>
 <style>
 :root{
   --bg:#0d1220;--bg2:#111726;--card:#161d2f;--card2:#1a2340;
@@ -33,7 +34,9 @@ header .sub{font-size:12px;color:var(--mut);margin-top:3px}
 .hright{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--mut)}
 .badge{display:inline-flex;align-items:center;gap:6px;background:rgba(22,199,132,.12);color:var(--down);
   border:1px solid rgba(22,199,132,.28);padding:4px 11px;border-radius:99px;font-size:12px}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--down);box-shadow:0 0 0 0 rgba(22,199,132,.5);animation:pulse 2s infinite}
+.badge.bad{background:rgba(240,72,62,.12);color:var(--up);border-color:rgba(240,72,62,.3)}
+.badge.mut{background:rgba(135,146,169,.1);color:var(--mut);border-color:rgba(135,146,169,.25)}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 0 0 rgba(22,199,132,.5);animation:pulse 2s infinite}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(22,199,132,.5)}70%{box-shadow:0 0 0 7px rgba(22,199,132,0)}100%{box-shadow:0 0 0 0 rgba(22,199,132,0)}}
 .wrap{max-width:1360px;margin:0 auto;padding:24px 20px 60px}
 .section-title{display:flex;align-items:baseline;gap:10px;margin:8px 2px 14px;font-size:15px;font-weight:600}
@@ -77,6 +80,8 @@ header .sub{font-size:12px;color:var(--mut);margin-top:3px}
 .btn:hover{filter:brightness(1.08)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .btn.ghost{background:transparent;border:1px solid var(--line2);color:var(--mut);box-shadow:none;font-weight:500}
+.btn.warn{background:linear-gradient(135deg,#e0a83c,#c08c20);color:#1a1405;box-shadow:0 6px 18px rgba(224,168,60,.22)}
+.btn.danger{background:linear-gradient(135deg,#e0483e,#b03030);box-shadow:0 6px 18px rgba(240,72,62,.25)}
 .msg{font-size:12px;color:var(--warn);margin-top:10px;min-height:16px}
 /* metric cards */
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:16px}
@@ -94,6 +99,35 @@ th{color:var(--mut);font-weight:500;font-size:12px}
 td{color:var(--txt)}
 .loading{opacity:.5;pointer-events:none}
 a{color:var(--accent)}
+
+/* ---------- 自动交易监控（2026-10-13 新增） ---------- */
+.at-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:12px;margin-top:14px}
+.at-card{background:linear-gradient(180deg,var(--card2),#141a2b);border:1px solid var(--line);border-radius:12px;padding:13px 15px}
+.at-card .k{font-size:11px;color:var(--mut);display:flex;justify-content:space-between;align-items:center}
+.at-card .v{font-size:15px;font-weight:700;margin-top:6px;font-variant-numeric:tabular-nums}
+.at-card .s{font-size:11px;color:var(--mut2);margin-top:5px;line-height:1.6}
+.pill{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600}
+.pill.ok{background:rgba(22,199,132,.12);color:var(--down);border:1px solid rgba(22,199,132,.3)}
+.pill.bad{background:rgba(240,72,62,.12);color:var(--up);border:1px solid rgba(240,72,62,.3)}
+.pill.warn{background:rgba(224,168,60,.12);color:var(--warn);border:1px solid rgba(224,168,60,.3)}
+.pill.mut{background:rgba(135,146,169,.1);color:var(--mut);border:1px solid rgba(135,146,169,.25)}
+.banner{border-radius:12px;padding:13px 16px;margin-top:12px;font-size:12.5px;white-space:pre-wrap;line-height:1.7}
+.banner.bad{background:rgba(240,72,62,.1);border:1px solid rgba(240,72,62,.35);color:#ffb4ae}
+.banner.warn{background:rgba(224,168,60,.08);border:1px solid rgba(224,168,60,.3);color:#e8c98a}
+.acts{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:14px}
+.act{background:#141a2c;border:1px solid var(--line2);border-radius:12px;padding:14px 15px;display:flex;flex-direction:column;gap:8px}
+.act h4{margin:0;font-size:13px;font-weight:600}
+.act .hint{font-size:11px;color:var(--mut2);line-height:1.6;flex:1}
+.act .row{display:flex;gap:8px;align-items:center}
+.jobbox{margin-top:14px;display:none}
+.jobtitle{font-size:12px;color:var(--mut);margin-bottom:6px;font-variant-numeric:tabular-nums}
+.joblog{background:#0a0e18;border:1px solid var(--line);border-radius:10px;padding:12px;
+  font-family:Consolas,"Courier New",monospace;font-size:12px;max-height:280px;overflow:auto;white-space:pre-wrap;color:#aeb7cb}
+.chip{display:inline-block;padding:2px 8px;border-radius:7px;font-size:12px;margin:2px 5px 2px 0;background:#1a2340;border:1px solid var(--line2)}
+.chip.buy{color:var(--up);border-color:rgba(240,72,62,.4)}
+.chip.sell{color:var(--down);border-color:rgba(22,199,132,.4)}
+.chip .st{color:var(--mut2);font-size:11px;margin-left:3px}
+.rot-date{font-weight:600;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -102,18 +136,60 @@ a{color:var(--accent)}
     <div class="logo">Q</div>
     <div>
       <h1>QuantPanorama · 量化数据全景</h1>
-      <div class="sub">每日 ETF 动量策略 · 数据全景 · 回测 · 风控</div>
+      <div class="sub">每日 ETF 动量策略 · 自动交易监控 · 数据全景 · 回测 · 风控</div>
     </div>
   </div>
   <div class="hright">
     <span id="clock"></span>
-    <span class="badge"><span class="dot"></span>ETF 扫描运行正常</span>
+    <span class="badge" id="healthBadge"><span class="dot"></span><span id="healthText">读取中…</span></span>
   </div>
 </header>
 
 <div class="wrap">
+  <!-- ============ 自动交易监控（置顶：主人最常看的一块） ============ -->
+  <div class="panel" style="margin-top:0">
+    <div class="section-title" style="margin-top:0">自动交易监控
+      <span class="tag" id="atNow"></span>
+      <button class="btn ghost" id="atRefresh" style="margin-left:auto;height:30px;padding:0 14px">刷新</button>
+    </div>
+    <div class="at-grid" id="atCards"><span class="hint">加载中…</span></div>
+    <div id="atAlerts"></div>
+
+    <div class="section-title" style="margin-top:18px">人工操作 <span class="tag">只读试算零副作用；补跑会走真实下单链路</span></div>
+    <div class="acts">
+      <div class="act">
+        <h4>① 刷新行情</h4>
+        <div class="hint">64 位 Python 拉取最新行情并做数据健康检查。交易前自动执行；失败时手动点这里。</div>
+        <div class="row"><button class="btn" id="btnRefresh">执行刷新</button></div>
+      </div>
+      <div class="act">
+        <h4>② 只读试算</h4>
+        <div class="hint">连接同花顺对账并算单，<b>不提交委托、不写本地账本、不推进调仓计数</b>。想看「今天会买什么」就点它。</div>
+        <div class="row"><button class="btn" id="btnDry">开始试算</button></div>
+      </div>
+      <div class="act">
+        <h4>③ 手动补跑 <span class="pill warn">实盘</span></h4>
+        <div class="hint">走完整交易链路（--manual：不覆盖自动交易健康记录、不发告警邮件）。<b>成功后调仓计数 +1</b>：若今日计划任务已成功，补跑成功会跳过下一个调仓日，页面会拦下来要求确认。</div>
+        <div class="row"><button class="btn danger" id="btnManual">手动补跑</button></div>
+      </div>
+    </div>
+    <div class="jobbox" id="jobbox">
+      <div class="jobtitle" id="jobtitle"></div>
+      <div class="joblog" id="joblog"></div>
+    </div>
+  </div>
+
+  <!-- ============ 实盘净值 + 调仓历史 ============ -->
+  <div class="cgrid">
+    <div class="chart"><h3>实盘净值曲线 <span class="hint" style="font-size:11px;color:var(--mut2)">来自 state/trading.db · 每交易日一条</span></h3><div class="box" id="eqChart"></div></div>
+    <div class="chart" style="padding:14px 0 14px 14px">
+      <h3 style="margin-left:6px">调仓历史 <span class="hint" style="font-size:11px;color:var(--mut2)">每次换仓买了什么 / 卖了什么</span></h3>
+      <div class="box" id="rotBox" style="height:340px;overflow:auto;padding-right:12px"><span style="color:var(--mut)">加载中…</span></div>
+    </div>
+  </div>
+
   <!-- 市场全景 -->
-  <div class="section-title">市场全景 <span class="tag" id="marketDate"></span></div>
+  <div class="section-title" style="margin-top:22px">市场全景 <span class="tag" id="marketDate"></span></div>
   <div class="mgrid">
     <div class="card">
       <h3>今日建议 <span class="hint">ETF轮动 · 风险平价</span></h3>
@@ -159,10 +235,8 @@ a{color:var(--accent)}
   </div>
 
   <div class="panel">
-    <div class="section-title" style="margin-top:0">实盘数据 · 持仓 / 最近订单
-      <button class="btn ghost" id="loadStatus" style="margin-left:12px;height:30px;padding:0 14px">加载状态</button>
-    </div>
-    <div id="statusBox"><span style="color:var(--mut)">点击"加载状态"读取本地持仓/订单</span></div>
+    <div class="section-title" style="margin-top:0">实盘数据 · 持仓 / 最近订单</div>
+    <div id="statusBox"><span style="color:var(--mut)">读取中…</span></div>
   </div>
 </div>
 
@@ -174,6 +248,7 @@ const $=id=>document.getElementById(id);
 const UP='#f0483e', DOWN='#16c784';
 const navChart=echarts.init($('navChart'));
 const ddChart=echarts.init($('ddChart'));
+const eqChart=echarts.init($('eqChart'));
 const DARK={
   textStyle:{color:'#aeb7cb'},
   xAxis:{axisLine:{lineStyle:{color:'#2c3857'}},axisLabel:{color:'#8792a9'},splitLine:{show:false}},
@@ -181,27 +256,176 @@ const DARK={
 };
 
 function fmtPct(v){return (v>=0?'+':'')+v.toFixed(2)+'%';}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+/* ================= 自动交易监控 ================= */
+let AT=null, jobPoller=null, currentJob=null;
+
+async function loadAutotrade(){
+  try{
+    const r=await fetch('/api/autotrade').then(x=>x.json());
+    AT=r; renderAutotrade(r);
+  }catch(e){
+    $('atCards').innerHTML='<span style="color:var(--warn)">监控数据读取失败：'+esc(e)+'</span>';
+  }
+}
+
+function runCard(r){
+  const s=r.scheduled, m=r.manual;
+  const one=(label,x,tag)=>{
+    if(!x) return `<div class="at-card"><div class="k">${label}</div><div class="v" style="color:var(--mut)">尚无记录</div><div class="s">等待下一次运行</div></div>`;
+    const ok=x.ok===true;
+    const skipped=!!x.skipped;
+    const pill=skipped?'<span class="pill mut">跳过</span>':(ok?'<span class="pill ok">成功</span>':'<span class="pill bad">失败</span>');
+    const reb=x.rebalanced===true?'<span class="pill warn" style="margin-left:6px">调仓日</span>':(x.rebalanced===false?'<span class="pill mut" style="margin-left:6px">非调仓</span>':'');
+    return `<div class="at-card"><div class="k"><span>${label}</span>${pill}${reb}</div>
+      <div class="v">${esc(x.ts||'')}</div>
+      <div class="s">模式 ${esc(x.mode||'')} · 尝试 ${x.attempts==null?'?':x.attempts} 次 · 退出码 ${x.exit_code==null?'?':x.exit_code}<br>${esc(x.summary||x.error||'')}</div></div>`;
+  };
+  return one('最近计划运行（每日 14:50）',s)+one('最近手动运行',m);
+}
+
+function renderAutotrade(r){
+  $('atNow').textContent=r.now+(r.is_trading_day===true?' · 今日交易日':(r.is_trading_day===false?' · 今日休市':''));
+  // 状态卡
+  const remain=r.runs_until_rebalance;
+  const cd=`<div class="at-card"><div class="k"><span>调仓倒计时</span><span class="pill mut">每 ${r.rebalance_every} 次成功运行</span></div>
+    <div class="v">${remain==null?'？':('还需 <span style="color:var(--warn)">'+remain+'</span> 次成功运行')}</div>
+    <div class="s">strategy_since = ${r.strategy_since==null?'？':r.strategy_since}；非调仓日只记净值、不下单，属正常现象。</div></div>`;
+  const td=`<div class="at-card"><div class="k"><span>今日状态</span></div>
+    <div class="v">${r.is_trading_day===false?'休市':(r.in_retry_window?'交易时段内':'已过 14:56 重试窗口')}</div>
+    <div class="s">${r.is_trading_day===false?'计划任务会自动跳过（记为 skipped）':(r.in_retry_window?'连接类失败会在收盘前自动重试':'此时补跑无法按当日价成交')}</div></div>`;
+  $('atCards').innerHTML=runCard(r)+cd+td;
+  // 告警
+  let ah='';
+  if(r.alerts&&r.alerts.auto) ah+='<div class="banner bad">🚨 自动交易告警（state/ALERT.txt）\n'+esc(r.alerts.auto)+'</div>';
+  if(r.alerts&&r.alerts.manual) ah+='<div class="banner warn">⚠️ 手动运行告警（state/ALERT_manual.txt，不代表自动交易异常）\n'+esc(r.alerts.manual)+'</div>';
+  if(!ah&&r.mail_last&&r.mail_last.ts) ah='<div class="banner warn">📧 最近一次告警邮件：'+esc(r.mail_last.ts)+'（'+esc(r.mail_last.to||'')+'）</div>';
+  $('atAlerts').innerHTML=ah;
+  // 头部健康徽章
+  const hb=$('healthBadge');
+  if(r.scheduled&&r.scheduled.date===r.today){
+    if(r.scheduled.ok){hb.className='badge';$('healthText').textContent='今日自动交易正常';}
+    else{hb.className='badge bad';$('healthText').textContent='今日自动交易失败';}
+  }else if(r.scheduled&&!r.scheduled.ok){hb.className='badge bad';$('healthText').textContent='自动交易异常';}
+  else{hb.className='badge mut';$('healthText').textContent='今日尚未运行';}
+}
+
+async function act(kind){
+  const labels={refresh:'刷新行情',dry:'只读试算',manual:'手动补跑'};
+  if(kind==='manual'){
+    const todayOk=AT&&AT.scheduled&&AT.scheduled.date===AT.today&&AT.scheduled.ok;
+    const msg=todayOk
+      ?'⚠️ 今日 14:50 的计划任务已成功！\n此时补跑一旦成功，会再次推进调仓计数（strategy_since），下一个真正的调仓日可能被跳过。\n\n确定仍要手动补跑？'
+      :'将走完整真实交易链路（连同花顺、可能下单）。\n确认手动补跑？';
+    if(!confirm(msg))return;
+  }
+  let res,j;
+  try{
+    res=await fetch('/api/actions/'+kind,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    j=await res.json();
+  }catch(e){alert(labels[kind]+'请求失败：'+e);return;}
+  if(res.status===409&&j.error==='today_scheduled_ok'){
+    // 服务端闸门：今日已成功 → 必须显式确认才放行
+    if(confirm('【调仓计数保护】'+j.warning)){
+      try{
+        res=await fetch('/api/actions/manual',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({confirm_rebalance_skip:true})});
+        j=await res.json();
+      }catch(e){alert('请求失败：'+e);return;}
+    }else return;
+  }
+  if(j.job_id){startJob(j.job_id,labels[kind]);}
+  else{alert(labels[kind]+'未能启动：'+(j.detail||j.error||'未知错误'));}
+}
+
+function startJob(id,label){
+  currentJob=id;
+  $('jobbox').style.display='block';
+  $('jobtitle').textContent=(label||'任务')+' · job='+id+' · 运行中…';
+  $('joblog').textContent='';
+  if(jobPoller)clearInterval(jobPoller);
+  jobPoller=setInterval(pollJob,1500);
+  pollJob();
+}
+async function pollJob(){
+  if(!currentJob)return;
+  try{
+    const j=await(await fetch('/api/jobs/'+currentJob)).json();
+    $('joblog').textContent=(j.lines||[]).join('\n');
+    $('joblog').scrollTop=$('joblog').scrollHeight;
+    if(!j.running){
+      clearInterval(jobPoller);jobPoller=null;
+      $('jobtitle').textContent=(j.kind||'任务')+' · job='+j.id+' · 已结束 rc='+j.rc+(j.error?'（启动异常）':'');
+      currentJob=null;
+      loadAutotrade();loadRotations();loadEquity();
+    }
+  }catch(e){/* 网络抖动：下一轮再试 */}
+}
+$('btnRefresh').onclick=()=>act('refresh');
+$('btnDry').onclick=()=>act('dry');
+$('btnManual').onclick=()=>act('manual');
+$('atRefresh').onclick=()=>{loadAutotrade();loadRotations();loadEquity();};
+
+/* ================= 实盘净值 ================= */
+async function loadEquity(){
+  try{
+    const r=await fetch('/api/equity').then(x=>x.json());
+    const eq=r.equity||[];
+    if(!eq.length){eqChart.setOption({title:{text:'暂无净值记录',textStyle:{color:'#8792a9'}}},true);return;}
+    eqChart.setOption({
+      backgroundColor:'transparent',
+      tooltip:{trigger:'axis',backgroundColor:'#1a2340',borderColor:'#2c3857',textStyle:{color:'#e8ecf7'}},
+      grid:{left:64,right:20,top:20,bottom:44},
+      xAxis:Object.assign({type:'category',data:eq.map(e=>e.date)},DARK.xAxis),
+      yAxis:Object.assign({type:'value',scale:true},DARK.yAxis),
+      series:[{name:'总资产',type:'line',data:eq.map(e=>Math.round(e.total*100)/100),showSymbol:false,
+        lineStyle:{width:2,color:'#3b82f6'},areaStyle:{color:'rgba(59,130,246,.12)'}}]
+    },true);
+  }catch(e){}
+}
+
+/* ================= 调仓历史 ================= */
+function chip(side,o){
+  const st=o.status==='filled'?'':('<span class="st">['+esc(o.status)+']</span>');
+  return '<span class="chip '+side+'">'+esc(o.name)+' '+o.qty+' @ '+Number(o.price).toFixed(3)+st+'</span>';
+}
+async function loadRotations(){
+  try{
+    const r=await fetch('/api/rotations?limit=40').then(x=>x.json());
+    const list=r.rotations||[];
+    if(!list.length){$('rotBox').innerHTML='<span style="color:var(--mut)">暂无调仓记录</span>';return;}
+    let h='<table><tr><th>日期</th><th>买入</th><th>卖出</th><th>调仓后总资产</th></tr>';
+    list.forEach(g=>{
+      const buys=g.buys.map(o=>chip('buy',o)).join('')||'<span style="color:var(--mut2)">—</span>';
+      const sells=g.sells.map(o=>chip('sell',o)).join('')||'<span style="color:var(--mut2)">—</span>';
+      const lw=g.live_weights&&Object.keys(g.live_weights).length
+        ?'<div class="s" style="font-size:11px;color:var(--mut2);margin-top:3px">目标：'+Object.entries(g.live_weights).map(([c,w])=>esc(c)+' '+(w*100).toFixed(1)+'%').join(' · ')+'</div>':'';
+      h+='<tr><td class="rot-date">'+esc(g.date)+'<div style="font-size:11px;color:var(--mut2);font-weight:400">'+esc((g.ts||'').slice(11))+'</div></td>'
+        +'<td>'+buys+lw+'</td><td>'+sells+'</td>'
+        +'<td style="font-variant-numeric:tabular-nums">'+(g.total_after==null?'—':Number(g.total_after).toLocaleString('zh-CN',{maximumFractionDigits:2}))+'</td></tr>';
+    });
+    $('rotBox').innerHTML=h+'</table>';
+  }catch(e){$('rotBox').innerHTML='<span style="color:var(--warn)">读取失败</span>';}
+}
 
 /* ---------- 市场全景 ---------- */
 function renderMarket(r){
   if(r.date)$('marketDate').textContent='信号日期 '+r.date;
-  // 指数
   const updown=v=>v>0?'<span class="up">'+fmtPct(v)+'</span>':(v<0?'<span class="dn">'+fmtPct(v)+'</span>':'<span class="flat">0.00%</span>');
   let ih='';
-  (r.indexes||[]).forEach((x,i)=>{
+  (r.indexes||[]).forEach(x=>{
     ih+=`<div class="idxrow"><span class="inm">${x.name}</span>
       <span class="ipr" style="color:${x.pct>=0?UP:DOWN}">${x.price.toFixed(2)} ${updown(x.pct)}</span></div>`;
   });
   $('indexes').innerHTML=ih||'<span class="hint">市场数据不可用</span>';
   $('mktHint').textContent=r.indexes&&r.indexes.length?('涨'+r.indexes.filter(x=>x.pct>0).length+' / 跌'+r.indexes.filter(x=>x.pct<0).length):'';
-  // 成交额
   if(r.turnover_yi!=null){
     $('turnover').innerHTML=`<div class="big">${(r.turnover_yi/1e4).toFixed(2)}<span class="u">万亿</span></div>
       <div class="turn-sub"><span>两市合计</span><span>${r.turnover_yi.toLocaleString('zh-CN')} 亿元</span></div>`;
   }else{
     $('turnover').innerHTML='<span class="hint">市场数据不可用</span>';
   }
-  // 今日建议
   let ph='';
   (r.picks||[]).forEach(p=>{
     const w=Math.round((p.weight||0)*100);
@@ -310,7 +534,6 @@ async function runBacktest(){
 /* ---------- 持仓/订单 ---------- */
 async function loadStatus(){
   const box=$('statusBox');
-  box.innerHTML='<span style="color:var(--mut)">加载中…</span>';
   let r={};
   try{ r=await fetch('/api/status').then(x=>x.json()); }catch(e){ box.innerHTML='<span style="color:var(--warn)">读取失败</span>'; return; }
   const pos=r.positions||[], orders=r.orders||[];
@@ -328,10 +551,11 @@ function tick(){const d=new Date();$('clock').textContent=d.toLocaleString('zh-C
 tick();setInterval(tick,1000);
 
 $('run').onclick=runBacktest;
-$('loadStatus').onclick=loadStatus;
 loadStrategies();loadPools();loadMarket();
 setTimeout(runBacktest,700);
-window.addEventListener('resize',()=>{navChart.resize();ddChart.resize();});
+loadAutotrade();loadEquity();loadRotations();loadStatus();
+setInterval(loadAutotrade,30000);   // 监控面板 30s 自刷
+window.addEventListener('resize',()=>{navChart.resize();ddChart.resize();eqChart.resize();});
 </script>
 </body>
 </html>
