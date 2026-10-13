@@ -1,13 +1,14 @@
 # agentskill
 
-**一个 A 股量化策略的研究与回测框架：从数据获取 → 因子计算 → 策略生成 → 风控 → 回测 → 绩效归因，全链路可复现。**
+**一个 A 股量化策略的研究与回测框架，并已跑通到每日自动交易：数据获取 → 因子计算 → 策略生成 → 风控 → 回测 / 模拟盘下单 → Web 监控，全链路可复现。**
 
-十层架构 · 8 个内置策略 · 5 个风控组件 · 真实成本口径 · 数据质量踩坑复盘
+十层架构 · 8 个内置策略 · 5 个风控组件 · 真实成本口径 · 数据质量踩坑复盘 · 每日自动交易 · Web 监控面板
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Data](https://img.shields.io/badge/data-akshare-orange.svg)](https://akshare.akfamily.xyz/)
 [![Backtest](https://img.shields.io/badge/backtest-one%20command%20%C2%B7%20~4s-brightgreen.svg)](#一快速开始)
+[![Web](https://img.shields.io/badge/web-dashboard-blue.svg)](#一快速开始)
 [![Last Commit](https://img.shields.io/github/last-commit/Chen171111/agentskill)](https://github.com/Chen171111/agentskill/commits/master)
 
 | 亮点 | 说明 |
@@ -17,6 +18,8 @@
 | 🛡 **5 个风控组件** | 回撤熔断分档降仓（带滞回带）、波动率目标、风险平价加权、信号稳定性过滤、大盘择时 |
 | 💰 **真实成本口径** | 万 5 佣金（最低 5 元）+ 0.1% 卖出印花税 + 0.05% 滑点，全部进回测 |
 | 🔍 **数据质量复盘** | 份额折算复权判据、ETF 涨跌幅分档、上市时间静默压缩回测区间 —— 每个坑一份完整复盘文档 |
+| ⏰ **每日自动交易** | 计划任务每个交易日 14:50 触发：刷新行情 → 选股/风控 → 同花顺模拟盘下单 → 失败写告警（绑作者本机环境，见 [§六](#六实盘--模拟盘个人自用非通用工具)） |
+| 🖥 **Web 监控面板** | FastAPI + ECharts（已本地化）：实时看每日运行状态、调仓倒计时、历史调仓明细、告警；支持只读试算与手动补跑 |
 | ✅ **可复现** | 装依赖 → 一条命令 → 约 4 秒出结果（行情自动下载） |
 
 > ### ⚠️ 先说清楚最重要的一件事
@@ -66,8 +69,13 @@ pip install -r requirements.txt
 python main.py backtest --strategy etf_rotation --pool ETF全球 --topk 5 --rebalance 5 --start 20190101 --end 20260911
 ```
 
+```bash
+python server.py        # Web 监控面板 → http://127.0.0.1:8000/（自动打开浏览器）
+```
+
 首次运行会通过 akshare **自动下载行情**到 `data/`（该目录**不入 git**，需要联网）。
 数据缓存后，上面这条命令实测约 **4 秒**出结果。
+Web 面板为只读监控（运行状态 / 调仓历史 / 净值）；「手动补跑 / 试算」按钮绑作者本机环境（见 [§六](#六实盘--模拟盘个人自用非通用工具)）。
 
 完整步骤（环境要求、数据下载排错、怎么看结果）见 **[QUICKSTART.md](QUICKSTART.md)**。
 
