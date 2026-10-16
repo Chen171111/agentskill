@@ -76,6 +76,55 @@ def _thresh_consistent():
     assert uniq == {0.35}, f"THRESH 应为 0.35，实得 {uniq}"
 
 
+@check("复权", "按品种涨跌停判据：漏检折算可抓、真实涨停不误报（合成数据）")
+def _split_limit_criterion():
+    """⚠️ 2026-10-16 新增（质检遗留项：0.35 漏掉 512690 2021-12-31 −27.06% /
+    510500 2022-08-29 −12.74% 两处真实折算，后者在权威 ETF全球池内）。
+
+    用合成确定性数据锁 `limit_aware` 口径的三条性质（不读 data/，clone 即可跑）：
+      ① 10% 档标的 −12.7%「日跌」：扁平 0.35 不抓，按品种判据抓（漏检修复）；
+      ② 20% 档标的 +20.02% 真实涨停（159949 2024-10-08 同型）：按品种判据**不抓**；
+      ③ >35% 折算：两种口径都抓（换判据无损失）。
+    默认口径（limit_aware=False）行为必须逐位不变 —— 开关默认关，
+    切换需老大决策（复权假设变更）。
+    """
+    import pandas as pd
+    from dataprovider.adjust import scan_jumps, repair_frame
+
+    def _mk(code, closes):
+        dates = [f"2024{d:04d}" for d in range(101, 101 + len(closes))]
+        df = pd.DataFrame({"close": closes}, index=dates)
+        return df
+
+    # ① 主板 ETF（±10%）：−12.7% 台阶 = 510500 2022-08-29 同型漏检
+    d10 = _mk("510300.SH", [7.0, 7.1, 7.236, 6.30, 6.29, 6.31])
+    assert scan_jumps(d10, code="510300.SH", limit_aware=True), \
+        "按品种判据应抓到 10% 档标的 −12.7% 的公司行为跳变"
+    assert not scan_jumps(d10), "扁平 0.35 口径不应抓 −12.7%（现行漏检行为）"
+    fixed, n, _ = repair_frame(d10, "510300.SH", limit_aware=True)
+    assert n == 1 and abs(fixed["close"].pct_change().iloc[3]) < 1e-9, \
+        "修复后跳变日收益应连续（≈0）"
+
+    # ② 双创 ETF（±20%）：+20.02% 真实涨停（159949 2024-10-08 实测同型）不得误报
+    d20 = _mk("159915.SZ", [1.5, 1.6, 1.8600, 2.2324, 2.23, 2.24])
+    assert not scan_jumps(d20, code="159915.SZ", limit_aware=True), \
+        "按品种判据误报真实涨停 +20.02%（安全边际/tick 覆盖失效）"
+
+    # ③ >35% 折算：两种口径都抓
+    dbig = _mk("513100.SH", [5.0, 5.2, 5.192, 1.015, 1.02, 1.01])
+    assert scan_jumps(dbig), "扁平口径应抓 −80.5% 折算"
+    assert scan_jumps(dbig, code="513100.SH", limit_aware=True), \
+        "按品种判据也应抓 −80.5% 折算（换判据无损失）"
+
+    # ④ 默认口径锁定：2026-10-16 老大决策切为 limit（切换记录见 adjust.py docstring）
+    from dataprovider.store import DataStore
+    assert DataStore().split_criterion == "limit", (
+        "默认复权判据应为 'limit'（2026-10-16 决策）；若需回退改用 'thresh'，"
+        "必须同步重跑四池权威回测并更新 README/HANDOFF 数字")
+    assert DataStore(split_criterion="thresh").split_criterion == "thresh", (
+        "'thresh' 对照口径必须保留（A/B 脚本显式传它）")
+
+
 # ============================ 稳定性 ============================
 @check("稳定性", "会下单的脚本必须拒绝未知参数（防「--help 触发交易」）")
 def _trade_script_arg_guard():

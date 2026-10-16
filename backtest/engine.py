@@ -232,9 +232,32 @@ class BacktestEngine:
             if getattr(self.strategy, "stops_enabled", True):
                 stop_codes = self.acc.stop_loss_codes(px, self.stop_loss, self.take_profit, self.trailing_stop)
                 if stop_codes:
-                    pending = pending or {}
+                    # 2026-10-15 修复（P0：单只止损误清其他持仓）：
+                    # 原实现在非调仓日只传 {止损标的: 0}，而 account.trade 把
+                    # **未列出**的持仓也当成零目标卖出（target_mv.get(code, 0.0)）
+                    # → 一只触发止损、整组清仓（内存复现：2 只持仓只清 1 只的
+                    # 意图变成 2 只全清）。默认 etf_rotation 也启用个股止损。
+                    # 现与实盘 runner 非调仓日止损检查同构（scheduler/runner.py
+                    # 273-295 行：目标权重 = 持仓各标的市值权重、止损标的置 0）：
+                    #   · 非调仓日：以**当日市值权重**为底 → 非止损标的
+                    #     tgt_mv == cur_mv，整手化后不动它们，只强平止损标的；
+                    #   · 调仓日：以当日调仓目标为底，止损标的置 0（原行为）。
+                    if pending is not None:
+                        base = dict(pending)
+                    else:
+                        equity = self.acc.total(px)
+                        base = {}
+                        if equity > 0:
+                            for _c, _p in self.acc.positions.items():
+                                _q = _p.get("qty", 0)
+                                if _q <= 0:
+                                    continue
+                                # 用 _px_of（停牌兜底最后已知价）与 market_value
+                                # 同口径，避免停牌持仓因缺席 px 被当成零目标卖出
+                                base[_c] = _q * self.acc._px_of(_c, px) / equity
                     for c in stop_codes:
-                        pending[c] = 0.0
+                        base[c] = 0.0
+                    pending = base
             holdings[date] = self.acc.holding()
 
         return BacktestResult(self.acc.results(), holdings, bench_nav)

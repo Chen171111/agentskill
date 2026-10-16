@@ -257,8 +257,11 @@ def _audit(kind, job_id, cmd, rc):
                 "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "kind": kind, "job": job_id, "cmd": cmd, "rc": rc,
             }, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
+    except Exception as e:
+        # 2026-10-16：原为静默 pass —— 审计日志写失败必须**可见**，
+        # 否则「谁在什么时候点了补跑/试算」悄悄丢失（selftest 禁新增静默吞异常）
+        print("[server] ⚠️ 动作审计日志写入失败（{}）：{}".format(_ACTION_LOG, e),
+              file=sys.stderr, flush=True)
 
 
 def _spawn_job(kind, argv, done_lock=None):
@@ -320,8 +323,11 @@ def autotrade():
         db = TradeDB()
         raw = db.get_state("strategy_since")
         since = int(raw) if raw is not None else None
-    except Exception:
-        pass
+    except Exception as e:
+        # 2026-10-16：原为静默 pass —— 倒计时读不到要说出来，否则面板显示「未知」
+        # 却没人知道为什么未知
+        print("[server] ⚠️ 读取 strategy_since 失败，调仓倒计时不可用：{}".format(e),
+              file=sys.stderr, flush=True)
     if since is not None:
         remain = every - (since % every)
 
@@ -329,8 +335,10 @@ def autotrade():
     try:
         from dataprovider.calendar import is_trading_day
         is_td = is_trading_day(now.date())
-    except Exception:
-        pass
+    except Exception as e:
+        # 2026-10-16：原为静默 pass —— 交易日历查询失败同样可见化
+        print("[server] ⚠️ is_trading_day 查询失败，交易日状态不可用：{}".format(e),
+              file=sys.stderr, flush=True)
     # daily_job 的「收盘前限窗重试」窗口上限（只重试连接类失败）
     in_window = (now.hour, now.minute) < (14, 56)
 

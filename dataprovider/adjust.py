@@ -108,6 +108,41 @@
 本项目 ETF 回测不使用 `min_price` 绝对价格门槛，故无影响；
 若将来引入绝对价格过滤，需重新评估（参见 `docs/个股线_复权口径缺陷.md` 的同类教训：
 **重建价格序列必须断言量级与原价一致**）。
+
+按品种涨跌停判据（2026-10-16 新增，**老大已决策切为默认口径**）
+----------------------------------------------------------------
+扁平 0.35 的结构性盲区：对本品种**物理上不可能**的日波动视而不见 ——
+主板 ETF 涨跌停只有 ±10%，一次 −27% 的"日跌"不可能是真实成交，只能是份额折算。
+2026-10-15 外部质检 + 2026-10-16 公告核实发现两处漏检（均**开盘价就落在前收
+跌停板之外**，隔夜台阶式下移，非数据跳针）：
+
+| 代码 | 日期 | 跳变 | 事件（已核实） | 所属池 |
+|---|---|---|---|---|
+| `512690.SH` | 2021-12-31 | −27.06% | 份额折算（`docs/ETF池扩容研究_行业轮动.md` 已列为折算） | ETF行业 / ETF稳健 |
+| `510500.SH` | 2022-08-29 | −12.74% | **份额拆分 1:1.14539**（南方基金 2022-08-29 公告，巨潮资讯网） | **ETF全球（权威池）** / ETF宽基 / ETF稳健 |
+
+→ 权威池 ETF全球 的回测窗口（2019~）内留着一处 −12.74% 假跌，**0.35 口径下的
+收益数字仍被此污染**。但不能简单把阈值降到 0.20：159949 2024-10-08 的 +20.02%
+是真实涨停（双创 20% 档 + 0.001 元取整溢出），会被误伤。
+
+修法 = **按品种涨跌停判据**（`limit_aware=True`，走 `tools/limit_rules.limit_of`
+单一来源）：`|ret| > limit + tick/prev_close + SPLIT_LIMIT_SAFETY`，
+其中 tick = 价格最小变动单位（ETF 0.001 / 个股 0.01，`limit_price_round`）。
+物理意义：超过本品种涨跌停板的单日波动不可能是真实成交。
+
+实测（`tools/diag_split_limit_criterion.py`，data/stocks 全池 27 只 ETF）：
+- **捕获**上述两处漏检；现行 0.35 能抓的全部仍抓（B 清单为空，无损失）；
+- **零误报**：已知真实涨停/大跌（159949 +20.02%、159915 +20.00%/+19.98%/−16.28%、
+  588000 +20.00%、159819 +10.07%）全部低于各自判据线（20.1~20.2% / 10.8%）。
+
+⚠️ **口径切换记录（2026-10-16，老大决策）**：默认口径已从扁平 `THRESH=0.35`
+切换为按品种涨跌停（`DataStore(split_criterion="limit")` 为默认；`"thresh"`
+保留作 A/B 对照）。决策依据：`tools/diag_split_limit_criterion.py`（零误报、
+零损失）+ `tools/cmp_split_criterion_impact.py`（权威回测 26.84%→28.28%，
++1.43pp，回撤/夏普同向改善）。切换后 ETF全球/ETF宽基/ETF行业/ETF稳健 四池的
+历史数字已随重跑更新（README §三）。另 3 个 tools/ 诊断脚本
+（diag_price_anomalies / repair_etf_adjust / sweep_etf_pool_expand）仍走扁平
+阈值，THRESH 常量未动、单一来源纪律不变。
 """
 from __future__ import annotations
 
@@ -117,7 +152,7 @@ from pathlib import Path
 
 import pandas as pd
 
-THRESH = 0.35          # 单日 |收益| 超过此值即视为份额折算异常。
+THRESH = 0.35          # 单日 |收益| 超过此值即视为份额折算异常（扁平口径，默认）。
                        # ⚠️ 为什么是 0.35 而不是 0.20 / 0.25：
                        #    ETF 涨跌幅限制按跟踪板块分 —— 主板 10%、创业板/科创板 20%、
                        #    北交所 30%（制度预留，尚无品种）、跨境 10%、商品/黄金 10%、
@@ -131,25 +166,52 @@ THRESH = 0.35          # 单日 |收益| 超过此值即视为份额折算异常
                        # ⚠️ 本模块是该判据的**单一来源**；另有 3 个 tools/ 脚本引用同一阈值
                        #    （diag_price_anomalies / repair_etf_adjust / sweep_etf_pool_expand），
                        #    改这里必须同步那三处（grep -rn THRESH）。
+SPLIT_LIMIT_SAFETY = 0.001   # 按品种判据的安全边际（0.1pp）：覆盖取整溢出之外
+                             # 的杂讯。实测最坏真实溢出 0.07pp（159819 +10.07%，
+                             # 价格 ~0.15 元时 tick/前收 已单独覆盖取整部分）。
 PRICE_COLS = ["open", "high", "low", "close"]
 
 
-def scan_jumps(d: pd.DataFrame, thresh: float = THRESH) -> list:
+def scan_jumps(d: pd.DataFrame, thresh: float = THRESH, code: str = None,
+               limit_aware: bool = False) -> list:
     """找出跳变日。返回 [(date, prev_close, close, ret)]，按日期升序。
 
     `d` 需以 `date` 为索引且已升序，含 `close` 列。
+
+    limit_aware
+    -----------
+    False（默认）= 扁平口径：`|ret| > thresh`（THRESH=0.35，现行行为）。
+    True = 按品种涨跌停口径（需传 `code`）：`|ret| > limit + tick/prev_close
+    + SPLIT_LIMIT_SAFETY`，limit/tick 走 `tools.limit_rules` 单一来源。
+    超过本品种涨跌停板的单日波动不可能是真实成交 → 判为公司行为。
+    指数等无档位标的（limit_of 返回 None）自动回落到扁平口径。
     """
     if d.empty or "close" not in d.columns:
         return []
     r = d["close"].pct_change()
+    lim = tick = None
+    if limit_aware and code:
+        # 延迟导入：tools.limit_rules 依赖 dataprovider.store（避免环）
+        from tools.limit_rules import limit_of, limit_price_round
+        lim = limit_of(code)
+        if lim is not None:
+            tick = 10 ** (-limit_price_round(code))
     out = []
     for dt, v in r.items():
-        if v == v and abs(v) > thresh:          # v == v 排除 NaN
+        if v == v:                              # 排除 NaN
             i = d.index.get_loc(dt)
             if i == 0:
                 continue
-            out.append((str(dt), float(d["close"].iloc[i - 1]),
-                        float(d["close"].iloc[i]), float(v)))
+            if lim is not None:
+                pc = float(d["close"].iloc[i - 1])
+                if pc <= 0:
+                    continue
+                bar = lim + tick / pc + SPLIT_LIMIT_SAFETY
+            else:
+                bar = thresh
+            if abs(v) > bar:
+                out.append((str(dt), float(d["close"].iloc[i - 1]),
+                            float(d["close"].iloc[i]), float(v)))
     return out
 
 
@@ -171,12 +233,14 @@ def repair_splits(d: pd.DataFrame, jumps: list) -> pd.DataFrame:
 
 
 def repair_frame(d: pd.DataFrame, code: str = "", thresh: float = THRESH,
-                 log_path=None) -> tuple:
+                 log_path=None, limit_aware: bool = False) -> tuple:
     """一步到位：扫描 + 修复。返回 `(df, n_repaired, jumps)`。
 
+    `limit_aware=True` 时用按品种涨跌停口径扫描（见 `scan_jumps`）；
+    默认 False = 现行扁平 0.35 口径（行为逐位不变）。
     幂等：无跳变时原样返回、`n_repaired=0`。
     """
-    jumps = scan_jumps(d, thresh)
+    jumps = scan_jumps(d, thresh, code=code, limit_aware=limit_aware)
     if not jumps:
         return d, 0, []
     fixed = repair_splits(d, jumps)

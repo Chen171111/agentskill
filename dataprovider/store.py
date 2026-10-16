@@ -137,12 +137,26 @@ def _download_one(ak, code: str, kind: str) -> pd.DataFrame:
 class DataStore:
     """行情数据仓库（下载 + 缓存 + 读取）。"""
 
-    def __init__(self, force_download=False, repair_splits=True):
+    def __init__(self, force_download=False, repair_splits=True,
+                 split_criterion="limit"):
         self.index_dir = Path(config.INDEX_DIR)
         self.stock_dir = Path(config.STOCK_DIR)
         self.force_download = force_download
         # 份额折算自动复权（默认开）。设为 False 可读**原始未复权**数据（诊断/对照用）。
         self.repair_splits = repair_splits
+        # 复权判据口径（2026-10-16 老大决策：切换为按品种涨跌停）：
+        #   "limit"（默认）= 按品种涨跌停（|ret| > limit + tick/前收 + 0.1pp），
+        #     修复 512690 2021-12-31 −27.06% / 510500 2022-08-29 −12.74%
+        #     两处 0.35 漏检的真实折算（后者在权威 ETF全球池内）。
+        #     决策依据：tools/diag_split_limit_criterion.py（零误报零损失）+
+        #     tools/cmp_split_criterion_impact.py（权威回测 26.84%→28.28%，+1.43pp）。
+        #   "thresh" = 扁平 0.35 旧口径，保留作对照（A/B 脚本显式传它）。
+        # ⚠️ 切到 limit 后四池历史数字已变（README §三已同步重跑更新）。
+        if split_criterion not in ("thresh", "limit"):
+            raise ValueError(
+                "split_criterion 仅支持 'thresh'（扁平0.35，对照用）/ 'limit'（按品种涨跌停，默认），"
+                "实得 {!r}".format(split_criterion))
+        self.split_criterion = split_criterion
         self.split_log = Path(config.DATA_DIR).parent / "state" / "split_repairs.log"
         self._cache = {}
 
@@ -228,15 +242,29 @@ class DataStore:
                 if df.empty:
                     continue
                 df.to_csv(p, index=False)
-                self._cache.pop(code, None)
+                # 缓存键为 (code, end) 元组（2026-10-15 PIT 修复后）——
+                # 必须清掉该 code 的**所有**截止档位，否则刷新后仍读到旧缓存
+                for _k in [k for k in self._cache if k[0] == code]:
+                    self._cache.pop(_k, None)
                 refreshed.append(code)
             except Exception as e:
                 print("[refresh] {} 刷新失败: {}".format(code, e))
         return refreshed
 
     def read(self, code: str, start=None, end=None):
-        if code in self._cache:
-            df = self._cache[code].copy()
+        # ⚠️ PIT 修复（2026-10-15，历史选股前视缺陷）：
+        # 原顺序是「读全量 CSV → 全量复权 → 算 rate → 最后才按 end 截断」。
+        # 份额折算复权（adjust.repair_splits）会把**跳变日之前**的整段价格
+        # 乘上跳变比率 —— 若该跳变（折算）发生在回测截止日 **end 之后**，
+        # 等于用截止日之后才发生的事件修改截止日之前的历史价格：
+        # 未来信息直接改变历史选股（实测 ETF全球池、截止 2025-12-31：
+        # 仅用截止日已知数据前三名含 512480.SH，全量路径第三名变成
+        # 588170.SH）。MACD 因子按绝对价差计算，对该缩放敏感。
+        # 修法：先按 end 截断、再复权、再算 rate；缓存键带 end，
+        # 不同截止各复权一次，互不串味。
+        key = (code, str(end) if end else None)
+        if key in self._cache:
+            df = self._cache[key].copy()
         else:
             p = self.path_for(code)
             if not p.exists():
@@ -247,21 +275,24 @@ class DataStore:
             df["date"] = df["date"].astype(str)
             df.index = df["date"]
             df.sort_index(inplace=True)
-            # ⚠️ 份额折算自动复权 —— **必须在算 rate 之前**。
+            if end:
+                df = df[df.index <= str(end)]
+            # ⚠️ 份额折算自动复权 —— **必须在算 rate 之前**，且只允许使用
+            # 截止日已知的数据（截断已在上面完成）。
             # 为什么放在读取时而不是下载后：`refresh()` 会用 akshare 的**原始未复权**
             # 全量历史覆盖 CSV，一次性打补丁会被下次刷新静默回退
             # （2026-09-16 真实事故：09-13 修好的 4 处，09-16 刷新后全部复发，
             #   回测年化 3.47% → 2.35%，差 1.12pp/年）。
             # 放在这里 → 无论文件被覆盖多少次，策略读到的永远连续；且**幂等**。
             if self.repair_splits:
-                df, n_fix, _ = repair_frame(df, code, log_path=self.split_log)
+                df, n_fix, _ = repair_frame(
+                    df, code, log_path=self.split_log,
+                    limit_aware=(self.split_criterion == "limit"))
                 if n_fix:
                     print("[DataStore] {} 份额折算自动复权 {} 处"
                           .format(code, n_fix), flush=True)
             df["rate"] = df["close"].pct_change()
-            self._cache[code] = df.copy()
+            self._cache[key] = df.copy()
         if start:
             df = df[df.index >= str(start)]
-        if end:
-            df = df[df.index <= str(end)]
         return df
