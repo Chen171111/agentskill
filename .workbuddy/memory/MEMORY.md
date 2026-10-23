@@ -40,3 +40,8 @@
 - 参数透传口径改动（如 `topk=None`）**必须枚举全部消费方**：`pipeline.run_backtest` 与
   `scheduler/runner.py`（实盘 DailyRunner）都要有守卫 —— 2026-10-09 调仓日崩溃就是这么来的。
 - 低频分支（调仓每 5 次成功运行才走一次）的改动，交付前必须主动构造样本跑到。
+- **净值缺口只用手工工具补，不挂进 `daily_job.py`**（2026-10-23 决定）：`tools/backfill_equity.py`
+  默认 dry-run、需 `--apply` 才写，且只补「最后成交日之后」的交易日（区间内持仓/现金未变才可复算）。
+  自动补历史净值风险高于收益，保持显式调用 + 人确认。
+- 账本里「最新一行」必须按 `date` 排序取，不能靠 `id`（补历史行会拿到最大 id）。`load_latest_equity` 已改
+  `ORDER BY date DESC, id DESC`；新增类似的「取最新」查询时同样处理。
