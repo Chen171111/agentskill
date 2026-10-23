@@ -148,10 +148,20 @@ class TradeDB:
                 for r in rows}
 
     def load_latest_equity(self) -> dict:
-        """读取最近一次记录的现金/市值/总资产，用于跨运行恢复现金。"""
+        """读取最近一次记录的现金/市值/总资产，用于跨运行恢复现金。
+
+        ⚠️ 必须按 **date** 排序，不能只按 id（2026-10-23 修复）
+        --------------------------------------------------------
+        原实现 `ORDER BY id DESC`，隐含假设「插入顺序 == 日期顺序」。
+        用 `tools/backfill_equity.py` 补历史缺口时这个假设立刻破裂：
+        补进去的 20261021 拿到最大 id，于是「最新净值」被读成更早的那天。
+        平时现金相同看不出来，一旦补的是资金变动过的日期，就会用错误的现金
+        恢复账户 → 直接算错持仓/下单量。
+        正确口径：最近交易日优先，同日多次写入再按 id 取最后一条。
+        """
         with self._session() as c:
             row = c.execute(
-                "SELECT * FROM equity ORDER BY id DESC LIMIT 1").fetchone()
+                "SELECT * FROM equity ORDER BY date DESC, id DESC LIMIT 1").fetchone()
         return dict(row) if row else None
 
     def load_equity_history(self) -> list:

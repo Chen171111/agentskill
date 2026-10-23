@@ -744,6 +744,31 @@ def _pos_ocr_psm_is_4():
     src = inspect.getsource(ths_uia.UiaThsBroker._read_grid_text)
     assert "_OCR_PSM" in src, "psm 必须走 _OCR_PSM 常量，禁止硬编码"
     assert "--psm 6" not in src, "禁止把 psm 6 硬编码回去"
+
+
+@check("数值", "equity 取「最新」必须按 date 排序（补历史行后 id 与日期不一致）")
+def _latest_equity_ordered_by_date():
+    """补数工具会插入「日期更早、id 更大」的行（2026-10-23 补 20261021，id=28）。
+
+    `load_latest_equity` 原本是 `ORDER BY id DESC`，隐含假设「插入顺序 == 日期顺序」。
+    补完历史缺口这个假设立刻破裂 → 「最新净值」被读成更早那天。当天现金恰好没变
+    所以看不出来；一旦补的是资金变动过的日期，就会用错误现金恢复账户，
+    直接算错可买数量（= 可能下错单）。
+    """
+    import os
+    import tempfile
+    from storage.db import TradeDB
+    tmp = os.path.join(tempfile.mkdtemp(prefix="selftest_eq_"), "t.db")
+    db = TradeDB(db_path=tmp)
+    db.save_equity("20261022", 100.0, 200.0, 300.0)
+    db.save_equity("20261021", 100.0, 150.0, 250.0)      # 后写、日期更早
+    lat = db.load_latest_equity()
+    assert lat["date"] == "20261022", (
+        "load_latest_equity 必须按 date 取最新，实际取到 %r"
+        "（id 最大的是 20261021）→ 排序被改回 id DESC 了" % (lat["date"],))
+    assert abs(lat["total"] - 300.0) < 1e-9, lat
+    hist = db.load_equity_history()
+    assert [round(x, 2) for x in hist] == [250.0, 300.0], hist
     # 调用点必须真的接上（函数写了但没人调 = 假修复）
     src = open(os.path.join(ROOT, "trader", "ths_uia.py"), encoding="utf-8").read()
     m = re.search(r"def _pos_ok\(self.*?\n(.*?)\n    def ", src, re.S)
