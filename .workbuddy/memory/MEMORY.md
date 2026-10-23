@@ -28,6 +28,14 @@
 
 ## 交易链路的已知硬约束
 
+- **同花顺表格 OCR 必须 `psm 4`**（`trader/ths_uia.py` 的 `_OCR_PSM`）。`psm 6` 会把带水印的
+  宽表切成两块、只保留第一块 → 持仓 3 行只读出 1 行 → 对账连续拒单（2026-10-23 实测，两天不能交易）。
+  `psm 11/12` 会把表按列切成几十行，`parse_position` 全丢。selftest 第 32 条守着这个值。
+- **`state/diag_pos_*.txt` 是对账失败的第一诊断入口**：先看「原始 OCR 文本」里该行在不在，
+  据此区分「OCR 没读到」与「解析层吃行」，不要一上来就怀疑解析。
+- **`tools/probe_env.py` 的 `trade_window=MISS` 在 2026-10-23 之前是假数据**（`EnumWindows`
+  回调裸 `return` 导致枚举提前终止，已修）。历史日志里 10-19 / 10-22 / 10-23 的 MISS 都不能当
+  「客户端没开」的证据；判客户端是否在跑，看 `[env] ths_proc` 那几行。
 - `daily_run.bat` **必须保持纯 ASCII**（含 `chcp 65001` 时，任何非 ASCII 字节都会让 cmd 解析错位、静默丢步骤）。
 - 参数透传口径改动（如 `topk=None`）**必须枚举全部消费方**：`pipeline.run_backtest` 与
   `scheduler/runner.py`（实盘 DailyRunner）都要有守卫 —— 2026-10-09 调仓日崩溃就是这么来的。
