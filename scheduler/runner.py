@@ -202,7 +202,16 @@ class DailyRunner:
             # ⚠️ 每次尝试前后对 account 做快照/回滚，失败尝试**不得**污染本地账本。
             import copy as _copy
             _attempts = 1 + max(int(getattr(config, "RECONCILE_RETRY", 0) or 0), 0)
-            _wait = float(getattr(config, "RECONCILE_RETRY_WAIT", 0) or 0)
+            _fallback = float(getattr(config, "RECONCILE_RETRY_WAIT", 0) or 0)
+            # 递增等待（2026-10-23）：固定 3s 太短 —— 一帧「清弹窗+切页+OCR」
+            # 自身要 1.5~2s，3s 只够表格重画一半，10-22 第 1/3 帧因此整行丢持仓。
+            _waits = list(getattr(config, "RECONCILE_RETRY_WAITS", ()) or [])
+
+            def _wait_of(k):
+                if _waits:
+                    return float(_waits[k] if k < len(_waits) else _waits[-1])
+                return _fallback
+
             ok = False
             _err = None                   # 最后一次异常（None = 全是"返回 False"型失败）
             for _i in range(_attempts):
@@ -221,9 +230,10 @@ class DailyRunner:
                 # 回滚，避免失败尝试的半成品数据留在账本里
                 self.account.cash, self.account.frozen, self.account.positions = snap_acc
                 if _i + 1 < _attempts:
+                    _w = _wait_of(_i)
                     print("[runner] 对账未通过（第 {}/{} 次），{:.0f}s 后重读…".format(
-                        _i + 1, _attempts, _wait), flush=True)
-                    time.sleep(_wait)
+                        _i + 1, _attempts, _w), flush=True)
+                    time.sleep(_w)
             if not ok:
                 raise RuntimeError(
                     "下单前对账失败（持仓/资金读取未通过校验），拒绝下单"

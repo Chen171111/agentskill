@@ -696,6 +696,84 @@ def _pos_ok_ghost_branch():
         "判据 4 必须走 _missing_positions helper"
 
 
+@check("券商读取", "市价列负值按行情价隔离（不整帧否掉好帧）")
+def _neg_price_field_isolated():
+    """事故（2026-10-22）：三次对账尝试里第 2 帧读得**完全正确** —— qty 与账本逐位
+    一致、available+frozen==qty、行情价×数量 vs 资金栏市值偏差仅 1.80%（< 5% 闸门），
+    只有「市价」列串成盈亏值（负）→ 旧规则「任一行 price<0 即整帧判坏」把整帧否掉
+    → 当日零成交（非调仓日，只丢一条净值，但同一逻辑在调仓日就是丢一次调仓）。
+
+    `_mk_price` 对池内标的永远优先用行情价，负价根本不参与计价 → 该字段作废即可。
+    分工：`sanitize_pos` 修可知的坏字段；`pos_frame_sane` 只判「修不掉」的帧。
+    """
+    from trader.ths_parse import pos_frame_sane, sanitize_pos
+    frame = {"510880": {"qty": 1640, "available": 1640, "frozen": 0,
+                        "cost": 3.417, "price": -1345.4},
+             "513100": {"qty": 2100, "available": 2100, "frozen": 0,
+                        "cost": 2.312, "price": -1042.22}}
+    prices = {"510880.SH": 3.385, "513100.SH": 2.311}
+    assert not pos_frame_sane(frame), "含负价的原始帧仍须被识别（隔离动作必须发生）"
+    fixed, dropped, bad = sanitize_pos(frame, prices)
+    assert sorted(dropped) == ["510880", "513100"] and not bad, (dropped, bad)
+    assert all(v["price"] is None for v in fixed.values())
+    assert pos_frame_sane(fixed), "行情价可替代时整帧必须可放行（10-22 就死在这里）"
+    # 池外标的无行情价兜底 → 仍须判坏（否则负成本写进账本）
+    out_bad, _d, bad2 = sanitize_pos(
+        {"601091": {"qty": 240, "available": 240, "frozen": 0,
+                    "cost": 41.673, "price": -19.23}}, prices)
+    assert bad2 == ["601091"] and not pos_frame_sane(out_bad), \
+        "无行情价兜底的负价必须整帧判坏"
+
+
+@check("券商读取", "表格 OCR 固定 psm 4（psm 6 在水印宽表上丢行）")
+def _pos_ocr_psm_is_4():
+    """事故（2026-10-23）：持仓页明明 3 行，OCR 只输出第 1 行 + 汇总行，
+    513100/513500 连字符都不出现 → 对账 4 次全拒、当日零成交。
+
+    实测（同一张 1134×458 截图，3 行数据，含「模拟炒股」水印）：
+        psm 6  → 只命中 510880（丢 2 行）
+        psm 4  → 命中 3 个代码，解析出的 qty/cost/price 与屏幕逐位一致
+        psm 11/12 → 代码都在，但按列切成 45/48 行，`parse_position` 全丢
+    根因：psm 6「统一文本块」把带水印的宽表切成两块，只保留第一块。
+    """
+    import inspect
+    from trader import ths_uia
+    assert ths_uia._OCR_PSM == 4, (
+        "表格 OCR 必须 psm 4，当前 %r。psm 6 会丢行（见 _read_grid_text 文档）"
+        % (ths_uia._OCR_PSM,))
+    src = inspect.getsource(ths_uia.UiaThsBroker._read_grid_text)
+    assert "_OCR_PSM" in src, "psm 必须走 _OCR_PSM 常量，禁止硬编码"
+    assert "--psm 6" not in src, "禁止把 psm 6 硬编码回去"
+    # 调用点必须真的接上（函数写了但没人调 = 假修复）
+    src = open(os.path.join(ROOT, "trader", "ths_uia.py"), encoding="utf-8").read()
+    m = re.search(r"def _pos_ok\(self.*?\n(.*?)\n    def ", src, re.S)
+    assert m and "sanitize_pos(pos, prices)" in m.group(1), \
+        "_pos_ok 必须先隔离负价再判帧"
+    m2 = re.search(r"def reconcile\(self.*?\n(.*?)\n    def ", src, re.S)
+    assert m2 and "sanitize_pos(pos, prices)" in m2.group(1), \
+        "reconcile 落账前必须再隔离一次（否则负价会以 ref 身份写出负成本/负 mark）"
+    print("      负价字段隔离：4 项断言通过（原始帧判坏 / 可替代放行 / 池外仍拒 / 调用点已接）")
+
+
+@check("风控", "对账重试间隔递增（3s 固定不够一帧渲染）")
+def _reconcile_retry_backoff():
+    """事故（2026-10-22 第 1/3 帧）：一帧「清弹窗 + 切页 + OCR」自身要 1.5~2s，
+    固定 3s 等待只够表格重画一半 → 两只持仓整行没读到（偏差 64.81%）；
+    第 2 帧间隔够了就全读对。故等待必须递增，且次数沿用 config 口径。
+    """
+    import config
+    waits = list(getattr(config, "RECONCILE_RETRY_WAITS", ()) or [])
+    assert waits, "config 缺少 RECONCILE_RETRY_WAITS（递增等待）"
+    assert all(b > a for a, b in zip(waits, waits[1:])), \
+        "重试等待必须严格递增：{}".format(waits)
+    assert waits[0] >= 3.0, "首次等待不得短于 3s"
+    attempts = 1 + max(int(getattr(config, "RECONCILE_RETRY", 0) or 0), 0)
+    assert attempts >= 3, "至少要给 3 次读取机会（10-22 的第 2 帧才是好帧）"
+    src = open(os.path.join(ROOT, "scheduler", "runner.py"), encoding="utf-8").read()
+    assert "RECONCILE_RETRY_WAITS" in src, "runner 必须使用递增等待（否则 config 改了不生效）"
+    print("      重试口径：{} 次尝试，等待 {} 秒".format(attempts, waits))
+
+
 @check("券商读取", "资金栏控件按「当前显示页」过滤（防读隐藏页陈旧值）")
 def _ths_balance_ctrl_scope():
     """事故：`_read_static` 取 `vals[-1]`（枚举顺序最后一个同名 ID 实例），

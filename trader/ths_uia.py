@@ -78,6 +78,12 @@ _CONFIRM_NO = ("否", "取消", "Cancel", "否(&N)")
 _POPUP_CLOSE_WORDS = ("确定", "知道了", "知道了(&K)", "关闭", "关闭(&C)", "不再提醒",
                       "不再提示", "OK", "Cancel", "取消")
 
+# 表格 OCR 的 Tesseract 页面分割模式。
+# 必须是 4（单列可变字号）。用 6（统一文本块）会在带水印的宽表上把表格切成
+# 两块、只保留第一块 —— 持仓 3 行只读出 1 行，导致对账连续拒单。
+# 详细实测数据见 `_read_grid_text` 的文档字符串。
+_OCR_PSM = 4
+
 
 class UiaThsBroker(Broker):
     """同花顺交易客户端下单/查询（消息级自动化）。"""
@@ -809,8 +815,22 @@ class UiaThsBroker(Broker):
         被 `<4` 的守卫丢掉；运气差时会读出**错位的数量**，触发对账拒单
         （2026-09-14 14:54 实际发生：511010 读成 400 股，实际 300）。
 
-        **改用 `--psm 6`（假设统一文本块）后按行输出完整行**，
-        再放大 **4 倍**让小数点被正确识别（2 倍时 `3.424` 会丢点变成 `3424`，
+        ⚠️ psm 必须用 4，不能用 6（2026-10-23 定位，代价两天不能交易）
+        --------------------------------------------------------------
+        09-14 把 psm 3 换成 psm 6 解决了「按列切碎」，但 psm 6（统一文本块）
+        在**带水印的宽表**上会把表格切成两块，**只保留第一块**：
+        持仓页明明有 3 行，OCR 输出只有第 1 行 + 汇总行，后两行连字符都不出现。
+        这不是偶尔丢行 —— 同一张截图重跑 4 次，输出**逐字相同**，100% 复现。
+
+        实测（2026-10-23 真实持仓页 1134×458，3 行数据，含「模拟炒股」水印）：
+            psm 6   → 命中 1 个代码（510880），513100/513500 全丢
+            psm 4   → 命中 3 个代码，parse_position 解析出 3 行，
+                       qty/available/frozen/cost/price 与屏幕**逐位一致**
+            psm 11/12 → 虽然 3 个代码都出现，但按列切成 45/48 行，
+                       `parse_position` 假设「一行含全部列」→ 全被 `<4` 守卫丢掉
+        结论：psm 4（单列、可变字号）才是宽表的正确参数。
+
+        放大 **4 倍**让小数点被正确识别（2 倍时 `3.424` 会丢点变成 `3424`，
         3 倍时虽多数正确、但实测仍偶发丢点，4 倍下整行结构最完整且耗时相近）。
 
         实测耗时（903×494 表）：2x 0.74s / 3x 0.99s / 4x 1.09s；
@@ -833,7 +853,7 @@ class UiaThsBroker(Broker):
         img = img.resize((img.width * 4, img.height * 4))
         try:
             return pytesseract.image_to_string(
-                img, lang="chi_sim+eng", config="--psm 6")
+                img, lang="chi_sim+eng", config="--psm " + str(_OCR_PSM))
         except Exception:
             return ""
 
@@ -933,6 +953,15 @@ class UiaThsBroker(Broker):
             mv = 0.0
         if not pos:
             return mv <= 1.0 and bal.get("cash") is not None
+        # 判据 2.5 前置：先隔离「市价列负值」（2026-10-22 修订）
+        # ------------------------------------------------
+        # 负价分两类：① 池外标的、没有行情价可替代 → 真的无法计价，必须判坏；
+        # ② 池内标的、行情价可替代 → 该字段不参与计价，**不该否决整帧**。
+        # 10-22 就是 ② 被旧规则整帧否掉：qty 全对、资金栏偏差仅 1.80%，仍然拒单。
+        pos, _fixed, _bad = sanitize_pos(pos, prices)
+        if _fixed:
+            print("[reconcile] 市价列读到负值，已按行情价替代（不影响计价）：{}".format(
+                ", ".join(sorted(_fixed))))
         # 判据 2.5：帧级行内自洽（负价/串列帧直接判坏，见 pos_frame_sane 注释）
         if not pos_frame_sane(pos):
             return False
@@ -1013,8 +1042,15 @@ class UiaThsBroker(Broker):
         ② 切页后校验页标题（必须是「资金股票」页）—— 切页失败会 OCR 到别的
            页面的表格，列结构不同 → 整帧错位；
         ③ 页标题对了才拍，坏帧（串列/负价/未过校验）自动进入下一帧重拍。
+
+        2026-10-22 新增：**全部帧都没过校验时，把每帧的原始 OCR 文本落盘**
+        （`state/diag_pos_<时间戳>.txt`）。此前的失败只打印解析后的 pos，
+        于是「第 1/3 帧为什么少读两只持仓」根本无从定位 —— 只能等下次复发。
+        落盘纯诊断，任何异常都不得影响主流程。
         """
         best = {}
+        frames = []                     # [(序号, 页标题, 原始 OCR 文本, 解析结果)]
+        passed = False
         for i in range(tries):
             self._dismiss_popups()
             self._switch("query")
@@ -1030,19 +1066,64 @@ class UiaThsBroker(Broker):
                 time.sleep(0.5)
                 continue
             time.sleep(1.0)
-            cur = parse_position(self._read_grid_text())
+            raw = self._read_grid_text()
+            cur = parse_position(raw)
+            frames.append((i + 1, page, raw, cur))
             if len(cur) > len(best):
                 best = cur
             if validator is not None:
                 try:
                     if cur and validator(cur):
+                        passed = True
                         return cur
                 except Exception:
                     pass
             elif len(cur) >= 3:
                 return cur
             time.sleep(0.4)
+        if validator is not None and not passed:
+            self._dump_position_frames(frames)
         return best
+
+    @staticmethod
+    def _dump_position_frames(frames) -> None:
+        """落盘「连拍全部未通过校验」的原始 OCR 帧（纯诊断，绝不抛给人）。
+
+        为什么（2026-10-22）：失败时日志只有 `parse_position` 的**结果**，
+        丢行/串列究竟发生在 OCR 还是解析层无法区分。原始文本一留，
+        下次就能直接判定是「弹窗遮挡少了行」还是「正则把行吃了」。
+        保留最近 10 份，避免 `state/` 无限堆积。
+        """
+        try:
+            import glob
+            import os as _os
+            import time as _time
+            root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+            d = _os.path.join(root, "state")
+            if not _os.path.isdir(d):
+                return
+            stamp = _time.strftime("%Y%m%d_%H%M%S")
+            path = _os.path.join(d, "diag_pos_{}.txt".format(stamp))
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("# 连拍 {} 帧，全部未通过对账校验（{}）\n"
+                        .format(len(frames), _time.strftime("%Y-%m-%d %H:%M:%S")))
+                f.write("# 用途：区分「OCR 丢行」与「解析层吃行」——看原始文本里该行在不在。\n")
+                for idx, page, raw, parsed in frames:
+                    f.write("\n{}\n## 第 {}/{} 帧  页标题={!r}\n{}\n"
+                            .format("=" * 60, idx, len(frames), page, "=" * 60))
+                    f.write("-- 解析结果（{} 行）--\n".format(len(parsed)))
+                    for code, p in parsed.items():
+                        f.write("   {} {}\n".format(code, p))
+                    f.write("-- 原始 OCR 文本 --\n{}\n".format(raw or "(空)"))
+            print("[ths] 持仓连拍全部未通过校验，原始 OCR 已落盘：{}".format(path))
+            olds = sorted(glob.glob(_os.path.join(d, "diag_pos_*.txt")))
+            for old in olds[:-10]:
+                try:
+                    _os.remove(old)
+                except OSError as e:
+                    print("[ths] (旧诊断文件清理失败: {} — {})".format(old, e))
+        except Exception as e:                       # 诊断落盘失败绝不能影响交易主流程
+            print("[ths] (原始 OCR 落盘失败: {})".format(e))
 
     @staticmethod
     def _order_frame_score(rows) -> int:
@@ -1185,6 +1266,11 @@ class UiaThsBroker(Broker):
 
         # 连拍持仓，以「市值自洽」作为停止条件：读到可信的那一帧为止
         pos = self.fetch_position(validator=lambda p: self._pos_ok(p, bal, prices, old))
+        # 落账前再隔离一次负价（2026-10-22）：`_pos_ok` 里隔离的是它自己的副本，
+        # 这里拿到的是原始帧。不隔离会顺着 `new_pos` 的 `ref = prices.get(full)
+        # or p.get("price")` 把负价当参考价 → 池外标的被算出**负成本/负 mark**
+        # 写进账本（市值、净值全污染）。池内标的走不到这一步（负价已判坏或已可替代）。
+        pos, _fixed, _bad = sanitize_pos(pos, prices)
         if not self._pos_ok(pos, bal, prices, old):
             self._dump_pos_failure(pos, bal, prices, old)
             return False
@@ -1243,13 +1329,13 @@ class UiaThsBroker(Broker):
 
     @staticmethod
     def _guess_full_code(code6) -> str:
-        """6 位纯代码 -> 带市场后缀的全代码（5xx/6xx/9xx 沪市；1xx/0xx/3xx 深市）。"""
-        c = str(code6).zfill(6)
-        if c.startswith(("6", "9", "5")):
-            return c + ".SH"
-        if c.startswith(("0", "3", "1")):
-            return c + ".SZ"
-        return c
+        """6 位纯代码 -> 带市场后缀的全代码（5xx/6xx/9xx 沪市；1xx/0xx/3xx 深市）。
+
+        ⚠️ 实现已抽到 `trader.ths_parse.to_full_code`（单一来源，铁律 14）：
+        这个映射同时被 `prices` 取值、DB 落库、`sanitize_pos` 判定共用，
+        两处各写一遍必然分叉。
+        """
+        return to_full_code(code6)
 
 
 # ================= OCR 文本解析（表格兜底） =================
@@ -1262,4 +1348,4 @@ class UiaThsBroker(Broker):
 # 这里 re-export 保持向后兼容：`from trader.ths_uia import parse_position` 照旧可用。
 from .ths_parse import (  # noqa: E402
     match_order_row, pos_frame_sane, parse_confirm_text, parse_position,
-    parse_trades)
+    parse_trades, sanitize_pos, to_full_code)

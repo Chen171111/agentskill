@@ -21,7 +21,7 @@
   ② 差额 ≥ 2%（确有东西没读到）→ 回到市值反证：
      `calc + missing <= mv×1.05` 判漏读并拒单。
 
-本文件把 8 个场景钉死防回归：
+本文件把 10 个场景钉死防回归：
   1. 幽灵 4.6% < 5%（09-28 实况口径）     → 必须放过（**旧规则在此死锁**）
   2. 幽灵 78% > 5%（池外个股）            → 必须放过（旧规则也放过，防改坏）
   3. 真清仓（09-14 实测口径）             → 必须放过
@@ -30,6 +30,8 @@
   6. 判据 3 的 5% 闸门（qty=500 串位帧）  → 必须拒单
   7. 无消失持仓（含 qty=0 旧行）          → 必须放过
   8. 行情价 NaN/inf（09-29 新增）        → 必须拒单（nan 比较全 False 会穿透全部判据）
+  9. 负价 + 行情价可替代（10-22 实况）    → 必须放过（**旧规则把好帧整帧否掉**）
+ 10. 负价 + 无行情价兜底（池外标的）      → 必须拒单（否则负成本写进账本）
 
 用法:
     E:\\Python32\\python.exe tools/test_pos_ok.py
@@ -197,6 +199,51 @@ def check_nan_price_rejected():
             "行情价 {!r} 必须拒单（nan/inf 会穿透全部判据）".format(bad)
 
 
+def check_neg_price_with_quotes_accepted():
+    """场景 9（2026-10-23 新增，10-22 事故）：行情价可替代时，负价帧必须放行。
+
+    10-22 第 2 帧实况（按 1/10 缩放，保持比例与列错位特征）：
+        qty 1640/2100/2130 与账本逐位一致、available+frozen==qty、
+        行情价×数量 vs 资金栏市值 偏差仅 1.80%（< 5% 闸门）
+    只有「市价」列串成盈亏值（-1345.4 / -1042.22 / -2262.93）。
+    旧规则「任一行 price<0 即整帧判坏」把这一帧否掉 → 当日零成交。
+    `_mk_price` 对池内标的永远优先用行情价，负价根本不参与计价 →
+    该字段作废即可，不构成整帧否决的理由。
+    """
+    pos = {
+        "510880": {"qty": 1640, "available": 1640, "frozen": 0,
+                   "cost": 3.417, "price": -1345.4},
+        "513100": {"qty": 2100, "available": 2100, "frozen": 0,
+                   "cost": 2.312, "price": -1042.22},
+        "513500": {"qty": 2130, "available": 2130, "frozen": 0,
+                   "cost": 2.735, "price": -2262.93},
+    }
+    prices = {"510880.SH": 3.385, "513100.SH": 2.311, "513500.SH": 2.656}
+    bal = {"cash": 2789.853, "market_value": 15777.16}
+    old = {
+        "510880.SH": {"qty": 1640, "cost": 3.417, "peak": 3.42, "mark": 3.385},
+        "513100.SH": {"qty": 2100, "cost": 2.312, "peak": 2.34, "mark": 2.311},
+        "513500.SH": {"qty": 2130, "cost": 2.735, "peak": 2.74, "mark": 2.656},
+    }
+    calc = B._pos_calc(pos, prices)
+    assert abs(calc - 16061.78) < 0.02, calc          # 与 10-22 实况逐位一致（已缩放）
+    assert abs(calc - bal["market_value"]) / bal["market_value"] < 0.05, \
+        "夹具偏差必须在 5% 闸门内（10-22 实况 1.80%）"
+    assert B._pos_ok(pos, bal, prices, old), \
+        "有行情价可替代的负价帧必须放行（旧规则在此把好帧整帧否掉）"
+
+
+def check_neg_price_pool_out_rejected():
+    """场景 10：池外标的读到负价且**没有行情价兜底** → 无法计价，必须拒单。
+
+    这条是场景 9 的对偶：放宽负价不能顺手放过「真的不知道值多少钱」的行。
+    """
+    pos = {"601091": {"qty": 240, "available": 240, "frozen": 0,
+                      "cost": 41.673, "price": -19.23}}
+    assert not B._pos_ok(pos, {"cash": 1000.0, "market_value": 9000.0}, {}, {}), \
+        "池外标的负价且无行情价 → 必须拒单（否则负成本会写进账本）"
+
+
 def regression_all() -> int:
     """跑全部场景断言；返回通过数。失败即抛 AssertionError。"""
     fns = [check_ghost_small_deadlock_zone,
@@ -206,7 +253,9 @@ def regression_all() -> int:
            check_missed_read_under_2pct_accepted_hole,
            check_calc_mv_gate_5pct,
            check_normal,
-           check_nan_price_rejected]
+           check_nan_price_rejected,
+           check_neg_price_with_quotes_accepted,
+           check_neg_price_pool_out_rejected]
     for fn in fns:
         fn()
         print("  ✓ {}".format(fn.__name__))
@@ -214,7 +263,7 @@ def regression_all() -> int:
 
 
 def main() -> int:
-    print("_pos_ok 判据 4 数值回归（真数字场景，含 09-28 死锁实况）")
+    print("_pos_ok 判据 4 数值回归（真数字场景，含 09-28 死锁实况 / 10-22 负价误杀）")
     n = regression_all()
     print("全部通过：{} 项".format(n))
     return 0

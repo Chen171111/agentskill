@@ -40,6 +40,15 @@ rem ---------------------------------------------------------------
 if errorlevel 1 echo [WARN] data refresh/health-check FAILED (see state/DATA_ALERT.txt). If the data is stale the trading step will refuse to run due to the staleness guard. >> "%LOG%"
 
 rem ---------------------------------------------------------------
+rem  Step 0  environment snapshot (read-only forensics, always exit 0)
+rem  Records session id, input desktop name, all visible window titles
+rem  and THS processes into the log. Purpose: separate a real "client
+rem  not running" from "client running but trade window missing/hidden"
+rem  (2026-10-19 could not be diagnosed after the fact). See probe_env.py
+rem ---------------------------------------------------------------
+"%PY32%" -u tools\probe_env.py >> "%LOG%" 2>&1
+
+rem ---------------------------------------------------------------
 rem  Step 2/2  run one trading session (32-bit Python)
 rem  daily_job.py wraps main.py: records state/last_run.json and writes
 rem  state/ALERT.txt on failure, so an unattended failure is visible

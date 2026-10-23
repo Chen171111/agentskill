@@ -22,7 +22,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from trader.ths_parse import (  # noqa: E402
-    match_order_row, parse_position, parse_trades, pos_frame_sane)
+    match_order_row, parse_position, parse_trades, pos_frame_sane,
+    sanitize_pos, to_full_code)
 
 # ---- 夹具 1：持仓表（含一行「名称 OCR 全丢」的新股） ----
 POS_OCR = "\n".join([
@@ -320,6 +321,65 @@ def check_trades_sync_fill_gets_real_avg_price():
     assert abs(r["price"] - 2.688) < 1e-9, "委托价应为 2.688：{}".format(r)
 
 
+def check_sanitize_neg_price_isolated():
+    """回归：市价列负值必须**按标的类型**分流（2026-10-22 事故）。
+
+    当天第 2 帧读得完全正确（qty 全对、available+frozen==qty、资金栏偏差 1.80%），
+    只有「市价」列串成盈亏值（负），却被旧规则「任一行 price<0 即整帧判坏」
+    整帧否掉 → 当日零成交。
+    正确分工：**有行情价可替代 → 该字段作废、整帧仍然可信；无行情价兜底 →
+    无法计价，必须判坏。**
+
+    ⚠️ 夹具数值照抄 10-22 实况结构，但按 1/10 缩放（公开仓库，不写真实账户股数），
+    所有比例关系与列错位特征保持不变。
+    """
+    # 帧 A：三只池内 ETF，市价列全读成负值（= 10-22 第 2 帧）
+    frame_bad_price = {
+        "510880": {"qty": 1640, "available": 1640, "frozen": 0,
+                   "cost": 3.417, "price": -1345.4},
+        "513100": {"qty": 2100, "available": 2100, "frozen": 0,
+                   "cost": 2.312, "price": -1042.22},
+        "513500": {"qty": 2130, "available": 2130, "frozen": 0,
+                   "cost": 2.735, "price": -2262.93},
+    }
+    prices = {"510880.SH": 3.385, "513100.SH": 2.311, "513500.SH": 2.656}
+
+    # 旧行为必须仍被识别为坏帧（负价本身不是好事，只是不该拖累整帧）
+    assert not pos_frame_sane(frame_bad_price), \
+        "原始帧含负价，pos_frame_sane 仍须判坏（保证隔离动作真的发生）"
+
+    fixed, dropped, bad = sanitize_pos(frame_bad_price, prices)
+    assert sorted(dropped) == ["510880", "513100", "513500"], dropped
+    assert bad == [], "池内标的都有行情价，不该有「无法计价」的行"
+    assert all(fixed[c]["price"] is None for c in fixed), \
+        "负价字段必须被置 None（不能留着它往账本里写负成本/负 mark）"
+    assert pos_frame_sane(fixed), "行情价可替代时整帧必须可放行（10-22 就死在这里）"
+    # 入参不得被就地修改（runner 的失败回滚依赖原对象完整）
+    assert frame_bad_price["510880"]["price"] == -1345.4, "sanitize_pos 不得改入参"
+
+    # 帧 B：池外标的读到负价且无行情价 → 无法计价，必须判坏
+    pool_out = {"601091": {"qty": 240, "available": 240, "frozen": 0,
+                           "cost": 41.673, "price": -19.23}}
+    _f2, _d2, bad2 = sanitize_pos(pool_out, prices)
+    assert bad2 == ["601091"], bad2
+    assert not pos_frame_sane(_f2), "池外标的无行情价兜底时，负价必须整帧判坏"
+
+    # 帧 C：可用+冻结≠余额（串列）与负价无关，仍须判坏
+    confused = {"513500": {"qty": 50, "available": 2120, "frozen": 2120,
+                           "cost": 2.735, "price": 2.656}}
+    _f3, _d3, _b3 = sanitize_pos(confused, prices)
+    assert not pos_frame_sane(_f3), "串列帧（可用+冻结≠余额）不得被负价隔离顺手放过"
+
+    # 空/None 不得崩
+    assert sanitize_pos(None, prices) == ({}, [], [])
+    assert sanitize_pos({}, None) == ({}, [], [])
+
+    # 全代码映射单一来源（分叉症状：持仓取不到行情价 → 市值恒 0 → 重复买入）
+    assert to_full_code("510880") == "510880.SH"
+    assert to_full_code("159915") == "159915.SZ"
+    assert to_full_code("513100") == "513100.SH"
+
+
 def regression_all() -> int:
     """跑全部夹具断言；返回通过数。失败即抛 AssertionError。"""
     fns = [check_position_row_with_latin_name,
@@ -327,6 +387,7 @@ def regression_all() -> int:
            check_position_still_handles_cjk_rows,
            check_trades_row_with_latin_name,
            check_pos_frame_sanity,
+           check_sanitize_neg_price_isolated,
            check_order_row_matches_side,
            check_trades_name_digits_not_treated_as_qty,
            check_trades_filled_row_tail_anchor,

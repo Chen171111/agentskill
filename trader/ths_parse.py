@@ -66,6 +66,64 @@ def parse_confirm_text(text) -> dict:
     return out
 
 
+def to_full_code(code6) -> str:
+    """6 位纯代码 -> 带市场后缀的全代码（5xx/6xx/9xx 沪市；1xx/0xx/3xx 深市）。
+
+    ⚠️ 单一来源（铁律 14）：`trader/ths_uia.py::UiaThsBroker._guess_full_code`
+    只是委托到这里。任何一处自己再写一遍映射，迟早会与 prices/DB 的全代码口径分叉
+    —— 分叉的症状是「持仓取不到行情价 → 市值恒为 0 → 引擎当作空仓重复买入」。
+    """
+    c = str(code6).zfill(6)
+    if c.startswith(("6", "9", "5")):
+        return c + ".SH"
+    if c.startswith(("0", "3", "1")):
+        return c + ".SZ"
+    return c
+
+
+def sanitize_pos(pos, prices=None):
+    """隔离「市价」列的负值：能取到行情价的标的直接置 None，取不到的留原值。
+
+    为什么需要（2026-10-22 事故，一次好帧被负价规则误杀）
+    --------------------------------------------------
+    当天 `数据源` 三次对账尝试里，第 2 帧读得**完全正确**：
+        qty 16400/21000/21300 与账本逐位一致、available+frozen==qty、
+        行情价×数量 vs 资金栏市值 偏差仅 1.80%（< 5% 闸门）
+    唯一的问题是「市价」列读成了盈亏值（-1345.4 / -1042.22 / -2262.93），
+    而 `pos_frame_sane` 判据①「任一行 price<0 即整帧判坏」把整帧否掉了
+    → 当日零成交。可 `_mk_price` 对**池内标的**永远优先用行情价，
+    OCR 的 price 只在**池外标的**兜底 —— 也就是说这个字段对这三只 ETF
+    根本不参与计价，却决定了整帧生死。
+
+    现在的分工（职责不重叠）：
+      · 本函数：把「可知的坏字段」修掉 —— 有行情价可替代时 `price=None`
+        （该字段作废，但整帧仍然可信，因为计价不依赖它）；
+      · `pos_frame_sane`：只对**修不掉**的坏帧判死（含「无行情价兜底却又读到
+        负价」的行 —— 那种行情无法用任何可靠价格计价）。
+
+    返回 `(pos2, fixed, unfixable)`：
+      `pos2` 是新 dict（不改入参，失败重试回滚依赖原对象完整）；
+      `fixed` = 已置 None 的代码；`unfixable` = 仍带负价、必须判坏的代码。
+    """
+    out, fixed, unfixable = {}, [], []
+    px_pool = prices or {}
+    for code, p in (pos or {}).items():
+        row = dict(p)
+        px = row.get("price")
+        try:
+            neg = px is not None and float(px) < 0
+        except (TypeError, ValueError):
+            neg = False
+        if neg:
+            if px_pool.get(to_full_code(code)):
+                row["price"] = None        # 该字段不可信，但行情价可替代 → 不判死
+                fixed.append(code)
+            else:
+                unfixable.append(code)     # 无行情价兜底 → 无法计价，留给判坏
+        out[code] = row
+    return out, fixed, unfixable
+
+
 def pos_frame_sane(pos) -> bool:
     """帧级健全性校验：行内自洽 + 无负价（2026-09-24 事故新增）。
 
@@ -79,6 +137,10 @@ def pos_frame_sane(pos) -> bool:
       ① 任一行 price < 0（市价不可能为负，负数必是串列）；
       ② 任一行 available + frozen != qty（资金股票页恒有 余额=可用+冻结，
          见 2026-09-21 实拍夹具：601091 当日买入 0+2400=2400 ✓）。
+
+    ⚠️ 调用前必须先过 `sanitize_pos`（2026-10-22 修订）：负价里有一部分是
+    「有行情价可替代」的伪坏帧，先修字段、再判帧。直接拿原始 pos 调本函数，
+    会把 10-22 那种「qty/资金全对、只有市价列串位」的好帧一起否掉。
     """
     for p in (pos or {}).values():
         px = p.get("price")
