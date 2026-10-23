@@ -1025,6 +1025,23 @@ class UiaThsBroker(Broker):
                 "{} qty={} px={:.3f}".format(c, q, px) for c, q, px in items) if items else "(无)"))
             print("   calc+missing = {:,.2f}   vs   mv×1.05 = {:,.2f}".format(
                 calc + missing, mv * 1.05))
+            # 行数对比（2026-10-23 新增）
+            # 原来只打印 `pos`，要人自己数行数才知道是"读错"还是"少读了"。
+            # 10-23 的 psm 6 事故就是少读两行，日志里看不出「应该有几行」。
+            book = [c for c, v in (old or {}).items() if v.get("qty", 0) > 0]
+            if len(pos) < len(book):
+                print("   行数对比   = 读到 {} 行 / 账本 {} 行   ⚠️ 少读 {} 行".format(
+                    len(pos), len(book), len(book) - len(pos)))
+                print("   → 这是「整块丢行」的典型形态，不是读错数字：表格被水印/弹窗"
+                      "切割、窗口被遮挡，或 OCR psm 参数被改回 6。"
+                      "先看 state/diag_pos_*.txt 里的原始 OCR 文本，确认缺的标的是否"
+                      "根本不在文本中；文本里也没有 → 换 psm 4 重拍，别再重试硬等。")
+            elif len(pos) > len(book):
+                print("   行数对比   = 读到 {} 行 / 账本 {} 行   （多读，按幽灵处理）".format(
+                    len(pos), len(book)))
+            else:
+                print("   行数对比   = 读到 {} 行 / 账本 {} 行   （行数一致，问题在数值）".format(
+                    len(pos), len(book)))
             if missing > 0 and dev < 2.0:
                 print("   → calc 与 mv 自洽 {:.2f}% < 2%：本地多余持仓按幽灵处理"
                       "（允许覆盖，不因此拒单）".format(dev))
