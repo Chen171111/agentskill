@@ -259,23 +259,31 @@ def _print_run_result(result):
 
 
 def main():
+    # 手动重跑时控制台是 GBK（cp936），日志里的 ⚠️ 等非 GBK 字符会让 print 抛
+    # UnicodeEncodeError。2026-10-30 实测：幽灵持仓分支的 ⚠️ 打印直接打断
+    # reconcile → 明明能自愈也判对账失败。计划任务有 PYTHONIOENCODING=utf-8，
+    # 但 ALERT.txt 正是教人手动重跑，所以入口自己兜住编码。
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
+        sys.stderr.reconfigure(errors="replace")
     ensure_dirs()
     p = argparse.ArgumentParser(description="agentskill 自动化量化交易模型")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     # 公共参数
-    def add_common(sp):
-        sp.add_argument("--strategy", default=DEFAULT_STRATEGY,
-                        choices=["momentum", "etf_rotation", "mean_reversion", "cross_moving",
-                                 "multifactor", "lianban_lead", "tech_offensive",
-                                 "bigorder_etf"])
+    def add_common(sp, research=False):
+        choices = ["momentum", "etf_rotation", "mean_reversion", "cross_moving",
+                   "multifactor", "lianban_lead", "tech_offensive", "bigorder_etf"]
+        if research:
+            choices.append("etf_rotation_multi")
+        sp.add_argument("--strategy", default=DEFAULT_STRATEGY, choices=choices)
         sp.add_argument("--codes", default="510300.SH,510500.SH,159915.SZ,510880.SH")
         sp.add_argument("--pool", default=None, help="推荐池名（覆盖 codes）")
         sp.add_argument("--topk", type=int, default=None)
         sp.add_argument("--rebalance", type=int, default=DEFAULT_REBALANCE)
 
     sp = sub.add_parser("backtest", help="历史回测")
-    add_common(sp)
+    add_common(sp, research=True)
     sp.add_argument("--start", default=DEFAULT_START)
     sp.add_argument("--end", default=DEFAULT_END)
     sp.add_argument("--benchmark", default=None)

@@ -107,28 +107,70 @@ class TradeDB:
                         "INSERT INTO equity (date, cash, market_value, total, ts) VALUES (?,?,?,?,?)",
                         (last["date"], last["cash"], last["market_value"], last["total"],
                          datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            # 迁移：equity 增列 frozen（2026-10-30）。
+            # 为什么需要：total_equity = cash + frozen + market_value，而表里只存
+            # cash/mv/total —— 有未成交买单（资金被冻结）的那几行，cash+mv 会比
+            # total 少一截（实测 09-10 / 10-19 / 10-27 三行都少），任何「按
+            # cash+mv 复算 total」的下游（如 backfill_equity 的自校验）都会判成
+            # 账实不符。把 frozen 存下来，三列才自洽。
+            ecols = [r[1] for r in c.execute("PRAGMA table_info(equity)").fetchall()]
+            if ecols and "frozen" not in ecols:
+                c.execute("ALTER TABLE equity ADD COLUMN frozen REAL DEFAULT 0")
+            # 迁移：equity 日期唯一（2026-10-30）。
+            # 为什么需要：save_equity 原为裸 INSERT，同一天重跑/补跑就再追加一行 ——
+            # 实测 20260910 有 7 行、20260924 有 2 行（后两行同值）。按 date 取净值
+            # 或算回撤时，取到哪一行取决于排序方式，同一份库能算出不同结果。
+            # 顺序：先去重（保留每日最后写入的一行 = MAX(id)），再加唯一索引堵住复发。
+            try:
+                c.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_equity_date ON equity(date)")
+            except sqlite3.IntegrityError:
+                c.execute("DELETE FROM equity WHERE id NOT IN "
+                          "(SELECT MAX(id) FROM equity GROUP BY date)")
+                c.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_equity_date ON equity(date)")
             # 迁移：positions 增列 mark（池外标的的「最后已知价」）。
             # 为什么需要：mark 让 PortfolioAccount.market_value() 能给**不在策略池**里
             # 的人工持仓定价；旧库缺这一列时按 0 处理（等价于旧行为，不会更差）。
             pcols = [r[1] for r in c.execute("PRAGMA table_info(positions)").fetchall()]
             if pcols and "mark" not in pcols:
                 c.execute("ALTER TABLE positions ADD COLUMN mark REAL DEFAULT 0")
+            # 迁移：orders 增列 fill_source（2026-10-30）。
+            # 为什么需要：台账里有一批「券商侧已成交、但当日委托表没回读到」的委托，
+            # 它们的 filled_price 只能是**委托价**（不是真实成交均价）。若与真正回读到
+            # 的成交混在一列里，日后算滑点/成交质量会把估算当事实。
+            # 取值：readback=当日委托页回读 / api_est=资金流水反推、价沿用委托价 /
+            #       inferred=由持仓或现金变动判定 / unknown=证据不足。
+            ocols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+            if ocols and "fill_source" not in ocols:
+                c.execute("ALTER TABLE orders ADD COLUMN fill_source TEXT DEFAULT ''")
 
     def save_order(self, order):
+        # ⚠️ 必须写**显式列名**（2026-10-30）：`INSERT INTO orders VALUES (?,?,…)`
+        # 依赖列数固定，`_init_schema` 一旦给 orders 加列就会参数个数不匹配而崩。
         with self._session() as c:
             c.execute(
-                "INSERT OR REPLACE INTO orders VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO orders "
+                "(id, ts, code, side, qty, price, reason, status, "
+                " filled_price, filled_qty, fee, fill_source) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (order.id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), order.code,
                  order.side, order.qty, order.price, order.reason, order.status,
-                 order.filled_price, order.filled_qty, order.fee),
+                 order.filled_price, order.filled_qty, order.fee,
+                 getattr(order, "fill_source", "") or ""),
             )
 
-    def save_equity(self, date: str, cash: float, market_value: float, total: float):
+    def save_equity(self, date: str, cash: float, market_value: float, total: float,
+                    frozen: float = 0.0):
+        # 同日覆盖而非追加（2026-10-30）：依赖 _init_schema 建的 uq_equity_date。
+        # frozen = 已报未成交委托占用的资金，仍属账户资产，故 total = cash+frozen+mv。
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with self._session() as c:
             c.execute(
-                "INSERT INTO equity (date, cash, market_value, total, ts) VALUES (?,?,?,?,?)",
-                (date, cash, market_value, total, ts),
+                "INSERT INTO equity (date, cash, market_value, total, frozen, ts) "
+                "VALUES (?,?,?,?,?,?) "
+                "ON CONFLICT(date) DO UPDATE SET cash=excluded.cash, "
+                "market_value=excluded.market_value, total=excluded.total, "
+                "frozen=excluded.frozen, ts=excluded.ts",
+                (date, cash, market_value, total, frozen, ts),
             )
 
     def save_positions(self, positions: dict):

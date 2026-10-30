@@ -271,7 +271,7 @@ class DailyRunner:
                 if not self.dry_run:
                     self.db.set_state("strategy_since", str(self.strategy._since))
                     self.db.save_equity(last_date, snap["cash"], snap["market_value"],
-                                        snap["total_equity"])
+                                        snap["total_equity"], snap["frozen"])
                     self.db.save_positions(self.account.positions)
                 return {
                     "status": "ok", "date": last_date, "strategy": self.strategy_name,
@@ -309,14 +309,25 @@ class DailyRunner:
                 for o in orders:
                     self.db.save_order(o)
             # 对账（同花顺模式）：回读真实持仓/资金，杜绝双账本
+            post_synced = True
             if self.broker is not None and hasattr(self.broker, "reconcile"):
+                post_synced = False
                 try:
                     try:
-                        self.broker.reconcile(self.account, prices)
+                        post_synced = bool(self.broker.reconcile(self.account, prices))
                     except TypeError:
-                        self.broker.reconcile(self.account)
+                        post_synced = bool(self.broker.reconcile(self.account))
                 except Exception as e:
-                    print("[runner] 止损单对账失败: {}".format(e))
+                    print("[runner] ⚠️ 止损单对账失败: {}".format(e))
+                if not post_synced:
+                    # 2026-10-30 修复：本分支原样照搬了 09-28 之前的老写法 ——
+                    # 只看异常、不看**返回值**（reconcile 校验不过时 return False 而非 raise），
+                    # 且随后**无条件**写 positions/净值。10-29 止损卖出 510880 后
+                    # 持仓表 OCR 读空、对账返回 False，这段仍然把「卖出前」的账户写回账本，
+                    # 当日照旧报 ok/exit 0 → 账实相差一笔清仓单，次日才暴露。
+                    print("[runner] ⚠️ 止损后对账未通过 → 跳过本地账本落库"
+                          "（orders 是事实记录，照常落库；positions 与净值保持上次可信值，"
+                          "下次对账成功会自动校正）")
             # 回读真实成交（当日委托只回读一次，与调仓日路径同款优化）
             if self.broker is not None and hasattr(self.broker, "sync_fill"):
                 rows = None
@@ -336,9 +347,10 @@ class DailyRunner:
                 for o in orders:
                     self.db.save_order(o)
                 self.db.set_state("strategy_since", str(self.strategy._since))
-                self.db.save_positions(self.account.positions)
-                self.db.save_equity(last_date, snap["cash"], snap["market_value"],
-                                    snap["total_equity"])
+                if post_synced:
+                    self.db.save_positions(self.account.positions)
+                    self.db.save_equity(last_date, snap["cash"], snap["market_value"],
+                                        snap["total_equity"], snap["frozen"])
             return {
                 "status": "ok", "date": last_date, "strategy": self.strategy_name,
                 "rebalanced": True, "reason": "daily_stop_loss",
@@ -469,7 +481,7 @@ class DailyRunner:
         snap = self.account.snapshot(prices)
         if not self.dry_run and post_synced:
             self.db.save_equity(last_date, snap["cash"], snap["market_value"],
-                                snap["total_equity"])
+                                snap["total_equity"], snap["frozen"])
         # ⚠️ 净值行同理：account 未与券商对齐时，算出来的净值是错的，不落库。
 
         return {

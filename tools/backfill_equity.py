@@ -54,10 +54,12 @@ def _last_fill_date(db):
 
 
 def _equity_rows(db):
-    """{date: (cash, mv, total)}。"""
+    """{date: (cash, mv, total, frozen)}。"""
     with db._conn() as c:
-        rows = c.execute("SELECT date, cash, market_value, total FROM equity").fetchall()
-    return {str(r["date"]): (float(r["cash"]), float(r["market_value"]), float(r["total"]))
+        rows = c.execute(
+            "SELECT date, cash, market_value, total, frozen FROM equity").fetchall()
+    return {str(r["date"]): (float(r["cash"]), float(r["market_value"]),
+                             float(r["total"]), float(r["frozen"] or 0.0))
             for r in rows}
 
 
@@ -99,6 +101,13 @@ def main(argv=None):
 
     # 现金口径：最后一次成交之后现金不变 → 取最新一条净值记录的现金
     cash = equity[max(equity)][0]
+    frozen = equity[max(equity)][3]
+    if frozen > TOL:
+        # 有未成交委托时「持仓/现金未变」的前提不成立：冻结资金随时会变成持仓，
+        # 用当前持仓复算过去的日期必然错。
+        print("拒绝：最新净值行有冻结资金 %.2f（= 有未成交委托），"
+              "「持仓/现金未变」前提不成立" % frozen)
+        return 2
 
     store = DataStore()
     # 交易日历：用第一只持仓标的的日期序列（持仓标的必有数据）

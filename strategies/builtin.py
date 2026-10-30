@@ -76,13 +76,18 @@ class EtfRotationStrategy(MomentumStrategy):
 
     def __init__(self, topk=5, window=20, risk_parity=True, include_sma=False,
                  trend_window=60, trend_gate=True, gate_window=200,
-                 gate_threshold=0.4, gate_topk=10, **kw):
+                 gate_threshold=0.4, gate_topk=10, momentum_windows=None, **kw):
         super().__init__(topk=topk, window=window, risk_parity=risk_parity,
                          include_sma=include_sma, trend_window=trend_window, **kw)
         self.trend_gate = bool(trend_gate)
         self.gate_window = int(gate_window)
         self.gate_threshold = float(gate_threshold)
         self.gate_topk = int(gate_topk)
+        windows = (self.window,) if momentum_windows is None else tuple(
+            int(w) for w in momentum_windows)
+        if not windows or any(w <= 0 for w in windows) or len(set(windows)) != len(windows):
+            raise ValueError("momentum_windows 必须是非空、互不重复的正整数窗口")
+        self.momentum_windows = windows
 
 
     def _warn_breadth_na(self, why: str):
@@ -137,7 +142,7 @@ class EtfRotationStrategy(MomentumStrategy):
     def generate_weights(self, date, factors, panel):
         if not self._is_rebalance():
             return None
-        specs = [(self.factor, 1, 1.0)]
+        specs = [(f"momentum{w}", 1, 1.0) for w in self.momentum_windows]
         if self.include_sma:
             specs.append(("sma_gap", 1, 1.0))
         score = weighted_score(factors, date, specs)
@@ -171,6 +176,18 @@ class EtfRotationStrategy(MomentumStrategy):
             w = volatility_weighted(codes, panel, date)
             return {c: ww * self.max_total for c, ww in w.items()}
         return {c: min(1.0 / max(len(codes), 1) * 0.9, self.max_total) for c in codes}
+
+
+class MultiHorizonEtfRotationStrategy(EtfRotationStrategy):
+    """多周期动量 ETF 轮动（研究变体，不进入默认交易链路）。
+
+    20/60/120 日横截面动量排名等权合成，降低单一窗口对近期噪声的依赖。
+    趋势过滤、广度门、风险平价和成本模型全部复用 etf_rotation；仅信号窗口不同。
+    """
+    name = "etf_rotation_multi"
+
+    def __init__(self, momentum_windows=(20, 60, 120), **kw):
+        super().__init__(momentum_windows=momentum_windows, **kw)
 
 
 class MeanReversionStrategy(Strategy):

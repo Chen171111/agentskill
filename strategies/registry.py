@@ -1,12 +1,22 @@
 """策略注册表。"""
 from .base import Strategy
-from .builtin import (MomentumStrategy, MeanReversionStrategy, CrossMovingStrategy,
-                      MultiFactorStrategy, LianbanLeadStrategy, EtfRotationStrategy,
-                      TechOffensiveStrategy, BigOrderEtfStrategy)
+from .builtin import (
+    BigOrderEtfStrategy,
+    CrossMovingStrategy,
+    EtfRotationStrategy,
+    LianbanLeadStrategy,
+    MeanReversionStrategy,
+    MomentumStrategy,
+    MultiFactorStrategy,
+    MultiHorizonEtfRotationStrategy,
+    TechOffensiveStrategy,
+)
 
 STRATEGIES = {
     "momentum": MomentumStrategy,
     "etf_rotation": EtfRotationStrategy,
+    # 多周期动量仅用于研究回测；main.py 的 simulate/run/daemon 不开放该选项。
+    "etf_rotation_multi": MultiHorizonEtfRotationStrategy,
     "mean_reversion": MeanReversionStrategy,
     "cross_moving": CrossMovingStrategy,
     "multifactor": MultiFactorStrategy,
@@ -27,5 +37,5 @@ def list_strategies() -> list:
 
 def create_strategy(name: str, **params) -> Strategy:
     if name not in STRATEGIES:
-        raise KeyError("未知策略: {}，可用: {}".format(name, list_strategies()))
+        raise KeyError(f"未知策略: {name}，可用: {list_strategies()}")
     return STRATEGIES[name](**params)

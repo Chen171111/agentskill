@@ -35,10 +35,14 @@ class Order:
         self.qty = int(qty)       # 股数（A股 100 取整）
         self.price = float(price)
         self.reason = reason
-        self.status = "submitted"  # submitted / filled / rejected
+        self.status = "submitted"  # submitted / filled / rejected / unfilled
         self.filled_price = None
         self.filled_qty = 0
         self.fee = 0.0
+        # 成交信息**来源**（2026-10-30）：readback=当日委托页回读的真实成交均价；
+        # api_est/inferred/unknown = 事后由资金流水或持仓变动推定，价格只能沿用委托价。
+        # 空串表示「未成交或尚无成交信息」。存在意义：别把估算的成交价当事实去算滑点。
+        self.fill_source = ""
 
     def to_dict(self):
         return {
@@ -46,6 +50,7 @@ class Order:
             "price": round(self.price, 4), "reason": self.reason,
             "status": self.status, "filled_price": self.filled_price,
             "filled_qty": self.filled_qty, "fee": round(self.fee, 4),
+            "fill_source": self.fill_source,
         }
 
 

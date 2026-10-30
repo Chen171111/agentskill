@@ -838,24 +838,76 @@ class UiaThsBroker(Broker):
 
         注意：ImageGrab 抓的是**屏幕像素**，同花顺被别的窗口盖住时会 OCR 到别人的画面。
         因此截图前必须先把交易窗口提到最前，否则会「读到空表格」而误判为空仓。
+
+        ⚠️ 最小化窗口必须先恢复（2026-10-30 定位，当天因此拒单）
+        ------------------------------------------------------
+        最小化窗口的 `GetWindowRect` 返回 `(-32000, -32000, ...)`，而 `_raise` 的
+        TOPMOST 对最小化窗口**不会**还原 → `ImageGrab` 抓到的是屏幕外坐标的纯黑帧。
+        实测（tkinter 窗口）：最小化后 rect=(-32000,-32000,-31840,-31972)，
+        抓图 mean=0.0 / stddev=0.0。表现为「资金栏（控件文本）读数正常、页标题正常，
+        唯独持仓表 OCR 全空」，与 10-30 14:50 的失败形态逐项一致。
+        控件文本走 `GetWindowText` 不受最小化影响，只有像素路径会瞎 —— 所以这条
+        故障无法从资金栏读数上发现，必须在这里显式还原。
+
+        空白帧必须显式判坏 + 留图（同一事故）：只落 OCR 文本无法区分「表格真空」
+        与「抓图失败」，下次仍只能猜。现在纯黑/纯白帧直接判坏、落 PNG 与窗口状态。
         """
         import pytesseract
-        from PIL import ImageGrab
+        from PIL import ImageGrab, ImageStat
+        if u32.IsIconic(self._win()):
+            print("[ths] 交易窗口处于最小化状态，先恢复再截图")
+            u32.ShowWindow(self._win(), 9)          # SW_RESTORE
+            time.sleep(0.8)
         rc = self._grid_rect()
         if not rc:
+            print("[ths] 未找到可见的表格控件（grid rect=None，窗口可能仍在最小化或页面未渲染）")
             return ""
         self._raise(keep=True)
         try:
             time.sleep(0.3)
-            img = ImageGrab.grab(bbox=rc)
+            # all_screens=True：交易窗口在副屏时，默认只抓主屏 → 坐标落在主屏外 → 纯黑
+            img = ImageGrab.grab(bbox=rc, all_screens=True)
         finally:
             self._unraise()
+        _st = ImageStat.Stat(img.convert("L"))
+        if _st.stddev[0] < 1.0:
+            self._dump_blank_capture(img, rc, _st.mean[0])
+            return ""
         img = img.resize((img.width * 4, img.height * 4))
         try:
             return pytesseract.image_to_string(
                 img, lang="chi_sim+eng", config="--psm " + str(_OCR_PSM))
         except Exception:
             return ""
+
+    def _dump_blank_capture(self, img, rc, mean) -> None:
+        """截图为空白帧（纯黑/纯白）时落盘 PNG + 窗口状态，纯诊断。
+
+        2026-10-30 教训：失败只落了 OCR 文本，(空) 既可能是「表格真没数据」，
+        也可能是「抓图像素是黑的」，事后无法区分，只能猜。
+        """
+        import glob
+        import os as _os
+        import time as _time
+        try:
+            win = self._win()
+            wr = win32gui.GetWindowRect(win)
+            iconic = bool(u32.IsIconic(win))
+            fg = win32gui.GetWindowText(win32gui.GetForegroundWindow()) or ""
+        except Exception as e:
+            wr, iconic, fg = None, None, "(读取失败: {})".format(e)
+        print("[ths] 截图为空白帧（mean={:.1f}）→ 判为抓图失败：grid_rect={} 窗口rect={} "
+              "iconic={} 前台窗口={!r}".format(mean, rc, wr, iconic, fg))
+        root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+        d = _os.path.join(root, "state")
+        path = _os.path.join(d, "diag_grid_{}.png".format(_time.strftime("%Y%m%d_%H%M%S")))
+        try:
+            img.save(path)
+            print("[ths] 空白截图已落盘：{}".format(path))
+            for old in sorted(glob.glob(_os.path.join(d, "diag_grid_*.png")))[:-5]:
+                _os.remove(old)
+        except OSError as e:
+            print("[ths] 空白截图落盘失败：{}".format(e))
 
     @staticmethod
     def _mk_price(code6, p, prices) -> float:
@@ -1247,11 +1299,19 @@ class UiaThsBroker(Broker):
                       order.code, order.id, r.get("qty"), r.get("deal_id")))
         if r.get("avg_price"):
             order.filled_price = r["avg_price"]      # 成交均价
+            _px_src = "readback"                     # 真·成交均价（委托页回读）
         elif r.get("price"):
             order.filled_price = r["price"]          # 委托价兜底
+            # 回读到了「已成」，但这一帧没读出成交均价 → 价格是委托价、不是成交价。
+            # 必须与 readback 区分（2026-10-30）：否则日后算滑点会把委托价当成交价。
+            _px_src = "readback_px"
+        else:
+            _px_src = "readback_px"
         if r.get("filled_qty"):
             order.filled_qty = r["filled_qty"]
         order.status = "filled" if r.get("status") == "已成" else "submitted"
+        if order.status == "filled":
+            order.fill_source = _px_src
 
     def reconcile(self, account, prices=None) -> bool:
         """用同花顺真实持仓/资金校正本地账户，消除双账本。

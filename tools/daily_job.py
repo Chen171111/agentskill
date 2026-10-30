@@ -305,8 +305,11 @@ def main():
         "--- 日志尾部 ---",
         tail,
         "",
-        "处理完可直接重跑:  E:\\Python32\\python.exe main.py simulate --ths",
-        "（或直接重新运行 daily_run.bat）",
+        # ⚠️ 别指向 `main.py simulate --ths`（2026-10-30 教训）：那样跑完**不留运行记录**，
+        # 巡检与面板都看不到「今天已补救」，下一个交易日还会被判成「没跑成功」。
+        # --manual 写 last_run_manual.json / ALERT_manual.txt，且不覆盖定时任务的状态。
+        "处理完可直接重跑:  E:\\Python32\\python.exe -u tools\\daily_job.py --manual",
+        "（--manual = 手动补跑：写 state/last_run_manual.json，不覆盖 last_run.json）",
         "=" * 60,
     ]
     text = "\n".join(body)

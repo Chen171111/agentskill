@@ -746,6 +746,46 @@ def _pos_ocr_psm_is_4():
     assert "--psm 6" not in src, "禁止把 psm 6 硬编码回去"
 
 
+@check("风控", "持仓截图失败可自愈/可诊断（最小化还原·空白帧留图·多屏抓取）")
+def _grid_capture_hardening():
+    """2026-10-30 事故：交易窗口最小化 → `GetWindowRect` 返回 (-32000,-32000)
+    → `ImageGrab` 抓到纯黑帧（实测 mean=0 / stddev=0）→ 持仓 OCR 全空 → 对账 4 连拒。
+    资金栏走 `GetWindowText`（控件文本）不受最小化影响，所以从读数上完全看不出异常。
+
+    三条都必须保住，否则同一事故会原样复发：
+      · `IsIconic` → `ShowWindow(SW_RESTORE)`：TOPMOST 不会还原最小化窗口；
+      · 空白帧（stddev<1）→ 判坏 + 落 PNG + 打印窗口状态，不许交给解析层；
+      · `all_screens=True`：窗口在副屏时默认只抓主屏，坐标落在主屏外同样是纯黑。
+    """
+    import inspect
+    from trader import ths_uia
+    src = inspect.getsource(ths_uia.UiaThsBroker._read_grid_text)
+    assert "IsIconic" in src and "ShowWindow" in src, (
+        "最小化窗口必须先还原再截图（TOPMOST 不还原最小化 → 抓图纯黑）")
+    assert "all_screens=True" in src, "抓图必须 all_screens=True（副屏窗口默认抓主屏 → 纯黑）"
+    assert "stddev" in src and "_dump_blank_capture" in src, (
+        "空白帧必须显式判坏并落盘 PNG，否则下一次仍无法区分「表格真空」与「抓图失败」")
+    assert hasattr(ths_uia.UiaThsBroker, "_dump_blank_capture"), "空白帧落盘方法缺失"
+
+
+@check("风控", "止损分支：对账返回 False 时不得落库 positions/净值（10-29 假 OK 的根因）")
+def _stop_loss_branch_gates_ledger_write():
+    """2026-10-29 事故：止损卖出 510880 后持仓表 OCR 读空，`reconcile()` 校验不过
+    返回 **False**（不是抛异常），但止损分支只捕获异常、忽略返回值，随后无条件
+    写 positions/净值 → 账本停在「卖出前」，当日仍 exit 0。
+
+    与 09-28 修过的调仓分支是同一个坑（那次导致 4 天对账死锁）。两者都必须门控，
+    否则「账实分叉 + 当日报正常」会再次同时出现。
+    """
+    import inspect
+    from scheduler import runner
+    src = inspect.getsource(runner.DailyRunner.run_once)
+    assert src.count("post_synced = True") >= 2, (
+        "调仓分支与止损分支都必须各自初始化 post_synced")
+    assert src.count("if post_synced:") >= 2, (
+        "调仓分支与止损分支都必须按 post_synced 门控账本落库")
+
+
 @check("数值", "equity 取「最新」必须按 date 排序（补历史行后 id 与日期不一致）")
 def _latest_equity_ordered_by_date():
     """补数工具会插入「日期更早、id 更大」的行（2026-10-23 补 20261021，id=28）。
@@ -778,6 +818,66 @@ def _latest_equity_ordered_by_date():
     assert m2 and "sanitize_pos(pos, prices)" in m2.group(1), \
         "reconcile 落账前必须再隔离一次（否则负价会以 ref 身份写出负成本/负 mark）"
     print("      负价字段隔离：4 项断言通过（原始帧判坏 / 可替代放行 / 池外仍拒 / 调用点已接）")
+
+
+@check("数值", "equity 同日重复写入必须覆盖（唯一索引 + 旧库自动去重）")
+def _equity_one_row_per_date():
+    """2026-10-30 新增：同日重跑/补跑不得在 equity 里追加第二行。
+
+    实测账本 20260910 有 7 行、20260924 有 2 行，都来自「一天跑多次」。
+    `load_equity_history` 已按 MAX(id)/date 去重，但 `load_latest_equity` 与
+    任何直接 `SELECT * FROM equity` 的下游仍会看到重复日期，且历史行无法
+    区分「那天最终是哪一版」。故在写入端堵住：唯一索引 + 同日覆盖。
+    本项同时守两端 —— 新库写入幂等；旧库（无索引且已有重复）打开时自动
+    去重并保留每日最后一行（与读取口径 MAX(id) 一致）。
+    """
+    import os
+    import sqlite3
+    import tempfile
+    from storage.db import TradeDB
+    with tempfile.TemporaryDirectory() as d:
+        db = TradeDB(db_path=os.path.join(d, "new.db"))
+        db.save_equity("20260910", 1.0, 2.0, 3.0)
+        db.save_equity("20260910", 4.0, 5.0, 9.0)
+        hist = db.load_equity_history()
+        assert len(hist) == 1 and abs(hist[0] - 9.0) < 1e-9, ("同日必须覆盖", hist)
+        # frozen 必须落库：total = cash + frozen + mv，否则「cash+mv 复算 total」会误判
+        db.save_equity("20260911", 10.0, 20.0, 35.0, frozen=5.0)
+        c = sqlite3.connect(os.path.join(d, "new.db"))
+        c.row_factory = sqlite3.Row
+        r = c.execute("SELECT cash, market_value, total, frozen FROM equity "
+                      "WHERE date='20260911'").fetchone()
+        c.close()
+        assert r and abs(r["frozen"] - 5.0) < 1e-9, ("frozen 未落库", dict(r) if r else None)
+        assert abs(r["total"] - (r["cash"] + r["frozen"] + r["market_value"])) < 1e-9, \
+            ("total 必须等于 cash+frozen+mv", dict(r))
+        # 旧库：无唯一索引 + 无 frozen 列 + 已有重复行 → 打开即迁移
+        p = os.path.join(d, "old.db")
+        c = sqlite3.connect(p)
+        c.execute("CREATE TABLE equity (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                  "date TEXT NOT NULL, cash REAL, market_value REAL, total REAL, ts TEXT)")
+        c.executemany(
+            "INSERT INTO equity (date, cash, market_value, total, ts) VALUES (?,?,?,?,?)",
+            [("20260910", 1.0, 1.0, 2.0, "a"), ("20260910", 3.0, 3.0, 6.0, "b"),
+             ("20260924", 7.0, 7.0, 14.0, "c")])
+        c.commit()
+        c.close()
+        db2 = TradeDB(db_path=p)
+        hist2 = db2.load_equity_history()
+        assert [round(x, 2) for x in hist2] == [6.0, 14.0], \
+            ("旧库必须去重且保留每日最后一行", hist2)
+        c = sqlite3.connect(p)
+        idx = [r[0] for r in c.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='equity'")]
+        n = c.execute("SELECT COUNT(*) FROM equity WHERE date='20260910'").fetchone()[0]
+        fcols = [r[1] for r in c.execute("PRAGMA table_info(equity)")]
+        old_frozen = c.execute(
+            "SELECT frozen FROM equity WHERE date='20260924'").fetchone()[0]
+        c.close()
+        assert "uq_equity_date" in idx, ("唯一索引未建立，重复会复发", idx)
+        assert n == 1, ("去重后仍有重复", n)
+        assert "frozen" in fcols, ("旧库未补 frozen 列", fcols)
+        assert old_frozen == 0, ("旧行 frozen 应默认 0", old_frozen)
 
 
 @check("风控", "对账重试间隔递增（3s 固定不够一帧渲染）")
@@ -865,6 +965,43 @@ def _positions_mark_roundtrip():
         assert got2["510880.SH"]["mark"] == 0.0, f"旧行 mark 应为 0：{got2}"
         db2.save_positions(got2)
         assert db2.load_positions()["510880.SH"]["qty"] == 1600
+
+
+@check("券商读取", "orders.fill_source 可持久化（新库建列 + 旧库自动迁移）")
+def _orders_fill_source_roundtrip():
+    """2026-10-30 新增：台账必须能区分「回读到的成交价」与「事后推定的委托价」。
+
+    背景：账本里有一批券商侧确已成交、但当日委托表没回读到成交均价的委托，
+    其 filled_price 只能是委托价。如果不标来源，日后算滑点会把估算当事实
+    （09-11 就吃过一次「委托价冒充成交价」的亏）。
+
+    本项同时守住 `save_order`：它原写 `INSERT INTO orders VALUES (?,…)`，
+    依赖列数固定 —— 给 orders 加一列就会参数个数不匹配而崩。必须写显式列名。
+    """
+    import tempfile
+    import sqlite3
+    from storage.db import TradeDB
+    from trader.broker import Order
+    with tempfile.TemporaryDirectory() as d:
+        o = Order("510880.SH", "buy", 100, 3.42)
+        o.status, o.filled_price, o.filled_qty = "filled", 3.42, 100
+        o.fill_source = "api_est"
+        db = TradeDB(db_path=os.path.join(d, "new.db"))
+        db.save_order(o)
+        got = db.recent_orders(1)[0]
+        assert got["fill_source"] == "api_est", got
+        # 旧库（orders 无 fill_source 列）→ 自动 ALTER 迁移后仍可写可读
+        p = os.path.join(d, "old.db")
+        c = sqlite3.connect(p)
+        c.execute("CREATE TABLE orders (id TEXT PRIMARY KEY, ts TEXT, code TEXT, "
+                  "side TEXT, qty INTEGER, price REAL, reason TEXT, status TEXT, "
+                  "filled_price REAL, filled_qty INTEGER, fee REAL)")
+        c.commit()
+        c.close()
+        db2 = TradeDB(db_path=p)
+        db2.save_order(o)
+        rows = db2.recent_orders(3)
+        assert len(rows) == 1 and rows[0]["fill_source"] == "api_est", rows
 
 
 # ============================ 巡检入口（check_alerts） ============================
@@ -1172,6 +1309,21 @@ def _topk_none_not_injected():
     except ValueError:
         raised = True
     assert raised, "Strategy(topk=None) 应立刻 raise ValueError（快速失败）"
+
+
+@check("桌面端", "桌面适配层 + 多周期研究策略无界面自检")
+def _desktop_and_research_strategy():
+    """把桌面端独立测试纳入原全量回归，避免 UI 变更只跑人工冒烟。"""
+    import io
+    import unittest
+
+    from tools.test_quant_desktop import DesktopTests
+
+    suite = unittest.defaultTestLoader.loadTestsFromTestCase(DesktopTests)
+    stream = io.StringIO()
+    result = unittest.TextTestRunner(stream=stream, verbosity=0).run(suite)
+    assert result.wasSuccessful(), stream.getvalue()
+    print(f"      桌面端子测试 {result.testsRun} 项通过（含交易 CLI 隔离与个股合成回测）")
 
 
 # ============================ 主流程 ============================

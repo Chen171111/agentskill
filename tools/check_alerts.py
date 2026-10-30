@@ -157,6 +157,21 @@ def main():
             notes.append("  └ 今日为非交易日，计划运行已按设计跳过（skipped=non-trading-day）")
         if not st.get("ok"):
             problems.append("最近一次运行失败（退出码 {}）".format(st.get("exit_code")))
+            # 2026-10-30 补：定时任务失败、但当天已人工补跑成功时，必须说清楚。
+            # 否则只看到「失败」二字，会误判成「今天完全没跑成」——
+            # 实际当天持仓/净值可能已经由 `daily_job.py --manual` 更新过。
+            # ⚠️ 仍然计入 problems（定时任务本身确实失败了），只是补一句事实。
+            try:
+                if STATUS_MANUAL.exists():
+                    mj = json.loads(STATUS_MANUAL.read_text(encoding="utf-8"))
+                    if (mj.get("ok") and str(mj.get("date")) == str(st.get("date"))):
+                        notes.append(
+                            "  └ 但当日已有**手动补跑成功**记录（{}，退出码 {}，{}）"
+                            "—— 持仓/净值已按补跑结果写入；失败的是定时任务那一次".format(
+                                mj.get("ts"), mj.get("exit_code"), mj.get("summary") or ""))
+            except Exception as e:
+                # 不静默吞（selftest 禁新增 `except: pass`）：读不到就说读不到
+                notes.append("  └ （手动运行记录读取失败，未判定是否已补跑：{}）".format(e))
 
         # 到点没跑：今天是交易日、且已过 14:50+宽限，但最后一次运行不是今天
         if trading and due:
