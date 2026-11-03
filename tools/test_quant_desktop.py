@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import ClassVar
+from unittest import mock
 
 import pandas as pd
 
@@ -19,6 +20,7 @@ from desktop.service import (
     PROJECT_ROOT,
     BacktestConfig,
     discover_projects,
+    ensure_dashboard_server,
     load_settings,
     save_settings,
 )
@@ -104,6 +106,28 @@ class DesktopTests(unittest.TestCase):
         self.assertGreater(result["meta"]["trades"], 0)
         self.assertGreater(len(result["series"]["dates"]), 20)
         self.assertIn("年化收益", result["metrics"])
+
+    def test_dashboard_existing_server_not_restarted(self):
+        with (mock.patch("desktop.service.dashboard_server_healthy", return_value=True),
+              mock.patch("desktop.service.subprocess.Popen") as popen):
+            info = ensure_dashboard_server(PROJECT_ROOT)
+        self.assertEqual(info["state"], "existing")
+        popen.assert_not_called()
+
+    def test_dashboard_server_start_waits_until_healthy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "server.py").write_text("# test fixture\n", encoding="utf-8")
+            process = mock.Mock(pid=12345)
+            process.poll.return_value = None
+            with (mock.patch("desktop.service.dashboard_server_healthy",
+                             side_effect=[False, False, True]),
+                  mock.patch("desktop.service.subprocess.Popen", return_value=process) as popen,
+                  mock.patch("desktop.service.time.sleep", return_value=None)):
+                info = ensure_dashboard_server(root, wait_sec=1.0)
+            self.assertEqual(info["state"], "started")
+            self.assertEqual(info["pid"], 12345)
+            popen.assert_called_once()
 
     def test_worker_error_is_explicit_json(self):
         with tempfile.TemporaryDirectory() as tmp:

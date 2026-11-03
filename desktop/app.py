@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import tkinter as tk
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -18,6 +19,7 @@ from desktop.service import (
     PROJECT_ROOT,
     BacktestConfig,
     discover_projects,
+    ensure_dashboard_server,
     load_settings,
     project_status,
     save_settings,
@@ -54,7 +56,17 @@ class QuantDesktop(tk.Tk):
         self._load_form_settings()
         self.show_page("overview")
         self.after(100, self._poll_events)
+        self.after(250, self._present_window)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _present_window(self):
+        """启动时把窗口带到前台，避免双击后进程在跑但窗口被其他应用遮住。"""
+        self.deiconify()
+        self.lift()
+        self.update_idletasks()
+        self.attributes("-topmost", True)
+        self.focus_force()
+        self.after(600, lambda: self.attributes("-topmost", False))
 
     def _init_styles(self):
         style = ttk.Style(self)
@@ -570,7 +582,19 @@ class QuantDesktop(tk.Tk):
         if not path.is_file():
             messagebox.showerror("看板不存在", str(path))
             return
-        os.startfile(path)
+        if project.kind == "stock":
+            os.startfile(path)  # quant2 是自包含 HTML，无 /api/* 依赖
+            return
+        try:
+            self.run_status_var.set("正在检查 ETF 看板后端 127.0.0.1:8000…")
+            self.update_idletasks()
+            info = ensure_dashboard_server(project.root)
+            if info["state"] == "existing":
+                webbrowser.open(info["url"])
+            self.run_status_var.set("ETF 看板已就绪：" + info["url"])
+        except (OSError, RuntimeError, TimeoutError) as exc:
+            self.run_status_var.set("ETF 看板启动失败")
+            messagebox.showerror("ETF 看板启动失败", str(exc))
 
     def _load_form_settings(self):
         try:

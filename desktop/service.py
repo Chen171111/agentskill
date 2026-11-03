@@ -8,7 +8,10 @@ from __future__ import annotations
 import json
 import math
 import os
+import subprocess
 import sys
+import time
+import urllib.request
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime
 from pathlib import Path
@@ -127,6 +130,51 @@ def project_status(project: ProjectInfo) -> dict:
         out["state_file"] = state.name
         out["updated"] = datetime.fromtimestamp(state.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
     return out
+
+
+def dashboard_server_healthy(url: str = "http://127.0.0.1:8000/api/health",
+                             timeout: float = 1.0) -> bool:
+    """只读探测本地看板后端；连接失败属于预期的未启动状态。"""
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return response.status == 200
+    except (OSError, TimeoutError, ConnectionError):
+        return False
+
+
+def ensure_dashboard_server(project_root: Path | str, *, wait_sec: float = 10.0) -> dict:
+    """确保 ETF 看板后端运行。已启动则不重复创建；启动失败返回可读日志。"""
+    if dashboard_server_healthy():
+        return {"state": "existing", "url": "http://127.0.0.1:8000/"}
+    root = Path(project_root).resolve()
+    server = root / "server.py"
+    if not server.is_file():
+        raise FileNotFoundError(f"缺少看板后端：{server}")
+    state = root / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    log_path = state / "desktop_server.log"
+    env = os.environ.copy()
+    env.update({"PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"})
+    flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+             ) if os.name == "nt" else 0
+    with log_path.open("a", encoding="utf-8") as log:
+        process = subprocess.Popen(
+            [sys.executable, "-u", "server.py"], cwd=root, stdout=log,
+            stderr=subprocess.STDOUT, env=env, creationflags=flags,
+            start_new_session=os.name != "nt")
+    deadline = time.monotonic() + wait_sec
+    while time.monotonic() < deadline:
+        if dashboard_server_healthy():
+            # server.py 自己会打开浏览器；这里不能再开一次，避免重复标签页。
+            return {"state": "started", "pid": process.pid,
+                    "url": "http://127.0.0.1:8000/"}
+        rc = process.poll()
+        if rc is not None:
+            tail = log_path.read_text(encoding="utf-8", errors="replace")[-1500:]
+            raise RuntimeError(f"看板后端退出（rc={rc}）：{tail}")
+        time.sleep(0.2)
+    process.terminate()
+    raise TimeoutError(f"看板后端启动超时，请检查日志：{log_path}")
 
 
 def _safe(value):
