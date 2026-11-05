@@ -154,6 +154,101 @@ def pos_frame_sane(pos) -> bool:
     return True
 
 
+# 证券名称 token：**以字母或汉字开头**的连续字母数字串。
+# ⚠️ 必须要求以字母/汉字开头，否则会把 `-1098.590` 这类负号数字也当成名称删掉。
+_NAME_TOKEN_RE = re.compile(r"[A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff]*")
+_NUM_RE = re.compile(r"[-+]?\d[\d,]*(?:\.\d+)?")
+
+
+def _row_numbers(ln, code):
+    """取「代码之后」的数字列（先剔掉证券名称，再抽数字）。
+
+    ⚠️ 先剔名称是 2026-09-28 的修复：名称里夹数字（「标普500ETF」被读成
+    `tPF500ETF`）会让整行数字左移一位，qty 读成 500。
+    """
+    tail = _NAME_TOKEN_RE.sub(" ", ln.split(code, 1)[-1])
+    return _NUM_RE.findall(tail)
+
+
+def _row_from_nums(nums):
+    """≥4 个数字 → 单行持仓字段；不合法（数量≤0/转换失败）返回 None。"""
+    def _i(s):
+        return int(float(s.replace(",", "")))
+
+    # 二级保险：真实持仓必然满足 `股票余额 == 可用 + 冻结`（买入冻结只挪列不改总量）。
+    # 若名称剔除后仍有残留错位，用该约束在候选偏移里选唯一自洽的那个；
+    # 全都对不上（当日 T+1 买入等情形）则退回偏移 0，保持与旧行为一致。
+    off = 0
+    for _k in range(0, min(3, len(nums) - 4) + 1):
+        try:
+            if _i(nums[_k]) == _i(nums[_k + 1]) + _i(nums[_k + 2]):
+                off = _k
+                break
+        except (ValueError, IndexError):
+            continue
+    nums = nums[off:]
+    try:
+        qty, available, frozen = _i(nums[0]), _i(nums[1]), _i(nums[2])
+    except (ValueError, IndexError):
+        return None
+    # 持仓行至少要有「股票余额/可用/冻结/成本价」4 个数；数量必须为正。
+    # OCR 抖动会产生 1~2 个数字的碎片行（实测出现过 qty=1/cost=0 的假持仓），
+    # 这类行一旦被当成持仓，会让引擎严重误判仓位。
+    if qty <= 0:
+        return None
+    return {
+        "qty": qty,                                                # 股票余额
+        "available": available,
+        "frozen": frozen,
+        "cost": _to_float(nums[3]),                                # 成本价
+        "price": _to_float(nums[4]) if len(nums) > 4 else None,    # 市价
+    }
+
+
+def _zip_split_columns(codes, rows) -> dict:
+    """兜底：OCR 把「代码列」与「数字列」切成两段互不相连的行 → 按顺序配对。
+
+    2026-11-05 实况（psm 4、窗口未最大化）—— 当天**两次运行全废**的根因
+    -------------------------------------------------------------------
+    OCR 按**块**切分表格，代码/名称列与数值列被读成两组独立的行：
+
+        三: 159928 消费ETFC          ← 只有代码，数字个数 0
+        三: 510880 ”红利ETF华
+        = 511010 ”国债ETF国
+        ...
+        8700   8700   0     0.696    ← 只有数字，没有代码
+        1900   1900   0     3.421
+        400     400   0   141.296
+
+    `parse_position` 的主路径要求「**同一行内**既有代码又有 ≥4 个数字」，
+    两边都不满足 → 整表解析出 **0 行** → 连拍 4 帧全废 → 对账失败拒单、exit=1。
+    （`_OCR_PSM` 当时仍是 4，不是 psm 回退；原始文本里 3 行持仓都在，
+      纯粹是解析层「行内」假设吃掉了它们。）
+
+    为什么必须严格（宁可放弃恢复，也不猜）
+    --------------------------------------
+    按顺序配对依赖「两串视觉顺序一致」这一假设。数量不等、代码重复、
+    或任一行不满足 `余额 == 可用 + 冻结` 时，顺序假设就可能错位 ——
+    错位配对的后果比「读不到」严重得多（把 A 的股数记到 B 名下 →
+    账本被污染 → 卖错标的）。因此全部条件必须同时成立，否则返回 {}：
+      · 代码数 ≥2 且与数字行数**完全相等**；代码不得重复；
+      · 每行都能解析出合法数量，且 `qty == available + frozen`。
+    """
+    if len(codes) < 2 or len(codes) != len(rows):
+        return {}
+    if len(set(codes)) != len(codes):
+        return {}
+    out = {}
+    for code, nums in zip(codes, rows):
+        row = _row_from_nums(nums)
+        if not row:
+            return {}
+        if row["qty"] != row["available"] + row["frozen"]:
+            return {}
+        out[code] = row
+    return out
+
+
 def parse_position(text) -> dict:
     """OCR 持仓表 → {code: {qty, available, frozen, cost, price}}。
 
@@ -161,9 +256,16 @@ def parse_position(text) -> dict:
     取「股票余额」为 qty、「成本价」为 cost、「市价」为 price。
     """
     out = {}
+    orphan_codes = []   # 只读到代码、没读到足够数字（疑似「列被竖向拆开」）
+    bare_rows = []      # 只有数字、没有代码
     for ln in text.splitlines():
         m = re.search(r"\b\d{6}\b", ln)
         if not m:
+            # 无代码行：可能是被拆开的「数字列」，留作列拆分兜底的候选
+            if not any(b in ln for b in _BAN_WORDS):
+                ns = _NUM_RE.findall(ln)
+                if len(ns) >= 4:
+                    bare_rows.append(ns)
             continue
         if any(b in ln for b in _BAN_WORDS):
             continue
@@ -194,41 +296,21 @@ def parse_position(text) -> dict:
         #   qty 被读成 500，与资金栏市值偏差 48% → 下单前对账**每天必失败**。
         #   `513100`（纳指ETF国）名称无数字，所以它一直正常 —— 这也是为什么
         #   09-22 之前（持仓是 510880 红利ETF，名称无数字）从未出现。
-        # 处理：删掉「以字母/汉字开头」的连续字母数字串（= 名称），再做数字提取。
-        # 注意必须要求**以字母或汉字开头**，否则会把 `-1098.590` 这类负号数字也删掉。
-        tail = re.sub(r"[A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff]*", " ",
-                      ln.split(code, 1)[-1])
-        nums = re.findall(r"[-+]?\d[\d,]*(?:\.\d+)?", tail)
-        # 持仓行至少要有「股票余额/可用/冻结/成本价」4 个数；数量必须为正。
-        # OCR 抖动会产生 1~2 个数字的碎片行（实测出现过 qty=1/cost=0 的假持仓），
-        # 这类行一旦被当成持仓，会让引擎严重误判仓位。
+        # 处理见 `_row_numbers`：删掉「以字母/汉字开头」的连续字母数字串（= 名称），
+        # 再做数字提取。
+        nums = _row_numbers(ln, code)
         if len(nums) < 4:
+            # 缺数字 → 记下代码，留给「列被竖向拆开」的兜底配对（2026-11-05）
+            orphan_codes.append(code)
             continue
-        # 二级保险：真实持仓必然满足 `股票余额 == 可用 + 冻结`（买入冻结只挪列不改总量）。
-        # 若名称剔除后仍有残留错位，用该约束在候选偏移里选唯一自洽的那个；
-        # 全都对不上（当日 T+1 买入等情形）则退回偏移 0，保持与旧行为一致。
-        def _i(s):
-            return int(float(s.replace(",", "")))
+        row = _row_from_nums(nums)
+        if row is not None:
+            out[code] = row
 
-        off = 0
-        for _k in range(0, min(3, len(nums) - 4) + 1):
-            try:
-                if _i(nums[_k]) == _i(nums[_k + 1]) + _i(nums[_k + 2]):
-                    off = _k
-                    break
-            except (ValueError, IndexError):
-                continue
-        nums = nums[off:]
-        qty = _i(nums[0])
-        if qty <= 0:
-            continue
-        out[code] = {
-            "qty": qty,                                                # 股票余额
-            "available": _i(nums[1]),
-            "frozen": _i(nums[2]),
-            "cost": _to_float(nums[3]),                                # 成本价
-            "price": _to_float(nums[4]) if len(nums) > 4 else None,    # 市价
-        }
+    # 列拆分兜底：仅当主路径一行都没读出来时才启用（混合帧下顺序无法确定，
+    # 强行配对的风险高于收益 —— 见 `_zip_split_columns` 的「为什么必须严格」）。
+    if not out:
+        out.update(_zip_split_columns(orphan_codes, bare_rows))
     return out
 
 

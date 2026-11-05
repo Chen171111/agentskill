@@ -468,6 +468,31 @@ class DailyRunner:
                     # （审计失真）。positions 有 reconcile 兜底，但这里必须留痕。
                     print("[runner] ⚠️ 成交回读失败 {} {}：{}".format(o.code, o.id, e))
 
+        # ⚠️ 成交了、但券商持仓帧里没有该标的（2026-11-05 新增，**仅告警不拦**）
+        # ------------------------------------------------------------------
+        # 11-04 实况：三笔买单全部 readback 确认成交（含 159928 8700 股），
+        # 但下单后的对账帧只读到 2 只 —— 资金栏股票市值 63,054.60 恰好等于
+        # 「另外两只 × 市价」的和，说明**表格本身**当时还没有这只新票，
+        # 不是解析层漏读。结果 positions 少了 159928，净值与账本出现一天缺口。
+        # 成因大概率是「reconcile 早于页面刷新」：回读成交在 reconcile 之后，
+        # 成交瞬间表格尚未重算。下一次对账成功会自动补齐（reconcile 用券商
+        # 真值整表覆盖，本方向不受判据 4 约束）。
+        # 为什么只告警不拦：T+0 标的当日买入又卖出后净持仓为 0，同样「不在
+        # 持仓帧里」；把它当失败会让账本一整天不落库，代价大于收益。
+        if self.broker is not None and not self.dry_run and post_synced:
+            held = set(getattr(self.account, "positions", {}) or {})
+            absent = [o for o in orders
+                      if o.side == "buy"
+                      and (getattr(o, "status", "") == "filled"
+                           or (getattr(o, "filled_qty", 0) or 0) > 0)
+                      and o.code not in held]
+            if absent:
+                print("[runner] ⚠️ 这些买单已成交，但券商持仓帧里没有对应标的：{}".format(
+                    "; ".join("{} {}股".format(o.code, o.filled_qty or o.qty)
+                              for o in absent)))
+                print("          → 多为「对账早于页面刷新」，下次对账会自愈；"
+                      "若次日仍缺，先看 state/diag_pos_*.txt 确认表格里有没有这只。")
+
         # 持久化（dry_run 时全部跳过，保证试算零副作用）
         if not self.dry_run:
             for o in orders:

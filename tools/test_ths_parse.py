@@ -123,6 +123,51 @@ ORDER_OCR_FILLED_NOISY = "\n".join([
 ])
 
 
+# ---- 夹具 8：2026-11-05 实盘原样 OCR（**代码列与数字列被竖向拆开**） ----
+# 事故：当日 14:50 定时（客户端没开）+ 15:28 手动补跑，**两次全废 exit=1**。
+# 手动那次卡在「下单前对账」，连拍 4 帧全部解析出 **0 行持仓**，
+# 而 `state/diag_pos_20261105_153053.txt` 的原始文本里 3 行持仓**全在**。
+# 根因：psm 4（窗口未最大化）按**块**切分表格，代码/名称列与数值列被读成
+# 两组互不相连的行 → `parse_position` 的「同一行内取代码 + ≥4 个数字」假设失效
+# → 整表静默跳过。与 10-30 那次「原始文本也空」是两回事，`_OCR_PSM` 一直是 4。
+# ⚠️ 股数按 1/10 缩放（公开仓库，不写真实账户规模），列拆分结构与成本价保持原样。
+POS_OCR_SPLIT_COLUMNS = "\n".join([
+    '操作 |证券代码 ， 证券名称',
+    '三: 159928 消费ETFC',
+    '三: 510880 ”红利ETF华',
+    '= 511010 ”国债ETF国',
+    '',
+    '汇总',
+    '',
+    '股票余额 | 可用余额 谍结数量 ， 成本价',
+    '',
+    '870                870                      0           0.696',
+    '190       190          0     3.421',
+    '40                 40                    0 141.296',
+    '',
+    '市价',
+    '0.707',
+    '3.348',
+    '',
+    '141.352',
+])
+
+# 同一形态但**不可恢复**的两类：数量不等（顺序假设失效）、行内不自洽（串列）
+POS_OCR_SPLIT_COUNT_MISMATCH = "\n".join([
+    '三: 159928 消费ETFC',
+    '三: 510880 ”红利ETF华',
+    '= 511010 ”国债ETF国',
+    '870                870                      0           0.696',
+    '190       190          0     3.421',
+])
+POS_OCR_SPLIT_INCONSISTENT = "\n".join([
+    '三: 159928 消费ETFC',
+    '三: 510880 ”红利ETF华',
+    '870                870                      0           0.696',
+    '190       880          0     3.421',      # 可用+冻结 ≠ 余额 → 可能串列
+])
+
+
 def check_position_row_with_latin_name():
     """回归：名称被 OCR 读成拉丁串（'C沈鼓'→'Cit'）的持仓行不得被丢弃。"""
     pos = parse_position(POS_OCR)
@@ -154,6 +199,36 @@ def check_position_still_handles_cjk_rows():
            '5416.000   2.84')
     pos = parse_position(txt)
     assert pos["510880"]["qty"] == 1600 and abs(pos["510880"]["cost"] - 3.424) < 1e-6
+
+
+def check_position_split_columns_vertical():
+    """回归：代码列与数字列被 OCR 竖向拆开时，必须按顺序配对恢复（2026-11-05）。
+
+    当天两次运行全废：定时那次是客户端没开；手动补跑卡在对账，
+    连拍 4 帧全解析出 0 行 —— 而原始 OCR 文本里 3 行持仓都在。
+    修好之前，**即使客户端状态正常也永远对不上账**。
+    """
+    pos = parse_position(POS_OCR_SPLIT_COLUMNS)
+    assert set(pos) == {"159928", "510880", "511010"}, \
+        "列拆分帧未恢复：{}".format(sorted(pos))
+    assert pos["159928"] == {"qty": 870, "available": 870, "frozen": 0,
+                             "cost": 0.696, "price": None}, pos["159928"]
+    assert pos["510880"]["qty"] == 190 and abs(pos["510880"]["cost"] - 3.421) < 1e-9
+    assert pos["511010"]["qty"] == 40 and abs(pos["511010"]["cost"] - 141.296) < 1e-9
+    # 恢复出来的帧必须能过帧级校验（否则等于白恢复）
+    assert pos_frame_sane(pos), "恢复后的帧仍被判坏：{}".format(pos)
+    # 市价列同样被拆走 → price 为 None（由行情价兜底，池内标的无影响）
+    assert all(p["price"] is None for p in pos.values())
+
+
+def check_position_split_columns_refuses_when_ambiguous():
+    """兜底不得瞎猜：数量不等 / 行内不自洽时，宁可维持「读不到」。"""
+    assert parse_position(POS_OCR_SPLIT_COUNT_MISMATCH) == {}, \
+        "代码数≠数字行数时不得配对（顺序假设已失效）"
+    assert parse_position(POS_OCR_SPLIT_INCONSISTENT) == {}, \
+        "行内不自洽（可用+冻结≠余额）时不得配对（可能是串列）"
+    # 只有 1 行代码时同样不配对（无冗余可校验）
+    assert parse_position('三: 159928 消费ETFC\n870 870 0 0.696') == {}
 
 
 def check_trades_row_with_latin_name():
@@ -385,6 +460,8 @@ def regression_all() -> int:
     fns = [check_position_row_with_latin_name,
            check_position_ignores_header_summary_junk,
            check_position_still_handles_cjk_rows,
+           check_position_split_columns_vertical,
+           check_position_split_columns_refuses_when_ambiguous,
            check_trades_row_with_latin_name,
            check_pos_frame_sanity,
            check_sanitize_neg_price_isolated,
