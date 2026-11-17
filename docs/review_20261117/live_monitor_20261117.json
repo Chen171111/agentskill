@@ -1,0 +1,49 @@
+{
+  "monitor_mode": "retrospective after quota interruption",
+  "timezone": "Asia/Shanghai",
+  "task": {
+    "State": "Ready",
+    "LastRunTime": "2026-11-17T14:50:00.0000000+08:00",
+    "LastTaskResult": 1,
+    "NextRunTime": "2026-11-18T14:50:00.0000000+08:00"
+  },
+  "orders": {
+    "before": 26,
+    "after": 26,
+    "new": 0,
+    "updated": 0
+  },
+  "strategy_phase_advanced": false,
+  "readiness_after_fix": {
+    "state": "READY",
+    "ok": true,
+    "fallback": "uia",
+    "visible": true,
+    "iconic": false
+  },
+  "tests": {
+    "bits64": {
+      "checks": 40,
+      "safety_tests": 107,
+      "failed": 0,
+      "skipped": 0,
+      "sha256": "398f5fbac6cf5527ae0b960c9412f57ab30f098ecc075b0f3ebe80bbd01e704c"
+    },
+    "bits32": {
+      "checks": 40,
+      "safety_tests": 107,
+      "failed": 0,
+      "skipped": 0,
+      "sha256": "398f5fbac6cf5527ae0b960c9412f57ab30f098ecc075b0f3ebe80bbd01e704c"
+    }
+  },
+  "syntax": {
+    "total": 3630,
+    "errors": 0
+  },
+  "production_sha256": {
+    "tools/ths_trade_up.py": "fbcc404a378908b6a7e0831ca917416830a7081a22234372813bc45334480b21",
+    "tools/test_broker_guards.py": "c428fc23e93f3d332bc789f129ba491670e712a867b073dc5764089cad58416a"
+  },
+  "no_extra_trade_run_by_this_monitor": true
+}

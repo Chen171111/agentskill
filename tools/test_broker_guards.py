@@ -374,6 +374,45 @@ class OrderReadbackTests(unittest.TestCase):
 
 
 class ReadinessTests(unittest.TestCase):
+    def test_direct_script_load_retains_project_imports(self):
+        from importlib.machinery import PathFinder
+        without_project = [p for p in sys.path if Path(p or '.').resolve() != ROOT]
+        with patch.object(sys, 'path', without_project):
+            _load_ui_modules()
+            self.assertIsNotNone(PathFinder.find_spec('trader', sys.path))
+
+    def fallback_for(self, value):
+        fake = types.SimpleNamespace(connect=lambda: None, fetch_balance=lambda: {'cash': value})
+        with patch.dict(sys.modules, {'trader.ths_uia': types.SimpleNamespace(UiaThsBroker=lambda: fake)}):
+            return up._broker_usable()
+
+    def test_fallback_rejects_missing_nonfinite_or_negative_cash(self):
+        for value in (None, float('nan'), float('inf'), -1, '', 'bad'):
+            with self.subTest(value=value):
+                self.assertFalse(self.fallback_for(value)[0])
+
+    def test_fallback_accepts_valid_cash_without_disclosing_amount(self):
+        for value in (0, '123.45'):
+            ok, reason = self.fallback_for(value)
+            self.assertTrue(ok)
+            self.assertNotIn('123.45', reason)
+
+    def test_fallback_connection_exception_stays_unready(self):
+        def fail():
+            raise RuntimeError('synthetic connection failure')
+        fake = types.SimpleNamespace(connect=fail)
+        with patch.dict(sys.modules, {'trader.ths_uia': types.SimpleNamespace(UiaThsBroker=lambda: fake)}):
+            self.assertFalse(up._broker_usable()[0])
+
+    def test_fallback_rechecks_window_after_account_read(self):
+        initial = dict(state='NOT_LOGGED_IN', hwnd=1, visible=True, iconic=False, controls=False)
+        hidden = dict(initial, visible=False)
+        with patch.object(up, 'snapshot', side_effect=[dict(initial), dict(initial), hidden]), \
+             patch.object(up, '_broker_usable', return_value=(True, 'validated')), \
+             patch.object(up, '_log', lambda _: None):
+            result = up.ensure_trade_window(timeout=0, show=False, quiet=True)
+        self.assertFalse(result['ok'])
+
     def test_all_four_controls_are_required(self):
         def found(ids):
             children = {1: 2}

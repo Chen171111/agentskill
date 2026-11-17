@@ -48,6 +48,8 @@ import win32gui
 import win32process
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 STATE = ROOT / "state"
 LOG = STATE / "ths_trade_up.log"
 
@@ -170,8 +172,14 @@ def _broker_usable():
         broker = UiaThsBroker()
         broker.connect()
         bal = broker.fetch_balance() or {}
-        cash = bal.get("cash")
-        return True, "UIA 连接成功且读到资金（可用 {}）".format(cash)
+        import math
+        raw_cash = bal.get("cash")
+        if isinstance(raw_cash, bool):
+            return False, "UIA 可用资金字段不是有效金额"
+        cash = float(raw_cash)
+        if not math.isfinite(cash) or cash < 0:
+            return False, "UIA 可用资金字段缺失或无效"
+        return True, "UIA 连接成功，可用资金字段已通过有限非负校验"
     except Exception as exc:                       # 复核失败也是结论，必须回报
         return False, "UIA 复核失败: {!r}".format(exc)
 
@@ -296,11 +304,18 @@ def ensure_trade_window(timeout=60, show=True, quiet=False):
     if snap["state"] == "NOT_LOGGED_IN":
         ok, why = _broker_usable()
         if ok:
-            snap["state"] = "READY"
-            snap["detail"] = ("控件 ID 探针未命中（当前客户端布局不含 _READY_CTRL_IDS 全集），"
-                              "但 UIA 复核通过 → 判定可用：{}".format(why))
-            snap["fallback"] = "uia"
-            _log("fallback=uia state=READY hwnd={} detail={}".format(snap.get("hwnd"), why))
+            # Account reads can outlast a hide/minimize/close. Recheck the
+            # actual window after the read before promoting it to READY.
+            snap = snapshot()
+            snap["actions"] = actions
+            if snap.get("hwnd") and snap.get("visible") and not snap.get("iconic"):
+                snap["state"] = "READY"
+                snap["detail"] = ("控件 ID 探针未命中（当前客户端布局不含 _READY_CTRL_IDS 全集），"
+                                  "但 UIA 复核通过 → 判定可用：{}".format(why))
+                snap["fallback"] = "uia"
+                _log("fallback=uia state=READY hwnd={} detail={}".format(snap.get("hwnd"), why))
+        else:
+            snap["detail"] = "固定控件探针未齐全；UIA账户复核未通过：" + why
 
     snap["ok"] = (snap["state"] == "READY")
     snap["elapsed"] = round(time.time() - t0, 1)
