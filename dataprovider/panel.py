@@ -5,7 +5,9 @@ import pandas as pd
 
 from .store import DataStore, classify_code
 
-_OCCL_FIELDS = ["open", "high", "low", "close", "volume", "rate"]
+_OCCL_FIELDS = ["open", "high", "low", "close", "volume", "rate",
+                "raw_open", "raw_high", "raw_low", "raw_close",
+                "split_ratio", "split_inferred"]
 
 
 class Panel:

@@ -96,6 +96,7 @@ def main():
 
     rows = []
     skipped = []          # 枚举失败必须留痕（selftest「禁止静默吞异常」纪律）
+    hidden_trade = []     # 标题匹配但**不可见**的交易窗口（2026-11-16 新增）
 
     def cb(hwnd, _):
         # ⚠️ 每个分支都必须 return True（2026-10-23 修复）
@@ -106,8 +107,6 @@ def main():
         # 后果：10-23 19:10 补跑成功的同时，日志仍写着 MISS —— 这份「取证」
         # 反而会把人引向「客户端没开」的错误结论（10-19 的诊断就被它污染过）。
         try:
-            if not u32.IsWindowVisible(hwnd):
-                return True
             n = u32.GetWindowTextLengthW(hwnd)
             if n <= 0:
                 return True
@@ -115,7 +114,15 @@ def main():
             u32.GetWindowTextW(hwnd, buf, n + 2)
             pid = ctypes.c_ulong(0)
             u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-            rows.append((buf.value.strip(), procs.get(int(pid.value), "?"), int(pid.value)))
+            title = buf.value.strip()
+            if not u32.IsWindowVisible(hwnd):
+                # 2026-11-16：交易窗口可能是**隐藏**的（开机自启后没人点出来）。
+                # 以前这里直接 return True 跳过，于是 MISS 既可能是"没开"、
+                # 也可能是"开着但隐藏"—— 两者处置完全不同，必须分开记。
+                if title.startswith(TRADE_PREFIX):
+                    hidden_trade.append((title, procs.get(int(pid.value), "?"), int(pid.value)))
+                return True
+            rows.append((title, procs.get(int(pid.value), "?"), int(pid.value)))
         except Exception as exc:            # 回调里不能抛（会让 EnumWindows 提前中断）
             skipped.append(repr(exc))
         return True
@@ -131,6 +138,11 @@ def main():
         print("[env]   win pid=%-6d exe=%-18s title=%s" % (pid, exe, title[:70]))
     if hit:
         print("[env] trade_window=HIT %d (%s)" % (len(hit), hit[0][2]))
+    elif hidden_trade:
+        # 窗口在、但不可见 —— 交易链路会判"未找到"，必须先显示出来
+        print("[env] trade_window=HIDDEN %d (%s) | title=%s" % (
+            len(hidden_trade), hidden_trade[0][2], hidden_trade[0][0]))
+        print("[env]   → 跑 E:\\Python32\\python.exe tools\\ths_trade_up.py --ensure 可自愈")
     else:
         print("[env] trade_window=MISS")
     return 0

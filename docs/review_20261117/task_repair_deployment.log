@@ -1,0 +1,9 @@
+==============================================================
+  注册 / 修复计划任务: QuantPanorama_DailyRun
+  仓库: E:\MyWorkAndProject\quant\agentskill
+==============================================================
+起始时间 (StartBoundary): 2026-11-17 14:50 Tuesday
+[FAIL] 注册被拒绝: Access is denied.
+
+       若为 Access is denied -> 用 install_schedule.bat 走提权重试，
+       或用任务计划程序 GUI: 操作 -> 导入任务 -> tools\schedule\QuantPanorama_DailyRun.xml

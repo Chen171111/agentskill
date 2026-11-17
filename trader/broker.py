@@ -35,7 +35,7 @@ class Order:
         self.qty = int(qty)       # 股数（A股 100 取整）
         self.price = float(price)
         self.reason = reason
-        self.status = "submitted"  # submitted / filled / rejected / unfilled
+        self.status = "draft"  # intent is not a confirmed broker submission
         self.filled_price = None
         self.filled_qty = 0
         self.fee = 0.0
@@ -43,6 +43,10 @@ class Order:
         # api_est/inferred/unknown = 事后由资金流水或持仓变动推定，价格只能沿用委托价。
         # 空串表示「未成交或尚无成交信息」。存在意义：别把估算的成交价当事实去算滑点。
         self.fill_source = ""
+        self.broker_order_id = ""
+        self.submitted_at = datetime.now().astimezone().isoformat()
+        self.cash_limit = None
+        self.max_notional = None
 
     def to_dict(self):
         return {
@@ -51,11 +55,26 @@ class Order:
             "status": self.status, "filled_price": self.filled_price,
             "filled_qty": self.filled_qty, "fee": round(self.fee, 4),
             "fill_source": self.fill_source,
+            "broker_order_id": self.broker_order_id,
+            "submitted_at": self.submitted_at,
+            "cash_limit": self.cash_limit,
+            "max_notional": self.max_notional,
         }
+
+    @classmethod
+    def from_record(cls, record):
+        order = cls(record["code"], record["side"], record["qty"], record["price"],
+                    record.get("reason", ""))
+        for name in ("id", "status", "filled_price", "filled_qty", "fee", "fill_source",
+                     "broker_order_id", "submitted_at", "cash_limit", "max_notional"):
+            if name in record and record[name] is not None:
+                setattr(order, name, record[name])
+        return order
 
 
 class Broker(abc.ABC):
     """券商抽象基类。"""
+    requires_trading_session = False
 
     def update_quotes(self, prices: dict):
         """更新报价（供撮合类券商使用）。默认无操作，实盘/真实券商无需实现。"""
@@ -102,11 +121,10 @@ class PaperBroker(Broker):
 
         notional = filled * order.qty
         # 佣金（滑点已体现在成交价里，不再重复计费）
-        fee = notional * self.commission_rate
-        fee = max(fee, self.min_commission if order.qty > 0 else 0.0)
-        # 印花税：仅个股卖出收取（ETF/基金免征）
-        if order.side == "sell" and _is_a_stock(order.code):
-            fee += notional * self.sell_tax_rate
+        from .costs import estimate_fee
+        fee = estimate_fee(notional, order.code, order.side == "sell", {
+            "commission_rate": self.commission_rate, "min_commission": self.min_commission,
+            "sell_tax_rate": self.sell_tax_rate})
 
         order.status = "filled"
         order.filled_price = filled
@@ -165,8 +183,8 @@ class ThsBroker(Broker):
     ⚠️ **已弃用（2026-09-29 核实：全仓库无任何调用点）**
     ------------------------------------------------------------------
     新版同花顺是**纯自绘 UI**，easytrader 的 win32 实现适配不了。而且本类
-    `submit()` 有一个**危险假设**：无条件置 `status="filled"` +
-    `filled_qty=order.qty`（把「已报」当「已成」），与真实成交无关。
+    原 `submit()` 曾把「已报」当「已成」。现已关闭此入口，调用立即抛错，
+    不向 easytrader 发送委托。查询方法仅供历史诊断。
 
     `--ths` 实际走 `trader/ths_uia.py::UiaThsBroker`（消息级实现），
     `main.py:_make_broker` 只构造 UiaThsBroker。本类仅作历史留存，
@@ -224,25 +242,8 @@ class ThsBroker(Broker):
         return code.split(".")[0]
 
     def submit(self, order: Order) -> Order:
-        if not self._connected:
-            raise RuntimeError("ThsBroker 未连接，请先调用 connect()")
-        code = self._pure_code(order.code)
-        price = round(order.price, 2)
-        try:
-            if order.side == "buy":
-                self.user.buy(code, price=price, amount=int(order.qty))
-            else:
-                self.user.sell(code, price=price, amount=int(order.qty))
-            order.status = "filled"
-            order.filled_price = price
-            order.filled_qty = int(order.qty)
-            order.fee = 0.0
-            # 回读今日成交，用真实成交价/数量修正订单（替代限价记账，避免账本失真）
-            self.sync_fill(order)
-        except Exception as e:
-            order.status = "rejected"
-            order.reason = "下单失败: {}".format(e)
-        return order
+        """The legacy adapter cannot prove submission identity or fills."""
+        raise RuntimeError("ThsBroker 已停用下单；请使用带回执与成交核验的 UiaThsBroker")
 
     # ---- 账户查询（可选，供状态同步）----
     @property

@@ -67,15 +67,17 @@ def run_backtest(codes, strategy="momentum", start=None, end=None,
     panel.fields["close_full"] = panel_full.get("close")
 
     bench_code = benchmark or codes[0]
-    bench_df = store.read(bench_code, start=start, end=end)
-    bench_close = bench_df["close"].reindex(panel.dates)
+    # Timing consumes the same warmup history as strategy signals. Benchmark
+    # NAV is sliced by the engine; warmup must not be discarded before timing.
+    bench_df = store.read(bench_code, start=warmup_start, end=end)
+    bench_close = bench_df["close"]
 
     engine = BacktestEngine(
         panel, factors, strat, init_cash=init_cash,
         benchmark=bench_close, timing=timing, timing_window=timing_window,
         timing_scale_off=timing_scale_off,
-        benchmark_high=bench_df["high"].reindex(panel.dates) if "high" in bench_df else None,
-        benchmark_low=bench_df["low"].reindex(panel.dates) if "low" in bench_df else None,
+        benchmark_high=bench_df["high"] if "high" in bench_df else None,
+        benchmark_low=bench_df["low"] if "low" in bench_df else None,
         dd_circuit=dd_circuit, vol_target=vol_target,
         stability_min_overlap=stability_min_overlap,
     )

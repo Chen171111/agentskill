@@ -13,6 +13,7 @@ $ErrorActionPreference = 'Continue'
 
 $Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $Bat  = Join-Path $Root 'daily_run.bat'
+. (Join-Path $PSScriptRoot 'task_action.ps1')
 
 $problems = @()
 $notes    = @()
@@ -34,7 +35,7 @@ if (Test-Path -LiteralPath $defPath) {
     }
 } else {
     # 目录 ACL 可能不允许 stat；此时用 Test-Path 也可能为假 -> 交叉验证服务端视图
-    $notes += '磁盘定义文件 Test-Path 为假或不可访问，改用服务端视图交叉验证'
+    $problems += '无法读取磁盘定义，不能证明任务已落盘；服务端视图仅用于补充诊断'
 }
 
 # --- 2. 服务端视图 --------------------------------------------------------
@@ -49,8 +50,10 @@ try {
     $act = ''
     if ($t.Actions.Count -gt 0) { $act = [string]$t.Actions[0].Execute + ' ' + [string]$t.Actions[0].Arguments }
     $notes += ('动作: ' + $act)
-    if ($act -notmatch [regex]::Escape($Bat)) {
-        $problems += ('动作路径不是本仓库的 daily_run.bat（期望含 ' + $Bat + '）')
+    if ($t.Actions.Count -ne 1) {
+        $problems += '任务必须只有一个已核验动作'
+    } else {
+        $problems += @(Test-QuantTaskAction -Root $Root -Action $t.Actions[0])
     }
     if ($t.State -eq 'Disabled') { $problems += '任务已被禁用 (Disabled)' }
 } catch {
@@ -63,6 +66,17 @@ if (-not $svcFound -and $defXml -eq '') {
 
 # --- 3. 关键配置漂移（仅有磁盘定义时逐项比对） ----------------------------
 if ($defXml -ne '') {
+    try {
+        $disk = [xml]$defXml
+        $exec = @($disk.Task.Actions.Exec)
+        if ($exec.Count -ne 1) {
+            $problems += '磁盘定义必须只有一个执行动作'
+        } else {
+            $diskAction = @{ Execute = [string]$exec[0].Command; Arguments = [string]$exec[0].Arguments; WorkingDirectory = [string]$exec[0].WorkingDirectory }
+            $problems += @(Test-QuantTaskAction -Root $Root -Action $diskAction)
+        }
+    } catch { $problems += ('磁盘动作解析失败: ' + $_.Exception.Message) }
+
     $checks = @(
         @{ re = '<StartWhenAvailable>true';          why = 'StartWhenAvailable != true（错过 14:50 不会补跑）' },
         @{ re = '<DisallowStartIfOnBatteries>false'; why = 'DisallowStartIfOnBatteries != false（电池下不跑）' },

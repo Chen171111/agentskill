@@ -1,0 +1,25 @@
+{
+  "copy_validated": true,
+  "applied": true,
+  "no_trading_calls": true,
+  "tables_checked": 6,
+  "backup": "state\\ledger_backups\\pre_audit_repair_20261117_103937.db",
+  "unchanged_tables": 6,
+  "changed_existing_rows": 0,
+  "new_columns": {
+    "orders": [
+      "broker_order_id",
+      "cash_limit",
+      "max_notional",
+      "submitted_at"
+    ],
+    "equity": [],
+    "sqlite_sequence": [],
+    "positions": [
+      "available",
+      "frozen"
+    ],
+    "state": [],
+    "shadow_weights": []
+  }
+}

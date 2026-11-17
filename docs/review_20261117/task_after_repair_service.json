@@ -1,0 +1,12 @@
+{
+  "Execute": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+  "Arguments": "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"E:\\MyWorkAndProject\\quant\\agentskill\\tools\\run_scheduled.ps1\"",
+  "WorkingDirectory": "E:\\MyWorkAndProject\\quant\\agentskill",
+  "ActionCount": 1,
+  "State": "Ready",
+  "NextRunTime": "2026-11-17T14:50:00.0000000+08:00",
+  "LastRunTime": "2026-11-16T14:50:00.0000000+08:00",
+  "LastTaskResult": 0,
+  "LogonType": "Interactive",
+  "RunLevel": "Limited"
+}

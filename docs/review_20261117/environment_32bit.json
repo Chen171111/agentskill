@@ -1,0 +1,240 @@
+{
+  "observed_at_host": "2026-11-17T00:50:08.194895+08:00",
+  "executable": "E:\\Python32\\python.exe",
+  "python": "3.10.11 (tags/v3.10.11:7d4cc5a, Apr  5 2023, 00:20:04) [MSC v.1929 32 bit (Intel)]",
+  "bits": 32,
+  "platform": "Windows-10-10.0.26100-SP0",
+  "environment": {
+    "PYTHON32": null,
+    "PYTHON64": null,
+    "PYTHONUTF8": null,
+    "PYTHONIOENCODING": null
+  },
+  "dependencies": {
+    "numpy": {
+      "ok": true,
+      "version": "1.26.4"
+    },
+    "pandas": {
+      "ok": true,
+      "version": "2.0.3"
+    },
+    "akshare": {
+      "ok": false,
+      "error": "ModuleNotFoundError: No module named 'akshare'"
+    },
+    "win32gui": {
+      "ok": true,
+      "version": "312"
+    },
+    "win32con": {
+      "ok": true,
+      "version": "312"
+    },
+    "win32process": {
+      "ok": true,
+      "version": "312"
+    },
+    "pywinauto": {
+      "ok": true,
+      "version": "0.6.6"
+    },
+    "PIL": {
+      "ok": true,
+      "version": "12.3.0"
+    },
+    "pytesseract": {
+      "ok": true,
+      "version": "0.3.13"
+    },
+    "fastapi": {
+      "ok": false,
+      "error": "ModuleNotFoundError: No module named 'fastapi'"
+    },
+    "uvicorn": {
+      "ok": false,
+      "error": "ModuleNotFoundError: No module named 'uvicorn'"
+    },
+    "trader.ths_uia": {
+      "ok": true
+    }
+  },
+  "windows": {
+    "own_session": 1,
+    "processes_enumerated": 445,
+    "processes_not_queryable": 172,
+    "related_processes": [
+      {
+        "pid": 21536,
+        "exe": "D:\\同花顺软件\\同花顺\\hexinhelper.exe",
+        "session": 1,
+        "wow64": true
+      }
+    ],
+    "top_windows_enumerated": 503,
+    "trade_windows": [],
+    "project_readiness_snapshot": {
+      "hwnd": null,
+      "visible": false,
+      "iconic": false,
+      "controls": false,
+      "procs": [],
+      "n_windows": 0,
+      "state": "MISSING_PROC",
+      "detail": "交易客户端 xiadan.exe 不在运行"
+    }
+  },
+  "ocr": {
+    "configured_command": "tesseract",
+    "resolved_exe": "E:\\Tesseract-OCR\\tesseract.EXE",
+    "--version": {
+      "exit_code": 0,
+      "output": "tesseract v5.5.0.20241111\n leptonica-1.85.0\n  libgif 5.2.2 : libjpeg 8d (libjpeg-turbo 3.0.4) : libpng 1.6.44 : libtiff 4.7.0 : zlib 1.3.1 : libwebp 1.4.0 : libopenjp2 2.5.2\n Found AVX2\n Found AVX\n Found FMA\n Found SSE4.1\n Found libarchive 3.7.7 zlib/1.3.1 liblzma/5.6.3 bz2lib/1.0.8 liblz4/1.10.0 libzstd/1.5.6\n Found libcurl/8.11.0 Schannel zlib/1.3.1 brotli/1.1.0 zstd/1.5.6 libidn2/2.3.7 libpsl/0.21.5 libssh2/1.11.0"
+    },
+    "--list-langs": {
+      "exit_code": 0,
+      "output": "List of available languages in \"E:\\Tesseract-OCR/tessdata/\" (4):\nchi_sim\nchi_sim_vert\neng\nosd"
+    }
+  },
+  "cached_data": {
+    "today_host_local": "20261117",
+    "calendar_rows": 8797,
+    "calendar_last": "20261231",
+    "latest_closed_by_project_definition": "20261116",
+    "total_codes": 11,
+    "observations": [
+      {
+        "code": "510300.SH",
+        "rows": 3515,
+        "latest": "20261113",
+        "fresh": false,
+        "duplicate_dates": 0,
+        "invalid_price_cells": 0
+      },
+      {
+        "code": "510500.SH",
+        "rows": 3318,
+        "latest": "20261113",
+        "fresh": false,
+        "duplicate_dates": 0,
+        "invalid_price_cells": 0
+      },
+      {
+        "code": "510050.SH",
+        "rows": 5280,
+        "latest": "20261113",
+        "fresh": false,
+        "duplicate_dates": 0,
+        "invalid_price_cells": 0
+      },
+      {
+        "code": "159915.SZ",
+        "rows": 3623,
+        "latest": "20261113",
+        "fresh": false,
+        "duplicate_dates": 0,
+        "invalid_price_cells": 0
+      },
+      {
+        "code": "159928.SZ",
+        "rows": 3197,
+        "latest": "20261113",
+        "fresh": false,
+        "duplicate_dates": 0,
+        "invalid_price_cells": 0
+      },
+      {
+        "code": "159920.SZ",
+        "rows": 3416,
+        "latest": "20261113",
+        "fresh": false,
+        "duplicate_dates": 0,
+        "invalid_price_cells": 0
+      },
+      {
+        "code": "513100.SH",
+        "rows": 3229,
+        "latest": "20261113",
+        "fresh": false,
+        "duplicate_dates": 0,
+        "invalid_price_cells": 0
+      },
+      {
+        "code": "513500.SH",
+        "rows": 3117,
+        "latest": "20261113",
+        "fresh": false,
+        "duplicate_dates": 0,
+        "invalid_price_cells": 0
+      },
+      {
+        "code": "518880.SH",
+        "rows": 3232,
+        "latest": "20261113",
+        "fresh": false,
+        "duplicate_dates": 0,
+        "invalid_price_cells": 0
+      },
+      {
+        "code": "510880.SH",
+        "rows": 4816,
+        "latest": "20261113",
+        "fresh": false,
+        "duplicate_dates": 0,
+        "invalid_price_cells": 0
+      },
+      {
+        "code": "511010.SH",
+        "rows": 3305,
+        "latest": "20261113",
+        "fresh": false,
+        "duplicate_dates": 0,
+        "invalid_price_cells": 0
+      }
+    ]
+  },
+  "state": {
+    "last_run.json": {
+      "ts": "2026-11-16 14:50:09",
+      "date": "20261116",
+      "mode": "scheduled",
+      "ok": false,
+      "exit_code": 1,
+      "attempts": 4,
+      "rebalanced": null,
+      "skipped": null
+    },
+    "last_run_manual.json": {
+      "ts": "2026-11-16 15:34:15",
+      "date": "20261116",
+      "mode": "manual",
+      "ok": true,
+      "exit_code": 0,
+      "attempts": 1,
+      "rebalanced": false,
+      "skipped": null
+    },
+    "ALERT.txt": {
+      "exists": false,
+      "bytes": null
+    },
+    "ALERT_manual.txt": {
+      "exists": false,
+      "bytes": null
+    },
+    "DATA_ALERT.txt": {
+      "exists": false,
+      "bytes": null
+    },
+    "ledger": {
+      "orders_by_status": {
+        "filled": 23,
+        "unfilled": 3
+      },
+      "last_order_ts": "2026-11-13 14:55:53",
+      "equity_rows": 36,
+      "latest_equity_date": "20261113",
+      "position_rows": 2
+    }
+  }
+}

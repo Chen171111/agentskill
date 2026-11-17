@@ -1,0 +1,674 @@
+{
+  "production_python": {
+    "baseline_total": 82,
+    "changed": [
+      "account\\portfolio.py",
+      "backtest\\account.py",
+      "backtest\\engine.py",
+      "dataprovider\\adjust.py",
+      "dataprovider\\calendar.py",
+      "dataprovider\\panel.py",
+      "dataprovider\\store.py",
+      "factors\\registry.py",
+      "main.py",
+      "pipeline.py",
+      "scheduler\\runner.py",
+      "storage\\db.py",
+      "strategies\\base.py",
+      "strategies\\builtin.py",
+      "tools\\daily_job.py",
+      "tools\\desktop_stock_smoke.py",
+      "tools\\selftest.py",
+      "tools\\test_pos_ok.py",
+      "tools\\test_quant_desktop.py",
+      "tools\\test_ths_parse.py",
+      "tools\\ths_trade_up.py",
+      "trader\\broker.py",
+      "trader\\execution.py",
+      "trader\\ths_parse.py",
+      "trader\\ths_uia.py"
+    ],
+    "added": [
+      "risk\\timing.py",
+      "storage\\lock.py",
+      "strategies\\eligibility.py",
+      "tools\\regression_safety.py",
+      "tools\\test_broker_guards.py",
+      "tools\\test_execution_reliability.py",
+      "tools\\test_runtime_safety.py",
+      "tools\\test_strategy_integrity.py",
+      "tools\\trading_session.py",
+      "trader\\costs.py"
+    ],
+    "current_total": 92,
+    "sha256": {
+      "account\\__init__.py": "777ce4ae37047612e07301ee17079b909348731127299c04d7f16f2d4ef62da6",
+      "account\\portfolio.py": "af5fcdd40d76be37e626f92c65cfb1f9d2bc5c7fb4c314443cbae848889dab46",
+      "analysis\\__init__.py": "af2b47fd7211d9a9ece240851c795d517cb2bdaf5cfae24dd92c1b91584afded",
+      "analysis\\metrics.py": "9c4a49b58f47bd4d263ed4619b2c25c5b839141625fe2551223155678eee6366",
+      "backtest\\__init__.py": "95a83d056bd192a26cc7152f400d7d4a46ebf132496287810457e0dc7e5ce44b",
+      "backtest\\account.py": "739e7d26c3dd7a08e9a1ce361ea9722f8150c07578d2e86f56befcfac240c40a",
+      "backtest\\engine.py": "5e36e8fdf9cfc0f7efcd53f80586302b8804e1491a1017133dd1c48eea2b0216",
+      "config.py": "1ab7c1ec12b3ebecba3bbd94b1c63862a1d6d599781498ad20a8a2790f793cb8",
+      "dataprovider\\__init__.py": "65354b39203982b4b8ccc9231431431bc2b29d736a1708203593d39f18877d96",
+      "dataprovider\\adjust.py": "9a199c99025081c95eff5d35f3b7afa9c41a75862fcb37e974c1f20ffd6df782",
+      "dataprovider\\altdata.py": "dac61680301d8ce4272369dcfe26f180b57136930a48bd545e367c8fefb4b54f",
+      "dataprovider\\calendar.py": "a0120e037cfa5ab0bf71f8dc58d067df16a7bdec222e59c97467fac282b3790f",
+      "dataprovider\\panel.py": "521db11486c4a3f5b11bf769e4b555c365f670289d9e6976d88de6639a4776ba",
+      "dataprovider\\store.py": "968cb072e7e5463b37e01ece4a19e5497e421e1e926f748ec963b61698c6223d",
+      "desktop\\__init__.py": "cc23673aaea786d74e1e79999a98657e630df2cdd82f62356bc5e02749ac62b3",
+      "desktop\\app.py": "dea3bf0d26412c6e60ab211c91c625717833d177ab1453013b01e4d676f2bb24",
+      "desktop\\service.py": "99d8c571519d7ff377cabb26ab4592f4260a28515f55f1fba8fc13dded99cf9b",
+      "desktop\\worker.py": "c259971bcdc3c673ac7afc9266354db73172821aee51d9ff46269ccba9d30dc0",
+      "factors\\__init__.py": "bca62de9a0f781f1072fedb87bc0773d377504fb630a97a93a0dab3e501b0ee8",
+      "factors\\engine.py": "ea8c9b20275c1b012dc571896a5e7ff4f262ce79bc46f32cce65f84301b5946b",
+      "factors\\registry.py": "e90e5d0adaab66cd52310c6a8fcebbeea6df13b69688a6a24e8342e456ff9190",
+      "main.py": "06ad2af2780200199cff3a995a468e0fc338e580e8653d5110b3c1527e06d2ec",
+      "pipeline.py": "1608ce16e37de04d54e320dbe926723d580161c29d2582e8255181cdf70aca1c",
+      "quant_desktop.py": "4f82c99470094d8980af1bbc4276b7889ee70bee011deaed9e1fdd9a0b57cfa9",
+      "risk\\__init__.py": "32ba31dad6d6bf0135d1513bc3192bddc036d9913e481b6994319c1db17b43c9",
+      "risk\\manager.py": "fc32c978b80608acb53227509a7cb2d83405912010d9f38365747eed732c6dd9",
+      "risk\\portfolio.py": "ad0d6657b9b4b030ad44953cdc5420a58d02200c7c068eeb135f89ea0903616d",
+      "risk\\timing.py": "4505703c68f1a6c143465f00feb75007c393c78150bb7990ffac4febf5868d58",
+      "scheduler\\__init__.py": "7c11a91060d5a9686c5ee11a7b125ec948f9411aea32bfd3c94ac28042714566",
+      "scheduler\\runner.py": "abead56297a7fa68b3c7a2b007664a7fb2839ffe6da6740fb4321c525e1b455a",
+      "server.py": "168136cdc4028a4d332b937dc30b72227d758ddffb833b107234bd1689b5abd1",
+      "storage\\__init__.py": "7eb7bb69705f41dddead72ca72e4dc3e6c96de9d885688dcaaf09b9507ec680c",
+      "storage\\db.py": "b2f8bec474ee0f9f56a1274b8f7410ebaaf2e8d8617e47d671592e2812b454fe",
+      "storage\\lock.py": "9f9f1109b444aa8e7638dfc8ace3e032480c72940da1efbc5ea16ffbf7eccd3b",
+      "strategies\\__init__.py": "c0e5890361acaa1334ff1d375bbac74f70a858b8a1a2f4f1de60433d5721093f",
+      "strategies\\base.py": "1f17f759e6d5c5944b02b86e641257421fe536e0f6639a398fd9e7e2a7c84346",
+      "strategies\\builtin.py": "b8568a1cda25a53c6df4b8ecb51215ba48a5852c346a316cdf62e4e2ff5d392e",
+      "strategies\\eligibility.py": "addc10884ccd190495aecb3b7c16fa83698dadc098a6f3d538e1b7b27c2389c8",
+      "strategies\\registry.py": "54b06dd95af8c45c8aa64831c6be9b447b9e98276cbcfb0e2015a4a43199af2c",
+      "test_uia_order.py": "a14949378023b91651dde8891d9edef7d78330075c939dfa7d339af83cd7095f",
+      "tools\\attribute_etf_return.py": "98dfcd434f138413f144f9e5e1aa4ede20948a2be36005ddd36604fd78ee0436",
+      "tools\\audit_doc_commands.py": "92120eeed158c575104b169a9e0ce9d45b8809f614c1585c9aa667e7ee33fee0",
+      "tools\\backfill_equity.py": "76348b1601ecea7b0bc8c7a7157b7864212c9c1b41897c9adda0e09c419d52b8",
+      "tools\\check_alerts.py": "6c130aa0b4115be71625e0a3ffa61b8bcb511f90e7fe001c0614a9749e6ec9ca",
+      "tools\\cmp_split_criterion_impact.py": "33ae1c7cecf3b06166fa31d9f585712a28473bdcda533911b7d2c1e9e392efcd",
+      "tools\\cmp_split_impact.py": "554723c02beab2b289fe9aacf91f74eb3b596dbc3ae2150a840c4e366f63e9c7",
+      "tools\\compare_bigorder.py": "cef42a9be80d5b53cb749f57a59c0449e5b5d498e7dfe2025c708a4e133bd2ce",
+      "tools\\daily_job.py": "1e7112f7bda942cc569c55aeae706e6c665d483c0260423e8411255422ec7a74",
+      "tools\\desktop_stock_smoke.py": "7d78de93c855383dfce4e185925acd218939556d4f3f853ff6937546b7111ca2",
+      "tools\\diag_etf_pool_attribution.py": "a436068b16ead9a22388dba75671050b2d646fc2cbafa3b82f99701ee8de44d8",
+      "tools\\diag_price_anomalies.py": "9f57e9d49e44f0e3ce579802de63cf3bf63e8c2b632fb231e608a483e8eb007e",
+      "tools\\diag_risk_controls.py": "5616bfc6f7b65c2ed2434b47e0bf4bf74276a01cc4bb542d26a4b864940ec0ad",
+      "tools\\diag_split_limit_criterion.py": "ff20291504e86e29f334581f7172a2517e54e5841a78593e378b29f3dd5db3ec",
+      "tools\\diag_ths_balance.py": "2eb4f3640de48a4f3b7101d90f5d419eebd42a578a14229368e3a904db75b3be",
+      "tools\\diag_ths_position.py": "1994e162573ad793b12c1395ce5c0b0c7b5c0e85094fca8e5c66dd65829771e0",
+      "tools\\faber_binding_diag.py": "dd54b6290201c8bc77bfb3d6b8cc5f89ede5ad1c6ccd88a8b2bf610c5f825e58",
+      "tools\\faber_long_sample.py": "6f259aa48b63e80523aa678fec93bf55069d878d23e1741927da90562dba1ceb",
+      "tools\\faber_shadow_report.py": "4b65defc9c00253e000a48798431764d0f0cd71a79d1bf892c0af77c480cffc4",
+      "tools\\limit_rules.py": "0096bbca9f76ecd7f99d310b8ed1235ca04aa04f355e05df9c860653308c351e",
+      "tools\\mail_alert.py": "e69d0b128b8f48a1fa2571bc87132095daa1b0360e64b938ef177370bf06fc0e",
+      "tools\\probe_env.py": "395de9f90e9b4ac0e85de45f1664bdda846a70d1109acef5efdfb392abef65e9",
+      "tools\\probe_split_thresh.py": "a0f346634f053c6093217a34e5a87017216a9f4d1ab805f66ea9e830ec4edbb3",
+      "tools\\refresh_data.py": "05375ce6b5514580c5955d4e9bc5c76518348537e6f71a7b4eed17a3a3a8920c",
+      "tools\\regression_safety.py": "f9b77c10b8a4fa0e79a2ab690f0bea4f9ab16a6f748106cfbaa1714e908523bb",
+      "tools\\repair_etf_adjust.py": "b7d609830f9c6b9b7354fbbb60bbd5d27557c3a985915f160d70814d91e13b3a",
+      "tools\\reproduce_faber_validation.py": "822f2f05ed6435ea2435982dcc1adaa82a124f900358cc2a4748b9292042343e",
+      "tools\\robust_bigorder.py": "fcc7f8bc8bd31c0cdb2bead7b2c32f4b1513b3c3dbb97a5c990ccb38f8b789bb",
+      "tools\\rolling_faber_decision.py": "469a464d33cf23f1a6bfe852c328db42a16fc8119aa115b47163aba7ccc3f331",
+      "tools\\scan_return_bands.py": "7c8f630f8eb3038f01e6d5b1cc413ee237384c6e3d82a22e7729ca0e8c4587b4",
+      "tools\\selftest.py": "460cf48d723b3c68cc2a555d3721217304c5b6f3b0a5901b26fed96a515a3c7d",
+      "tools\\sweep_etf_pool_expand.py": "70ccf5618a8994987f10bebb1c2a1cce2ccbdcd2d87285cf5292956e56838f5c",
+      "tools\\sweep_etf_pool_fair.py": "9befabf420fa7bf267fa01e8d22fb274fc118a47047491db8a6188e0eaabcee3",
+      "tools\\sweep_pool_rolling.py": "a055a30c2df170b14d1058c5412077e81ac222be1710efed271072c7f6702f93",
+      "tools\\test_broker_guards.py": "6ff9e96ccb3ef19d76ac2cb95b126c43583efddfd48e25b132379a259906f8d6",
+      "tools\\test_etf_defensive_sleeve.py": "fe4e860abf8422bd3672cd24bc63d71d7fdc7ca06baa4bad60a8d11512b343aa",
+      "tools\\test_etf_realcost.py": "6429eecc3d0bcb08005172090713945d1549edac5e705a889543bcfeff61edb3",
+      "tools\\test_execution_reliability.py": "1b8e0643a436ccdc8e21b39e4fe899027e6f2252ba2b4b8cd9d2802b6b8383f5",
+      "tools\\test_pos_ok.py": "6777e058800ded4da813849bd98237f6be9cd0bd3c513182b110c352d4443b1c",
+      "tools\\test_quant_desktop.py": "5ac26bf0215469f22b7bb8cb5f536569896108d13fcb0aff82a89e0a7bd792f1",
+      "tools\\test_runtime_safety.py": "6e0985dd5b995d0a43195944bf8f6ecb9408b80330e53df0406167add658704b",
+      "tools\\test_strategy_integrity.py": "a7e4a68327b0037ae0559b2316212d252ea64e840c47cfd462b53f7cf8d187a8",
+      "tools\\test_ths_parse.py": "d14cf5c2670973f31ced89b1c54091bbd31524e16b8fbc9b55ad5b1dcbd4df42",
+      "tools\\ths_dump_tree.py": "765016dd87b4757e62c3b05166b123af4e481a944f6051c0fe986f908c55e207",
+      "tools\\ths_trade_up.py": "342569f2541defd8afacb5db151b7e76a09c9b2fa2d2940dbff4a32f03ede82e",
+      "tools\\trading_session.py": "d3fa02404c31a844760a11f1eb1aa634eb31fd57261e9b82602f6a050e7d5b83",
+      "tools\\verify_p0_fix_20261015.py": "355769e7fa3e0d6bc660d4abf6f6040ec0a60192abcc857ce7cebfd4e3865721",
+      "trader\\__init__.py": "bfe42f5ad4245c7cf6991b5671f343371bee51dbdd6c3223cf04a3a6d29f9137",
+      "trader\\broker.py": "e68fe0618a574e5cf9365c8f7b4d50b4a4c48a5fd5a77149142e96fabd25d60f",
+      "trader\\costs.py": "1ee4f6dfa3314166fbbaa83efba63cfeefd2f6f7fdaffc7f1d26981a8b475a2a",
+      "trader\\execution.py": "a17d5a3fe23caceb7e4139e4cfac2e7a985e159e5d5e1cb97b24662f065a77fe",
+      "trader\\ths_parse.py": "3df0d29aae39d97e976f91511387f194b407ac48bf4a3891aa7e2f2a5e140f19",
+      "trader\\ths_uia.py": "917c20fde57488c76ccbeb61be08c6f1b35cea9ba7e74adb12b1280617115331"
+    }
+  },
+  "syntax": {
+    "total": 3629,
+    "errors": 0
+  },
+  "encoding": {
+    "total": 48,
+    "files": {
+      "README.md": {
+        "bytes": 26449,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 395,
+        "bare_lf": 0
+      },
+      "account\\portfolio.py": {
+        "bytes": 5626,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 125
+      },
+      "backtest\\account.py": {
+        "bytes": 8840,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 199
+      },
+      "backtest\\engine.py": {
+        "bytes": 12062,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 230
+      },
+      "daily_run.bat": {
+        "bytes": 3870,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 70,
+        "bare_lf": 0
+      },
+      "dataprovider\\adjust.py": {
+        "bytes": 20204,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 363
+      },
+      "dataprovider\\calendar.py": {
+        "bytes": 2911,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 81
+      },
+      "dataprovider\\panel.py": {
+        "bytes": 2653,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 76
+      },
+      "dataprovider\\store.py": {
+        "bytes": 12234,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 286
+      },
+      "factors\\registry.py": {
+        "bytes": 3367,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 104
+      },
+      "install_schedule.bat": {
+        "bytes": 4292,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 101,
+        "bare_lf": 0
+      },
+      "main.py": {
+        "bytes": 17391,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 364
+      },
+      "pipeline.py": {
+        "bytes": 4702,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 95
+      },
+      "requirements-ths.txt": {
+        "bytes": 448,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 10
+      },
+      "requirements.txt": {
+        "bytes": 314,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 8
+      },
+      "risk\\timing.py": {
+        "bytes": 3463,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 79
+      },
+      "run_desktop.bat": {
+        "bytes": 151,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 7
+      },
+      "scheduler\\runner.py": {
+        "bytes": 39570,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 684
+      },
+      "start_web.bat": {
+        "bytes": 965,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 20
+      },
+      "storage\\db.py": {
+        "bytes": 16378,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 307
+      },
+      "storage\\lock.py": {
+        "bytes": 1097,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 32
+      },
+      "strategies\\base.py": {
+        "bytes": 4284,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 107
+      },
+      "strategies\\builtin.py": {
+        "bytes": 25810,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 525,
+        "bare_lf": 0
+      },
+      "strategies\\eligibility.py": {
+        "bytes": 943,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 27
+      },
+      "tools/schedule/QuantPanorama_DailyRun.xml": {
+        "bytes": 3822,
+        "utf16": true,
+        "utf8_bom": false,
+        "crlf": 49,
+        "bare_lf": 0
+      },
+      "tools/schedule/check_task.ps1": {
+        "bytes": 6547,
+        "utf16": false,
+        "utf8_bom": true,
+        "crlf": 0,
+        "bare_lf": 135
+      },
+      "tools/schedule/register_task.ps1": {
+        "bytes": 7563,
+        "utf16": false,
+        "utf8_bom": true,
+        "crlf": 0,
+        "bare_lf": 151
+      },
+      "tools/schedule/task_action.ps1": {
+        "bytes": 869,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 20
+      },
+      "tools/ths_autostart.ps1": {
+        "bytes": 6037,
+        "utf16": false,
+        "utf8_bom": true,
+        "crlf": 0,
+        "bare_lf": 143
+      },
+      "tools/ths_keepvisible.ps1": {
+        "bytes": 2748,
+        "utf16": false,
+        "utf8_bom": true,
+        "crlf": 0,
+        "bare_lf": 62
+      },
+      "tools\\daily_job.py": {
+        "bytes": 19617,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 414
+      },
+      "tools\\desktop_stock_smoke.py": {
+        "bytes": 2220,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 56
+      },
+      "tools\\regression_safety.py": {
+        "bytes": 1019,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 35
+      },
+      "tools\\selftest.py": {
+        "bytes": 78367,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 1395,
+        "bare_lf": 0
+      },
+      "tools\\test_broker_guards.py": {
+        "bytes": 20355,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 410
+      },
+      "tools\\test_execution_reliability.py": {
+        "bytes": 17529,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 336
+      },
+      "tools\\test_pos_ok.py": {
+        "bytes": 13510,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 272
+      },
+      "tools\\test_quant_desktop.py": {
+        "bytes": 7612,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 167
+      },
+      "tools\\test_runtime_safety.py": {
+        "bytes": 20649,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 359
+      },
+      "tools\\test_strategy_integrity.py": {
+        "bytes": 16881,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 344
+      },
+      "tools\\test_ths_parse.py": {
+        "bytes": 27859,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 489
+      },
+      "tools\\ths_trade_up.py": {
+        "bytes": 13123,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 326
+      },
+      "tools\\trading_session.py": {
+        "bytes": 1658,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 40
+      },
+      "trader\\broker.py": {
+        "bytes": 15576,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 391
+      },
+      "trader\\costs.py": {
+        "bytes": 699,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 18
+      },
+      "trader\\execution.py": {
+        "bytes": 5020,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 113
+      },
+      "trader\\ths_parse.py": {
+        "bytes": 24633,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 503
+      },
+      "trader\\ths_uia.py": {
+        "bytes": 76399,
+        "utf16": false,
+        "utf8_bom": false,
+        "crlf": 0,
+        "bare_lf": 1521
+      }
+    }
+  },
+  "tasks": {
+    "definitions_checked": 5,
+    "definitions": [
+      {
+        "name": "\\QuantPanorama_DailyRun",
+        "readable": true,
+        "changed": true
+      },
+      {
+        "name": "\\QuantSelect_PaperTrack",
+        "readable": true,
+        "changed": false
+      },
+      {
+        "name": "\\QuantSelect_RefreshData",
+        "readable": true,
+        "changed": false
+      },
+      {
+        "name": "\\THS-AutoStart",
+        "readable": true,
+        "changed": false
+      },
+      {
+        "name": "\\THS-KeepVisible",
+        "readable": true,
+        "changed": false
+      }
+    ],
+    "action_fields_match_service": 3,
+    "old_leaves": 27,
+    "new_leaves": 38,
+    "all_leaf_changes": [
+      {
+        "field": "/Task/Actions/Exec/Arguments",
+        "before": "--headless cmd.exe /c \"E:\\MyWorkAndProject\\quant\\agentskill\\daily_run.bat\"",
+        "after": "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"E:\\MyWorkAndProject\\quant\\agentskill\\tools\\run_scheduled.ps1\""
+      },
+      {
+        "field": "/Task/Actions/Exec/Command",
+        "before": "C:\\Windows\\System32\\conhost.exe",
+        "after": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+      },
+      {
+        "field": "/Task/Principals/Principal/RunLevel",
+        "before": null,
+        "after": "LeastPrivilege"
+      },
+      {
+        "field": "/Task/Principals/Principal/UserId",
+        "before": "S-1-5-21-1017583895-2847980918-1557695864-1001",
+        "after": "ALEXSIB66\\XiaoQi"
+      },
+      {
+        "field": "/Task/Settings/AllowHardTerminate",
+        "before": null,
+        "after": "true"
+      },
+      {
+        "field": "/Task/Settings/AllowStartOnDemand",
+        "before": null,
+        "after": "true"
+      },
+      {
+        "field": "/Task/Settings/DisallowStartOnRemoteAppSession",
+        "before": null,
+        "after": "false"
+      },
+      {
+        "field": "/Task/Settings/Enabled",
+        "before": null,
+        "after": "true"
+      },
+      {
+        "field": "/Task/Settings/Hidden",
+        "before": null,
+        "after": "false"
+      },
+      {
+        "field": "/Task/Settings/Priority",
+        "before": null,
+        "after": "7"
+      },
+      {
+        "field": "/Task/Settings/RunOnlyIfIdle",
+        "before": null,
+        "after": "false"
+      },
+      {
+        "field": "/Task/Settings/RunOnlyIfNetworkAvailable",
+        "before": null,
+        "after": "false"
+      },
+      {
+        "field": "/Task/Settings/WakeToRun",
+        "before": null,
+        "after": "false"
+      },
+      {
+        "field": "/Task/Triggers/CalendarTrigger/Enabled",
+        "before": null,
+        "after": "true"
+      },
+      {
+        "field": "/Task/Triggers/CalendarTrigger/StartBoundary",
+        "before": "2026-10-06T14:50:00+08:00",
+        "after": "2026-11-17T06:50:00Z"
+      }
+    ],
+    "not_started": true
+  },
+  "tests": {
+    "64bit": {
+      "checks": 40,
+      "safety_tests": 102,
+      "desktop_tests": 10,
+      "exit_code": 0,
+      "log_sha256": "13e0f7c04996634086502bbbaef0874f21b1ad02b8b6334db49d43b47a6ad5eb"
+    },
+    "32bit": {
+      "checks": 40,
+      "safety_tests": 102,
+      "desktop_tests": 10,
+      "exit_code": 0,
+      "log_sha256": "13e0f7c04996634086502bbbaef0874f21b1ad02b8b6334db49d43b47a6ad5eb"
+    },
+    "native_child_encoding": {
+      "checks": 40,
+      "safety_tests": 102,
+      "desktop_tests": 10,
+      "exit_code": 0,
+      "log_sha256": "13e0f7c04996634086502bbbaef0874f21b1ad02b8b6334db49d43b47a6ad5eb"
+    }
+  },
+  "ledger": {
+    "copy_validated": true,
+    "applied": true,
+    "no_trading_calls": true,
+    "tables_checked": 6,
+    "backup": "state\\ledger_backups\\pre_audit_repair_20261117_103937.db",
+    "unchanged_tables": 6,
+    "changed_existing_rows": 0,
+    "new_columns": {
+      "orders": [
+        "broker_order_id",
+        "cash_limit",
+        "max_notional",
+        "submitted_at"
+      ],
+      "equity": [],
+      "sqlite_sequence": [],
+      "positions": [
+        "available",
+        "frozen"
+      ],
+      "state": [],
+      "shadow_weights": []
+    }
+  },
+  "backtests": {
+    "source": "local CSV cache; no refresh",
+    "inputs": {
+      "data\\stocks\\159915.SZ.csv": "6546db5190c71f48ff7c819e9e9d026a336c9cd022881b1d30dca6000e12213e",
+      "data\\stocks\\159920.SZ.csv": "18685d3188c32b1b4a670cec4f7474d3eeed217945a87c0e8ac91c53105db84f",
+      "data\\stocks\\159928.SZ.csv": "4d18cd6a9d152ee51baeeb8eb0818cdd7d8347eeef0612735d26916b443bd2eb",
+      "data\\stocks\\159949.SZ.csv": "9f59337c3e3a8bc43c3d4a510dab868fe9aafe776d82e6bc95995df67f7b7c4a",
+      "data\\stocks\\510050.SH.csv": "95b0b1aca21ffaa54be1b7d8775ba907cfbfa016e7ea4937b760bf164146309a",
+      "data\\stocks\\510300.SH.csv": "c822ac0e393b36d84f9453b88d0c8914bf1cc6fc75c85ef1cc458a43018306f5",
+      "data\\stocks\\510500.SH.csv": "a372482db0ae3dc448ab46c05045f278ba171b957622c534617350f8afc3aa19",
+      "data\\stocks\\510880.SH.csv": "fe3c2b94dd280cddbe5e733c78c3927e0f3036267654c385b360ee5856891892",
+      "data\\stocks\\511010.SH.csv": "475d0e9d92a446ab568937fb9e5ee1c5cdb8cc5d892cd482f4c93c18d6478a58",
+      "data\\stocks\\512010.SH.csv": "1ee1f06c4925b18dfde9ad8a5cf8233b20ae43b849ac715ab87444e844ec282e",
+      "data\\stocks\\512100.SH.csv": "1d5fe1b8568e9717af07ed8bb84121af7640e5509067c9d73ecff164c0578f78",
+      "data\\stocks\\512170.SH.csv": "e5465fec9413aeeb10e076164df234376fb7180e298d42284615f7e914dc9df7",
+      "data\\stocks\\512660.SH.csv": "0387cd51e4af742dd3014f34a4d0effa16ff3aa4208aee0c6417dc7cad746cd8",
+      "data\\stocks\\512690.SH.csv": "2858364599791c01dd8f0590f104dfd4a608f4fa99a998e237bbbf244eb3034a",
+      "data\\stocks\\512800.SH.csv": "c118b43e4e57f6f3e718955c9101839ccf735fbfd75053f8af19a97c26129c2c",
+      "data\\stocks\\512880.SH.csv": "aa294c9bef98c5976447ea627118eb6475e40aa73fa5890bd198b90249d1a15b",
+      "data\\stocks\\513100.SH.csv": "461135ad77febc995076c656ea99dbd28be35770944ba8cabebf0f777b53ff5c",
+      "data\\stocks\\513500.SH.csv": "a97c154bdcbf5cbfc9279dae1b64964c7fbff991f8a4ffcd7dcc071ed0f5217a",
+      "data\\stocks\\515030.SH.csv": "1b1420309f181d6e754d739fe87f05931662ce13ed28e59a9b947986e1b928f1",
+      "data\\stocks\\518880.SH.csv": "11f67048d2255525eabb9ff635311b50eb01cff72cefb2e48e22ad6cf59e9c69"
+    },
+    "unchanged_inputs": 20,
+    "completed_runs": 9,
+    "cash_observations": 12696,
+    "minimum_virtual_cash": 8743.018526025153,
+    "split_ratios": "jump-inferred unless CSV supplies explicit split_ratio; approximate"
+  },
+  "actual_orders_submitted": 0
+}

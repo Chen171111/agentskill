@@ -7,12 +7,20 @@ import config
 
 
 class TradeDB:
-    def __init__(self, db_path=None):
+    def __init__(self, db_path=None, read_only=False):
         self.db_path = str(db_path) if db_path else str(config.DB_PATH)
-        self._init_schema()
+        self.read_only = read_only
+        if not read_only:
+            self._init_schema()
 
     def _conn(self):
         self.db_path_parent = __import__("pathlib").Path(self.db_path).parent
+        if self.read_only:
+            from pathlib import Path
+            conn = sqlite3.connect(Path(self.db_path).resolve().as_uri() + "?mode=ro", uri=True, timeout=10)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only=ON")
+            return conn
         self.db_path_parent.mkdir(parents=True, exist_ok=True)
         # timeout=10 + WAL（2026-10-03 验收修复顺手项 Q-09）：daily_job 与
         # 手动重入/面板并发时等待锁而非立即抛 database is locked；
@@ -142,6 +150,25 @@ class TradeDB:
             ocols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
             if ocols and "fill_source" not in ocols:
                 c.execute("ALTER TABLE orders ADD COLUMN fill_source TEXT DEFAULT ''")
+            for name, definition in (("broker_order_id", "TEXT DEFAULT ''"),
+                                     ("submitted_at", "TEXT DEFAULT ''"),
+                                     ("cash_limit", "REAL"), ("max_notional", "REAL")):
+                if name not in ocols:
+                    c.execute("ALTER TABLE orders ADD COLUMN " + name + " " + definition)
+            for name in ("available", "frozen"):
+                if name not in pcols:
+                    c.execute("ALTER TABLE positions ADD COLUMN " + name + " INTEGER")
+
+    def run_lock(self):
+        from .lock import ledger_lock
+        return ledger_lock(self.db_path)
+
+    def unresolved_orders(self):
+        with self._session() as c:
+            rows = c.execute("SELECT * FROM orders WHERE status IN "
+                             "('pending_submit','submitted','unknown','error','partially_filled') "
+                             "ORDER BY ts, id").fetchall()
+        return [dict(r) for r in rows]
 
     def save_order(self, order):
         # ⚠️ 必须写**显式列名**（2026-10-30）：`INSERT INTO orders VALUES (?,?,…)`
@@ -150,12 +177,15 @@ class TradeDB:
             c.execute(
                 "INSERT OR REPLACE INTO orders "
                 "(id, ts, code, side, qty, price, reason, status, "
-                " filled_price, filled_qty, fee, fill_source) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " filled_price, filled_qty, fee, fill_source, broker_order_id, submitted_at, cash_limit, max_notional) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (order.id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), order.code,
                  order.side, order.qty, order.price, order.reason, order.status,
                  order.filled_price, order.filled_qty, order.fee,
-                 getattr(order, "fill_source", "") or ""),
+                  getattr(order, "fill_source", "") or "",
+                  getattr(order, "broker_order_id", "") or "",
+                  getattr(order, "submitted_at", "") or "",
+                  getattr(order, "cash_limit", None), getattr(order, "max_notional", None)),
             )
 
     def save_equity(self, date: str, cash: float, market_value: float, total: float,
@@ -178,15 +208,19 @@ class TradeDB:
             c.execute("DELETE FROM positions")
             for code, p in positions.items():
                 c.execute(
-                    "INSERT OR REPLACE INTO positions VALUES (?,?,?,?,?)",
-                    (code, p["qty"], p["cost"], p["peak"], p.get("mark", 0.0)),
+                    "INSERT OR REPLACE INTO positions "
+                    "(code,qty,cost,peak,mark,available,frozen) VALUES (?,?,?,?,?,?,?)",
+                    (code, p["qty"], p["cost"], p["peak"], p.get("mark", 0.0),
+                     p.get("available"), p.get("frozen")),
                 )
 
     def load_positions(self) -> dict:
         with self._session() as c:
             rows = c.execute("SELECT * FROM positions").fetchall()
         return {r["code"]: {"qty": r["qty"], "cost": r["cost"],
-                            "peak": r["peak"], "mark": r["mark"] or 0.0}
+                            "peak": r["peak"], "mark": r["mark"] or 0.0,
+                            "available": r["available"] if "available" in r.keys() else None,
+                            "frozen": r["frozen"] if "frozen" in r.keys() else None}
                 for r in rows}
 
     def load_latest_equity(self) -> dict:

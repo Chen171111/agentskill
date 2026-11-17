@@ -185,18 +185,17 @@ def check_normal():
 
 
 def check_nan_price_rejected():
-    """场景 8（2026-09-29 新增）：行情价 NaN/inf 必须拒单。
-
-    nan 的比较运算**全部返回 False** —— 不挡它，判据 3（5% 闸门）和判据 4
-    （幽灵分支/市值反证）会全部静默放行（本场景修复前实测：五个判据全"通过"），
-    nan 还会经 reconcile 写进账本（cost/mark=nan → 市值/净值全污染）。
-    入口闸门在 runner（prices isfinite），这里是校验器本体的最后一道防线。
-    """
+    """Invalid quotes can use a corroborated OCR mark, never the position cost."""
     for bad in (float("nan"), float("inf"), float("-inf")):
         px = dict(P_LIVE)
         px["513100.SH"] = bad
-        assert not B._pos_ok(POS_LIVE, BAL_LIVE, px, OLD_LIVE), \
-            "行情价 {!r} 必须拒单（nan/inf 会穿透全部判据）".format(bad)
+        assert B._pos_ok(POS_LIVE, BAL_LIVE, px, OLD_LIVE), \
+            "Finite OCR mark must replace invalid external quote"
+        for mark in (None, 0, float("nan"), float("inf")):
+            unreadable = {code: dict(p) for code, p in POS_LIVE.items()}
+            unreadable["513100"]["price"] = mark
+            assert not B._pos_ok(unreadable, BAL_LIVE, px, OLD_LIVE), \
+                "No finite positive quote or OCR mark must fail closed"
 
 
 def check_neg_price_with_quotes_accepted():

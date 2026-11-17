@@ -3,7 +3,10 @@
 自动化交易核心闭环：
     目标权重(target) --对比--> 当前持仓(actual) --差异--> 订单 --broker--> 成交 --apply_fill--> 账户
 """
+import math
+import config
 from .broker import Broker, PaperBroker, Order
+from .costs import estimate_fee
 
 
 def _round_lot(qty: int) -> int:
@@ -12,83 +15,99 @@ def _round_lot(qty: int) -> int:
 
 
 class ExecutionEngine:
-    def __init__(self, broker: Broker = None):
+    def __init__(self, broker: Broker = None, on_order=None):
         self.broker = broker or PaperBroker()
+        self.on_order = on_order
+
+    def _record(self, order):
+        if self.on_order is not None:
+            self.on_order(order)
+
+    def _submit(self, order, account):
+        if getattr(self.broker, "requires_trading_session", False):
+            from tools.trading_session import require_trading_session
+            require_trading_session()
+        order.status = "pending_submit"
+        self._record(order)  # durable intent BEFORE any external side effect
+        try:
+            self.broker.submit(order)
+        except BaseException as exc:
+            if order.status == "rejected":
+                order.reason = "{} [已拒绝:{}]".format(order.reason, str(exc)[:150])
+            else:
+                order.status = "unknown"
+                order.reason = "{} [提交结果未知:{}]".format(order.reason, str(exc)[:150])
+            self._record(order)
+            if not isinstance(exc, Exception):
+                raise
+        else:
+            if order.status == "filled":
+                account.apply_fill(order, order.filled_price)
+            self._record(order)
+        return order
+
+    def _terms(self):
+        return {key: getattr(self.broker, key, config.TRADING_COST[key])
+                for key in ("commission_rate", "min_commission", "sell_tax_rate")}
 
     def rebalance(self, account, target_weights: dict, prices: dict) -> list:
-        """根据目标权重与当前持仓，生成并执行订单。返回成交订单列表。
-
-        参数
-        ----
-        account        : PortfolioAccount
-        target_weights : {code: weight}（权重和 <= 1，其余现金）
-        prices         : {code: 最新价}
-        """
+        """Submit journaled sells, then size buys using confirmed available cash."""
+        for code, weight in target_weights.items():
+            if not math.isfinite(float(weight)) or weight < 0:
+                raise ValueError("目标权重必须是有限非负数: {}".format(code))
+        if sum(target_weights.values()) > 1.00000001:
+            raise ValueError("目标权重之和不能超过1")
         self.broker.update_quotes(prices)
         equity = account.total_equity(prices)
-        if equity <= 0:
+        if not math.isfinite(equity) or equity <= 0:
             return []
-
-        orders = []
         target_mv = {c: equity * w for c, w in target_weights.items() if w > 0}
-
-        # 先卖出不在目标或需减仓的
-        sell_proceeds = 0.0          # 预估卖出回款（未扣费，保守）
-        for code in list(account.positions.keys()):
-            cur_qty = account.position_qty(code)
-            if cur_qty <= 0:
-                continue
-            tgt_mv = target_mv.get(code, 0.0)
-            px = prices.get(code, 0.0)
-            cur_mv = cur_qty * px
-            if cur_mv > tgt_mv:
-                sell_mv = cur_mv - tgt_mv
-                sell_qty = _round_lot(int(sell_mv / px)) if px > 0 else 0
-                if sell_qty > 0:
-                    orders.append(Order(code, "sell", sell_qty, px, reason="减仓/清仓"))
-                    sell_proceeds += sell_qty * px
-
-        # 再买入需加仓的
-        # ⚠️ cash_left 逐单扣减（2026-09-29）：真实券商 submit() 只返回
-        # submitted、不当场成交，account.cash 在**整批订单生成期间不会变**——
-        # 多笔买单都按交易前现金核算会**超配**（ broker 拒单/部分成交，
-        # 策略目标失真）。卖出回款按 A 股当日可用计入预算（先卖后买的提交
-        # 顺序也保证这一点）； PaperBroker 路径同样受益（宁少勿超）。
-        cash_left = account.cash + sell_proceeds
-        for code, tgt_mv in target_mv.items():
-            cur_qty = account.position_qty(code)
-            px = prices.get(code, 0.0)
-            if px <= 0:
-                continue
-            cur_mv = cur_qty * px
-            if tgt_mv > cur_mv:
-                buy_mv = min(tgt_mv - cur_mv, cash_left)
-                buy_qty = _round_lot(int(buy_mv / px))
-                if buy_qty > 0:
-                    # 现金不足时按整手收敛（1.001 含费用缓冲）
-                    while buy_qty > 0 and buy_qty * px * 1.001 > cash_left:
-                        buy_qty -= 100
-                    if buy_qty > 0:
-                        cash_left -= buy_qty * px * 1.001
-                        orders.append(Order(code, "buy", buy_qty, px, reason="加仓/建仓"))
-
-        # 提交执行（逐单隔离，2026-10-02 验收修复 P1-4）
         placed = []
-        for o in orders:
-            try:
-                self.broker.submit(o)
-            except Exception as e:
-                # 逐单隔离：任一单 submit 抛异常不得中断整批 —— 否则已提交到券商的
-                # 订单既不返回也不落库（runner 的 save_order 只保存返回的 placed），
-                # 表现为「既丢单又可能在下次运行重复下单」。
-                # ⚠️ submit 抛异常 ≠ 委托未报出：UiaThsBroker 是「先点确认、再读回执」，
-                # 超时/读回执失败时委托可能已在券商侧成立 → 必须保留订单、标记 error，
-                # 让台账留下「报过但状态未知」的痕迹，由 sync_fill/reconcile 事后澄清。
-                o.status = "error"
-                o.reason = "{} [submit异常:{}]".format(o.reason or "", str(e)[:150]).strip()
-            if o.status == "filled":
-                # 本地撮合（PaperBroker）：立即计入账户
-                account.apply_fill(o, o.filled_price)
-            # 无论终态如何一律返回（rejected/error 同样是发生过的事实，必须落台账）
-            placed.append(o)
+        for code, position in list(account.positions.items()):
+            px = prices.get(code, 0.)
+            if not math.isfinite(px) or px <= 0:
+                continue
+            qty = account.position_qty(code)
+            available = position.get("available")
+            if available is None:
+                available = max(0, qty - int(position.get("frozen") or 0))
+            target = target_mv.get(code, 0.)
+            if qty * px > target:
+                wanted = qty if target == 0 else _round_lot(int((qty * px - target) / px))
+                sell_qty = min(wanted, max(0, int(available)), qty)
+                if sell_qty:
+                    order = self._submit(Order(code, "sell", sell_qty, px, "减仓/清仓"), account)
+                    placed.append(order)
+                    if order.status == "unknown":
+                        return placed
+        # A submitted sale is not buying power. Only broker truth / filled cash counts.
+        if placed and hasattr(self.broker, "reconcile"):
+            if not self.broker.reconcile(account, prices):
+                raise RuntimeError("卖出后购买力对账失败，停止买入")
+        cash_left = float(account.cash)
+        terms = self._terms()
+        for code, target in target_mv.items():
+            px = prices.get(code, 0.)
+            if not math.isfinite(px) or px <= 0:
+                continue
+            remaining = target - account.position_qty(code) * px
+            if remaining <= 0 or cash_left <= 0:
+                continue
+            slip = self.broker.slippage_rate if isinstance(self.broker, PaperBroker) else 0.
+            fill = px * (1 + slip)
+            qty = _round_lot(int(min(remaining, cash_left) / fill))
+            while qty > 0 and (fill * qty + estimate_fee(fill * qty, code, cost=terms)) > cash_left:
+                qty -= 100
+            if qty <= 0:
+                continue
+            order = Order(code, "buy", qty, px, "加仓/建仓")
+            order.cash_limit = cash_left
+            order.max_notional = remaining
+            cost = fill * qty + estimate_fee(fill * qty, code, cost=terms)
+            self._submit(order, account)
+            placed.append(order)
+            if order.status not in ("rejected", "cancelled"):
+                cash_left -= cost
+            if order.status == "unknown":
+                break
         return placed

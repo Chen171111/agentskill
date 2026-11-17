@@ -5,7 +5,7 @@ import pandas as pd
 
 import config
 
-from .adjust import repair_frame          # 份额折算自动复权（读取时生效）
+from .adjust import prepare_signal_frame  # Causal signals + original executable quotes
 
 # 指数代码 -> akshare symbol
 _AK_SYMBOL_MAP = {
@@ -252,16 +252,10 @@ class DataStore:
         return refreshed
 
     def read(self, code: str, start=None, end=None):
-        # ⚠️ PIT 修复（2026-10-15，历史选股前视缺陷）：
-        # 原顺序是「读全量 CSV → 全量复权 → 算 rate → 最后才按 end 截断」。
-        # 份额折算复权（adjust.repair_splits）会把**跳变日之前**的整段价格
-        # 乘上跳变比率 —— 若该跳变（折算）发生在回测截止日 **end 之后**，
-        # 等于用截止日之后才发生的事件修改截止日之前的历史价格：
-        # 未来信息直接改变历史选股（实测 ETF全球池、截止 2025-12-31：
-        # 仅用截止日已知数据前三名含 512480.SH，全量路径第三名变成
-        # 588170.SH）。MACD 因子按绝对价差计算，对该缩放敏感。
-        # 修法：先按 end 截断、再复权、再算 rate；缓存键带 end，
-        # 不同截止各复权一次，互不串味。
+        # End-keyed cache retains only information available by that endpoint.
+        # prepare_signal_frame then scales only an event's effective day and
+        # later dates; raw_* always retains original cached executable quotes.
+        # Appending future events cannot change any earlier signal or quote.
         key = (code, str(end) if end else None)
         if key in self._cache:
             df = self._cache[key].copy()
@@ -277,21 +271,16 @@ class DataStore:
             df.sort_index(inplace=True)
             if end:
                 df = df[df.index <= str(end)]
-            # ⚠️ 份额折算自动复权 —— **必须在算 rate 之前**，且只允许使用
-            # 截止日已知的数据（截断已在上面完成）。
-            # 为什么放在读取时而不是下载后：`refresh()` 会用 akshare 的**原始未复权**
-            # 全量历史覆盖 CSV，一次性打补丁会被下次刷新静默回退
-            # （2026-09-16 真实事故：09-13 修好的 4 处，09-16 刷新后全部复发，
-            #   回测年化 3.47% → 2.35%，差 1.12pp/年）。
-            # 放在这里 → 无论文件被覆盖多少次，策略读到的永远连续；且**幂等**。
-            if self.repair_splits:
-                df, n_fix, _ = repair_frame(
-                    df, code, log_path=self.split_log,
-                    limit_aware=(self.split_criterion == "limit"))
-                if n_fix:
-                    print("[DataStore] {} 份额折算自动复权 {} 处"
-                          .format(code, n_fix), flush=True)
-            df["rate"] = df["close"].pct_change()
+            # Split events are processed before rate calculation. Historical
+            # CSVs remain untouched; explicit metadata is exact, jump-inferred
+            # conversion factors are marked approximate (split_inferred=1).
+            df, n_fix = prepare_signal_frame(
+                df, code, enabled=self.repair_splits, log_path=self.split_log,
+                limit_aware=(self.split_criterion == "limit"))
+            if n_fix:
+                print("[DataStore] {} 份额折算因果复权 {} 处"
+                      .format(code, n_fix), flush=True)
+            df["rate"] = df["close"].pct_change(fill_method=None)
             self._cache[key] = df.copy()
         if start:
             df = df[df.index >= str(start)]

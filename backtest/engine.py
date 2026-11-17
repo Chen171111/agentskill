@@ -8,6 +8,8 @@ import config
 from .account import BacktestAccount
 from dataprovider.store import classify_code
 from risk.portfolio import PortfolioRisk
+from risk.timing import timing_scale
+from strategies.eligibility import filter_positive_momentum
 
 _TRADING_DAYS = getattr(config, "TRADING_DAYS_PER_YEAR", 244)
 
@@ -50,72 +52,26 @@ class BacktestEngine:
                                       if stability_min_overlap else None)
         self._last_codes = None                     # 上一调仓期的标的集合
         self._nav_history = []                      # 组合净值历史（用于组合层风控）
-        self._timing_ma = None
-        self._timing_mom = None
-        self._timing_rsrs = None
-        self._timing_bias = None
-        if timing and benchmark is not None and len(benchmark) > timing_window:
-            bc = benchmark.dropna()
-            if timing == "ma20":
-                self._timing_ma = bc.rolling(timing_window).mean()
-            elif timing == "abs_mom":
-                self._timing_mom = bc / bc.shift(timing_window) - 1
-            elif timing == "rsrs":
-                self._timing_rsrs = self._build_rsrs(
-                    benchmark, benchmark_high, benchmark_low, timing_window)
-            elif timing == "bias":
-                # BIAS 温度计：大盘 20 日乖离率，用于多档仓位调度
-                ma = bc.rolling(timing_window).mean()
-                self._timing_bias = (bc - ma) / ma
-
-    def _build_rsrs(self, close, high, low, window):
-        if high is None or low is None:
-            return None
-        bh, bl = high.dropna(), low.dropna()
-        if len(bh) < window + 2:
-            return None
-        hi, lo = bh.values, bl.values
-        N = max(5, min(window, len(bh) - 2))
-        beta = [np.nan] * len(bh)
-        for i in range(N, len(bh)):
-            beta[i] = np.polyfit(lo[i - N:i], hi[i - N:i], 1)[0]
-        alpha = pd.Series(beta, index=bh.index)
-        M = max(N * 2, 20)
-        return (alpha - alpha.rolling(M).mean()) / alpha.rolling(M).std()
+        self.benchmark_high = benchmark_high
+        self.benchmark_low = benchmark_low
 
     def _timing_scale(self, date) -> float:
-        if (self._timing_ma is None and self._timing_mom is None
-                and self._timing_rsrs is None and self._timing_bias is None):
-            return 1.0
-        if self._timing_rsrs is not None:
-            z = self._timing_rsrs.get(date)
-            if z is None or z != z:
-                return 1.0
-            return 1.0 if z > 0 else self.timing_scale_off
-        if self._timing_bias is not None:
-            # BIAS 温度计多档仓位（聚宽"坦克300"思想）：
-            # 大盘极端深跌→空仓；均线下方→减仓；均线上方→满仓
-            b = self._timing_bias.get(date)
-            if b is None or b != b:
-                return 1.0
-            if b <= -0.08:
-                return 0.0
-            if b <= -0.05:
-                return 0.3
-            if b <= 0:
-                return 0.5
-            return 1.0
-        if self._timing_ma is not None:
-            c = self._timing_ma.get(date)
-            if c is None or c != c:
-                return 1.0
-            return 1.0 if self.benchmark.get(date, 0) > c else self.timing_scale_off
-        if self._timing_mom is not None:
-            c = self._timing_mom.get(date)
-            if c is None or c != c:
-                return 1.0
-            return 1.0 if c > 0 else self.timing_scale_off
-        return 1.0
+        close = self.panel.get("close_full")
+        if close is None:
+            close = self.panel.get("close")
+        high = self.benchmark_high
+        low = self.benchmark_low
+        if high is None:
+            high = self.panel.get("high_full")
+            if high is None:
+                high = self.panel.get("high")
+        if low is None:
+            low = self.panel.get("low_full")
+            if low is None:
+                low = self.panel.get("low")
+        return timing_scale(self.timing, date, close, high, low,
+                            benchmark=self.benchmark, window=self.timing_window,
+                            scale_off=self.timing_scale_off)
 
     def _portfolio_risk_scale(self) -> float:
         """组合层风控（调仓日应用）：回撤熔断 + 波动率目标，返回 0~1 仓位系数（共享 PortfolioRisk）。"""
@@ -169,10 +125,18 @@ class BacktestEngine:
 
     def run(self) -> BacktestResult:
         dates = self.panel.dates
-        close = self.panel.get("close")
-        open_ = self.panel.get("open")
+        close = self.panel.get("raw_close")
+        if close is None:
+            close = self.panel.get("close")
+        open_ = self.panel.get("raw_open")
+        if open_ is None:
+            open_ = self.panel.get("open")
         volume = self.panel.get("volume")
+        splits = self.panel.get("split_ratio")
         prev_close = close.shift(1) if close is not None else None
+        if prev_close is not None and splits is not None:
+            # Today's exchange limit reference is expressed in post-split units.
+            prev_close = prev_close / splits.reindex_like(close).fillna(1.)
 
         bench_nav = None
         if self.benchmark is not None:
@@ -183,6 +147,8 @@ class BacktestEngine:
         holdings = {}
         pending = None  # 上一交易日收盘决策的目标权重，今日开盘成交
         for date in dates:
+            # Corporate actions precede next-open orders, including stale marks.
+            self.acc.apply_splits(self._row(splits, date))
             close_px = self._row(close, date)
             open_px = self._row(open_, date)
             buy_blocked, sell_blocked = self._blocked(date, open_px, prev_close, volume)
@@ -203,6 +169,8 @@ class BacktestEngine:
 
             # 3) 今日收盘后决策（生成下一开盘的调仓目标）
             weights = self.strategy.generate_weights(date, self.factors, self.panel)
+            if getattr(self.strategy, "positive_momentum_filter", False):
+                weights = filter_positive_momentum(weights, self.factors, date)
             # 【单标的上限】2026-10-02 验收修复（P1-2）：策略的 max_weight 此前
             # 赋值后全仓无读取（死参数）——README §四 把「单标的上限」列为风控
             # 组件，但回测链路完全没有单标的约束，风险平价路径在标的少/低波动

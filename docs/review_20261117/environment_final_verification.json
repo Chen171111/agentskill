@@ -1,0 +1,56 @@
+{
+  "businessPython": {
+    "mismatches": 0,
+    "total": 82
+  },
+  "environmentSources": {
+    "mismatches": 0,
+    "total": 10,
+    "paths": [
+      "daily_run.bat",
+      "tools/ths_autostart.ps1",
+      "tools/ths_keepvisible.ps1",
+      "tools/schedule/register_task.ps1",
+      "tools/schedule/check_task.ps1",
+      "tools/schedule/QuantPanorama_DailyRun.xml",
+      "requirements.txt",
+      "requirements-ths.txt",
+      "run_desktop.bat",
+      "start_web.bat"
+    ]
+  },
+  "taskDefinitions": {
+    "mismatches": 0,
+    "total": 5
+  },
+  "installedExecutables": [
+    {
+      "path": "D:/同花顺软件/同花顺/xiadan.exe",
+      "bytes": 87283424,
+      "peMachine": "14c"
+    },
+    {
+      "path": "D:/同花顺软件/同花顺/hexin.exe",
+      "bytes": 17400096,
+      "peMachine": "14c"
+    }
+  ],
+  "offlineProbes": {
+    "python32": {
+      "reproduced": 9,
+      "total": 9
+    },
+    "python64": {
+      "reproduced": 9,
+      "total": 9
+    }
+  },
+  "existingSelftest": {
+    "pass": 39,
+    "total": 39,
+    "fail": 0,
+    "skip": 0,
+    "childEnvironment": "PYTHONUTF8=1"
+  },
+  "noActualOrders": true
+}

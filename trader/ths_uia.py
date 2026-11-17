@@ -23,6 +23,8 @@ import time
 import ctypes
 import logging
 import math
+import re
+from datetime import datetime
 from threading import Lock
 
 import win32gui
@@ -90,6 +92,8 @@ class UiaThsBroker(Broker):
 
     # 「操作」列读不出的一次性告警开关（见 sync_fill）。类属性便于测试重置。
     _side_warned = False
+    requires_trading_session = True
+    orders_valid_for_day = True
 
     def __init__(self, exe_path=None, use_market_price=True):
         self._hwnd = None
@@ -107,20 +111,51 @@ class UiaThsBroker(Broker):
 
     # ================= 连接 =================
     @staticmethod
-    def _find_trade_hwnd():
-        found = []
+    def _find_trade_hwnd(show_hidden=True):
+        """定位交易窗口；**找不到可见窗口时，把隐藏的拉出来**。
+
+        2026-11-16 事故：同花顺开机自启后 `xiadan.exe` 的窗口可能是**隐藏**的
+        （`IsWindowVisible=False`，自启动日志实测：
+        `trade window: 网上股票交易系统5.0 | visible=False iconic=False`）。
+        旧实现只认可见窗口 → 14:50 的定时任务连续 4 次 connect 失败
+        （每次 120 秒，空转约 6 分钟后放弃），当日白丢一个交易日。
+        窗口明明在、也登录着，只是"没人把它显示出来"。
+
+        现在：先找可见的（无副作用）；一个都没有时，把隐藏/最小化的显示出来再返回。
+        不调 `SetForegroundWindow` —— 无人值守时抢焦点是副作用，而本模块
+        全走消息级操作，并不需要窗口在前台。
+        """
+        visible, hidden = [], []
 
         def cb(h, _):
             try:
-                if not win32gui.IsWindowVisible(h):
-                    return
                 t = (win32gui.GetWindowText(h) or "").strip()
                 if t == _TRADE_TITLE or t.startswith(_TITLE_PREFIX):
-                    found.append(h)
+                    (visible if win32gui.IsWindowVisible(h) else hidden).append(h)
             except Exception:
                 pass
+            return True          # ⚠️ 必须返回 True，否则 EnumWindows 会提前终止
+
         win32gui.EnumWindows(cb, None)
-        return found[0] if found else None
+        if visible:
+            return visible[0]
+        if not hidden or not show_hidden:
+            return None
+
+        for h in hidden:
+            try:
+                win32gui.ShowWindow(h, win32con.SW_RESTORE
+                                    if win32gui.IsIconic(h) else win32con.SW_SHOW)
+            except Exception:
+                continue
+            for _ in range(10):          # 同花顺窗口有自绘初始化，给一点映射时间
+                if win32gui.IsWindowVisible(h):
+                    print("[ths] 交易窗口原本是隐藏的，已自动显示（hwnd={}）"
+                          "—— 开机自启后没人点出来的情况".format(h))
+                    return h
+                time.sleep(0.2)
+        return None
+
 
     def connect(self, exe_path=None, retries=2):
         self._exe_path = exe_path or self._exe_path
@@ -459,26 +494,50 @@ class UiaThsBroker(Broker):
         return None, []
 
     def _confirm_dialog(self, dlg, expect_code=None, expect_qty=None, order=None):
-        """核对弹窗内容并点「是(Y)」。返回 (ok, 弹窗文本)。
-
-        真实委托价以弹窗为准（市价模式下我方不写价格框，价格由客户端带入），
-        核对通过后回填到 order，保证台账记录的是真实报单价。
-        """
+        """Confirm only an exact, complete and valid order read from the dialog."""
         txt = self._read_confirm_text(dlg)
         info = parse_confirm_text(txt)
-
-        if expect_code and expect_code not in txt:
-            # 弹窗内容与预期不符 → 点「否」放弃
+        code = str(expect_code or (order.code if order else "")).split(".")[0]
+        qty = expect_qty if expect_qty is not None else (order.qty if order else None)
+        side = {"buy": "buy", "sell": "sell", "买入": "buy", "卖出": "sell"}.get(
+            order.side if order else None)
+        price = self._f(info.get("price"))
+        valid = (bool(code) and info.get("code") == code and side is not None
+                 and info.get("side") == side and qty is not None
+                 and info.get("qty") == qty and qty > 0
+                 and price is not None and price > 0)
+        if valid and not self.use_market_price:
+            # ETFs/funds quote in 0.001; mainland equities quote in 0.01.
+            tick = 0.001 if code.startswith(("1", "5")) else 0.01
+            expected = self._f(order.price)
+            valid = (expected is not None and expected > 0
+                     and abs(price - expected) <= tick / 2 + 1e-12)
+        if valid and side == "buy":
+            notional = price * qty
+            cash_limit = getattr(order, "cash_limit", None)
+            max_notional = getattr(order, "max_notional", None)
+            if cash_limit is not None:
+                from .costs import estimate_fee
+                limit = self._f(cash_limit)
+                valid = (limit is not None and limit >= 0
+                         and notional + estimate_fee(notional, order.code) <= limit + 1e-8)
+            if max_notional is not None:
+                limit = self._f(max_notional)
+                valid = valid and limit is not None and limit >= 0 and notional <= limit + 1e-8
+        if not valid:
             self._click_dialog_button(dlg, _CONFIRM_NO)
             return False, txt
-        if expect_qty is not None and info.get("qty") is not None \
-                and int(info["qty"]) != int(expect_qty):
+        # Form filling and dialog rendering can cross lunch/close.  Recheck at
+        # the actual commit point, after reading and validating the dialog.
+        from tools.trading_session import require_trading_session
+        try:
+            require_trading_session()
+        except RuntimeError as exc:
             self._click_dialog_button(dlg, _CONFIRM_NO)
-            return False, txt
+            return False, txt + "\n时段校验拒绝: " + str(exc)
         if not self._click_dialog_button(dlg, _CONFIRM_YES):
             return False, txt
-        if order is not None and info.get("price"):
-            order.price = float(info["price"])
+        order.price = price
         return True, txt
 
     def _click_dialog_button(self, dlg, prefixes):
@@ -494,7 +553,7 @@ class UiaThsBroker(Broker):
         return False
 
     def _dismiss_info(self, timeout=3.0):
-        """点掉「委托已成功提交」之类的提示框（交易窗口拥有的顶层弹窗）。"""
+        """Capture the broker receipt before closing it; no receipt means unknown."""
         t0 = time.time()
         while time.time() - t0 < timeout:
             for h in self._owned_top_windows():
@@ -504,12 +563,21 @@ class UiaThsBroker(Broker):
                         for b in self._find_class("Button", root=h)]
                 joined = " ".join(t for _, t in btns)
                 if "是" in joined and "否" in joined:
-                    continue          # 那是委托确认框，不在这里处理
+                    continue
+                txt = "\n".join((win32gui.GetWindowText(c) or "")
+                                for c in self._find_class("Static", root=h))
+                contract = re.search(r"(?:合同编号|委托编号|委托号)[：:\s]*([0-9]+)(?![0-9])", txt)
+                rejected = any(word in txt for word in ("失败", "废单", "拒绝", "无效", "不足", "错误"))
+                accepted = not rejected and any(word in txt for word in ("成功", "已提交", "已报"))
+                receipt = {"status": "rejected" if rejected else
+                           ("submitted" if accepted and contract else "unknown"),
+                           "broker_order_id": contract.group(1) if contract else "",
+                           "message": txt}
                 if self._click_dialog_button(h, ("确定", "好的", "OK")):
                     time.sleep(0.4)
-                    return True
+                    return receipt
             time.sleep(0.2)
-        return False
+        return None
 
     # ================= 弹窗清理（读表前） =================
     def _same_pid_top_windows(self):
@@ -615,6 +683,7 @@ class UiaThsBroker(Broker):
         if ("买入" if key == "buy" else "卖出") not in btxt:
             raise RuntimeError("提交按钮文本异常：{!r}（当前页 {}）".format(btxt, self._page_label()))
 
+        order.status = "unknown"
         self._bm_click(btn)
         time.sleep(1.2)
 
@@ -626,11 +695,21 @@ class UiaThsBroker(Broker):
         ok, txt = self._confirm_dialog(dlg, expect_code=code, expect_qty=int(order.qty),
                                        order=order)
         if not ok:
+            order.status = "rejected"
             raise RuntimeError("委托确认失败或被取消，弹窗内容：\n{}".format(txt))
+        from tools.trading_session import SHANGHAI
+        order.submitted_at = datetime.now(SHANGHAI).isoformat(timespec="seconds")
         time.sleep(1.0)
-        self._dismiss_info()
-
-        order.status = "submitted"
+        receipt = self._dismiss_info()
+        if isinstance(receipt, dict):
+            order.broker_order_id = receipt.get("broker_order_id") or ""
+            order.status = receipt.get("status", "unknown")
+            if order.status == "submitted" and not order.broker_order_id:
+                order.status = "unknown"
+            if receipt.get("message"):
+                order.reason = "{} | {}".format(order.reason, receipt["message"]).strip(" |")
+        else:
+            order.status = "unknown"
         # ⚠️ filled_price 保持 None（2026-09-29）：此处只完成了「提交」，
         # 成交价/量必须等 sync_fill 回读当日委托。旧实现写 order.price，
         # 会让**未成交**的订单在台账里也带一个非空「成交价」= 委托价
@@ -642,6 +721,8 @@ class UiaThsBroker(Broker):
         return order
 
     def submit(self, order: Order) -> Order:
+        from tools.trading_session import require_trading_session
+        require_trading_session()
         with self._lock:
             if order.side in ("buy", "买入"):
                 self._submit_page(order, "buy")
@@ -712,26 +793,25 @@ class UiaThsBroker(Broker):
         「仓位占比」汇总 50.26% 完全吻合。读错值直接导致下单前对账偏差 95.61% 拒单
         （2026-09-21 14:50 实际发生）。
 
-        返回顺序：当前显示页的实例 → 其它可见实例 → 其余（保持旧兜底行为）。
+        返回顺序：当前页可见实例 → 其它可见实例。隐藏实例一律不可信。
         """
         cur = prefer_page if prefer_page is not None else self._page_label()
-        on_page, visible, others = [], [], []
+        on_page, visible = [], []
         for h in self._find_id(cid):
             t = (win32gui.GetWindowText(h) or "").strip()
-            if not t:
+            if not t or not u32.IsWindowVisible(h):
                 continue
             if cur and cur in self._page_label_of(h):
                 on_page.append(t)
-            elif u32.IsWindowVisible(h):
-                visible.append(t)
             else:
-                others.append(t)
-        return on_page + visible + others
+                visible.append(t)
+        return on_page + visible
 
     @staticmethod
     def _f(s):
         try:
-            return float(str(s).replace(",", ""))
+            value = float(str(s).replace(",", ""))
+            return value if math.isfinite(value) else None
         except (TypeError, ValueError):
             return None
 
@@ -748,7 +828,7 @@ class UiaThsBroker(Broker):
 
         def pick(cid):
             vs = self._read_static(cid, prefer_page=page)
-            return self._f(vs[-1]) if vs else None
+            return self._f(vs[0]) if vs else None
 
         return {
             "total": pick(_BAL_TOTAL),
@@ -911,7 +991,7 @@ class UiaThsBroker(Broker):
 
     @staticmethod
     def _mk_price(code6, p, prices) -> float:
-        """给一行 OCR 持仓定价：本地行情价 → OCR 市价 → OCR 成本价。
+        """给一行 OCR 持仓定价：有限正行情价 → 有限正 OCR 市价。
 
         ⚠️ 顺序不能颠倒（2026-09-21 修复）
         ---------------------------------
@@ -923,10 +1003,11 @@ class UiaThsBroker(Broker):
         正确顺序：池外标的应用 OCR 读到的「市价」列 —— 2026-09-21 实测该列读得准
         （2400 × 37.720 = 90,528.000，与表格「市值」列 90528.000 逐位一致）。
         """
-        px = prices.get(UiaThsBroker._guess_full_code(code6))
-        if px:
-            return float(px)
-        return float(p.get("price") or p.get("cost") or 0.0)
+        for value in (prices.get(UiaThsBroker._guess_full_code(code6)), p.get("price")):
+            px = UiaThsBroker._f(value)
+            if px is not None and px > 0:
+                return px
+        return 0.0
 
     def _pos_calc(self, pos, prices) -> float:
         """Σ(行情价×数量) —— 判据 3 与 `_dump_pos_failure` 共用的**单一来源**。
@@ -951,6 +1032,26 @@ class UiaThsBroker(Broker):
                 total += v["qty"] * px
                 items.append((code, v["qty"], px))
         return total, items
+
+    @staticmethod
+    def _validated_balance(bal):
+        """Return finite nonnegative account anchors; zero holdings require a total check."""
+        values = {}
+        for key in ("cash", "market_value", "frozen", "total"):
+            raw = bal.get(key)
+            if key == "frozen" and raw is None:
+                raw = 0.0
+            value = UiaThsBroker._f(raw)
+            if value is None or value < 0:
+                if key == "total" and raw is None and values.get("market_value", 0) > 0:
+                    continue
+                return None
+            values[key] = value
+        if values["market_value"] == 0:
+            expected = values["cash"] + values["frozen"]
+            if not math.isclose(values["total"], expected, rel_tol=0, abs_tol=0.02):
+                return None
+        return values
 
     def _pos_ok(self, pos, bal, prices, old=None) -> bool:
         """校验一次持仓读取是否可信（防止 OCR 坏数据污染账本）。
@@ -999,12 +1100,14 @@ class UiaThsBroker(Broker):
         天然封顶）—— 用这个有界且自愈的代价，换消除结构性死锁。
         数值回归：`tools/test_pos_ok.py`（真数字 7 场景，需 32 位 Python）。
         """
-        try:
-            mv = float(bal.get("market_value") or 0.0)
-        except (TypeError, ValueError):
-            mv = 0.0
+        anchors = self._validated_balance(bal)
+        if anchors is None or pos is None:
+            return False
+        mv = anchors["market_value"]
         if not pos:
-            return mv <= 1.0 and bal.get("cash") is not None
+            return mv == 0
+        if mv == 0:
+            return False
         # 判据 2.5 前置：先隔离「市价列负值」（2026-10-22 修订）
         # ------------------------------------------------
         # 负价分两类：① 池外标的、没有行情价可替代 → 真的无法计价，必须判坏；
@@ -1017,8 +1120,8 @@ class UiaThsBroker(Broker):
         # 判据 2.5：帧级行内自洽（负价/串列帧直接判坏，见 pos_frame_sane 注释）
         if not pos_frame_sane(pos):
             return False
-        for p in pos.values():
-            if int(p.get("qty") or 0) <= 0:
+        for code, p in pos.items():
+            if int(p.get("qty") or 0) <= 0 or self._mk_price(code, p, prices) <= 0:
                 return False
         if mv > 1.0:
             calc = self._pos_calc(pos, prices)
@@ -1137,22 +1240,27 @@ class UiaThsBroker(Broker):
             time.sleep(1.0)
             raw = self._read_grid_text()
             cur = parse_position(raw)
+            # Blank/garbled OCR is not proof of no holdings. A readable empty
+            # position table must expose its headers or an explicit no-record message.
+            empty_evidence = (not cur and bool(raw) and
+                              (("证券代码" in raw and "证券名称" in raw)
+                               or re.search(r"(?:暂无|没有|无)(?:持仓|证券|记录)|没有.*记录", raw)))
             frames.append((i + 1, page, raw, cur))
             if len(cur) > len(best):
                 best = cur
             if validator is not None:
                 try:
-                    if cur and validator(cur):
+                    if (cur or empty_evidence) and validator(cur):
                         passed = True
                         return cur
                 except Exception:
                     pass
-            elif len(cur) >= 3:
+            elif len(cur) >= 3 or empty_evidence:
                 return cur
             time.sleep(0.4)
         if validator is not None and not passed:
             self._dump_position_frames(frames)
-        return best
+        return best or None
 
     @staticmethod
     def _dump_position_frames(frames) -> None:
@@ -1258,60 +1366,53 @@ class UiaThsBroker(Broker):
         return best
 
     def sync_fill(self, order: Order, rows=None):
-        """回读当日委托，用真实成交价/成交量修正订单。
-
-        `rows`：可选，已抓取的委托行（来自 `fetch_today_orders`）。传入可**省掉
-        一次全量连拍**（实测 `fetch_today_orders` 约 35 s，而它内部 3 次连拍
-        本身就可能拿到不同帧 —— 同一次校验用同一份数据才自洽）。
-
-        ⚠️ 2026-09-29 核对 `Order` 语义时的两处修正：
-
-        1. **必须同方向** —— 见 `trader.ths_parse.match_order_row`。当日委托表里
-           同一代码可能有多行（部分成交后补单 / 同日重跑 / 人工委托），旧实现
-           只按 code 匹配、命中即返回第一行；若第一行是反向委托，就会拿卖单的
-           成交价与成交量去修正买单 —— `orders` 是审计事实记录，串向即失真。
-        2. **不再静默吞异常** —— 原先的 `except Exception: pass` 让 `runner` 层的
-           「成交回读失败」告警永远收不到（异常在更内层就被吃掉了），结果是
-           「真的没成交」与「回读失败」在台账里长得一模一样。
-
-        ⚠️ 实测补充（2026-09-29 已成交卖单 5 帧）：**`side` 读不出来是常态**，
-        「操作」列 5/5 帧被 OCR 读坏（'Sik'/'32h'/'SH SS8aba'…）→ `match_order_row`
-        实际走的是「全部候选行 side 均 None → 取第一行」的兜底分支。
-        方向匹配是**保险**，不是主路径；只有当日同标的出现方向明确的**多行**时才生效。
-        """
+        """Read a uniquely associated broker order and retain its actual terminal state."""
+        if not getattr(order, "broker_order_id", ""):
+            # A unique old row still cannot identify a submission lacking a receipt.
+            if order.status not in ("filled", "cancelled", "rejected"):
+                order.status = "unknown"
+            return
         if rows is None:
             try:
                 rows = self.fetch_today_orders()
-            except Exception as e:
-                print("[ths_uia] ⚠️ sync_fill 回读当日委托失败 {} {}：{}".format(
-                    order.code, order.id, e))
-                return
-        r = match_order_row(rows, order.code, order.side, order.qty)
+            except Exception as exc:
+                print("[ths_uia] sync_fill 回读失败 {} {}：{}".format(order.code, order.id, exc))
+                rows = []
+        r = match_order_row(rows, order.code, order.side, order.qty,
+                            broker_order_id=getattr(order, "broker_order_id", ""))
         if r is None:
+            if order.status not in ("filled", "cancelled", "rejected"):
+                order.status = "unknown"
             return
-        if r.get("side") is None and not UiaThsBroker._side_warned:
-            # 只提示一次：这是**系统性**的 OCR 缺陷（实测 5/5 帧读不出），
-            # 逐笔打印会把日志刷成噪音，反而盖住真告警。
-            UiaThsBroker._side_warned = True
-            print("[ths_uia] ⚠️ 委托行「操作」列未读出（OCR 已知缺陷，5/5 帧复现）"
-                  "→ 方向匹配退化为「取第一行」兜底；本进程后续不再重复提示。"
-                  "首次：{} {} 兜底匹配到 {} 股（合同编号 {}）".format(
-                      order.code, order.id, r.get("qty"), r.get("deal_id")))
-        if r.get("avg_price"):
-            order.filled_price = r["avg_price"]      # 成交均价
-            _px_src = "readback"                     # 真·成交均价（委托页回读）
-        elif r.get("price"):
-            order.filled_price = r["price"]          # 委托价兜底
-            # 回读到了「已成」，但这一帧没读出成交均价 → 价格是委托价、不是成交价。
-            # 必须与 readback 区分（2026-10-30）：否则日后算滑点会把委托价当成交价。
-            _px_src = "readback_px"
-        else:
-            _px_src = "readback_px"
-        if r.get("filled_qty"):
-            order.filled_qty = r["filled_qty"]
-        order.status = "filled" if r.get("status") == "已成" else "submitted"
-        if order.status == "filled":
-            order.fill_source = _px_src
+        quantity = self._f(r.get("filled_qty"))
+        if quantity is None or quantity < 0 or quantity > order.qty or not quantity.is_integer():
+            order.status = "unknown"
+            return
+        filled_qty = int(quantity)
+        if filled_qty < order.filled_qty:
+            order.status = "unknown"  # a stale OCR frame cannot erase a corroborated fill
+            return
+        order.broker_order_id = str(r.get("broker_order_id") or r.get("deal_id") or
+                                    getattr(order, "broker_order_id", ""))
+        order.filled_qty = filled_qty
+        average = self._f(r.get("avg_price"))
+        if filled_qty and average is not None and average > 0:
+            order.filled_price = average
+            order.fill_source = "readback"
+        elif filled_qty == 0:
+            order.filled_price = None
+            order.fill_source = ""
+        statuses = {"已成": "filled", "全部成交": "filled", "已撤": "cancelled",
+                    "部撤": "cancelled", "废单": "rejected", "部分成交": "partially_filled",
+                    "已报": "submitted", "未成交": "submitted", "待撤": "cancel_pending"}
+        status = statuses.get(r.get("status"), "unknown")
+        if status == "filled" and filled_qty != order.qty:
+            status = "unknown"
+        elif status == "submitted" and filled_qty:
+            status = "partially_filled"
+        if filled_qty and (average is None or average <= 0) and status not in ("cancelled", "rejected"):
+            status = "unknown"
+        order.status = status
 
     def reconcile(self, account, prices=None) -> bool:
         """用同花顺真实持仓/资金校正本地账户，消除双账本。
@@ -1330,19 +1431,15 @@ class UiaThsBroker(Broker):
         bal = self.fetch_balance()
         old = getattr(account, "positions", {}) or {}
 
-        # 资金栏是交叉核对的「锚」：读不到市值/现金时（资金控件也读坏），
-        # _pos_ok 的判据 3/4 全部静默跳过、只剩弱判据 —— 坏帧可能混过校验。
-        # 直接判对账失败，让人工介入（2026-09-24 加固：宁可拒单，不要脏账本）。
-        try:
-            _mv = float(bal.get("market_value") or 0.0)
-        except (TypeError, ValueError):
-            _mv = 0.0
-        if bal.get("cash") is None or _mv <= 0:
-            print("[reconcile] ⚠️ 资金栏读取异常（bal={}），无法交叉核对 → 判对账失败".format(bal))
+        anchors = self._validated_balance(bal)
+        if anchors is None:
+            print("[reconcile] 资金栏缺失、非有限或现金空仓总额不一致：{}".format(bal))
             return False
 
         # 连拍持仓，以「市值自洽」作为停止条件：读到可信的那一帧为止
         pos = self.fetch_position(validator=lambda p: self._pos_ok(p, bal, prices, old))
+        if pos is None:
+            return False
         # 落账前再隔离一次负价（2026-10-22）：`_pos_ok` 里隔离的是它自己的副本，
         # 这里拿到的是原始帧。不隔离会顺着 `new_pos` 的 `ref = prices.get(full)
         # or p.get("price")` 把负价当参考价 → 池外标的被算出**负成本/负 mark**
@@ -1356,15 +1453,15 @@ class UiaThsBroker(Broker):
         for code, p in pos.items():
             full = self._guess_full_code(code)
             qty = int(p["qty"])
-            cost = float(p.get("cost") or 0.0)
-            ref = prices.get(full) or p.get("price")
+            cost = self._f(p.get("cost")) or 0.0
+            ref = self._mk_price(code, p, prices)
             # 成本价校验：偏离行情价 >50% 视为 OCR 读错（实测 8.950 被读成 8950），退回行情价
             if ref and cost > 0:
                 if not (0.5 * ref <= cost <= 2.0 * ref):
                     cost = float(ref)
             elif not cost and ref:
                 cost = float(ref)
-            old_peak = old.get(full, {}).get("peak", 0.0) if old.get(full) else 0.0
+            from account.portfolio import position_peak
             # mark：该标的的「最后已知价」，池外标的靠它才能被正确定价
             # ⚠️ 为什么必须存（2026-09-21 修复）
             # --------------------------------
@@ -1376,21 +1473,17 @@ class UiaThsBroker(Broker):
             # market_value 用 OCR 市价兜底，口径立刻自洽。
             mark = self._mk_price(code, p, prices)
             new_pos[full] = {"qty": qty, "cost": round(cost, 4),
-                             "peak": max(cost, old_peak),
-                             "mark": round(mark, 4)}
+                             "peak": position_peak(old.get(full), mark, cost, qty=qty),
+                             "mark": round(mark, 4),
+                             "available": p.get("available"),
+                             "frozen": p.get("frozen")}
 
         # 校验通过，落账
         account.positions = new_pos
-        if bal.get("cash") is not None:
-            account.cash = bal["cash"]
-        elif bal.get("total") is not None and bal.get("market_value") is not None:
-            account.cash = bal["total"] - bal["market_value"]
+        account.cash = anchors["cash"]
         # 冻结资金（已报未成交委托占用）仍属账户资产，须计入净值，
         # 否则「下单瞬间资产骤降」会被回撤熔断误判成巨亏而清仓。
-        try:
-            account.frozen = float(bal.get("frozen") or 0.0)
-        except (TypeError, ValueError):
-            account.frozen = 0.0
+        account.frozen = anchors["frozen"]
 
         # ⚠️ 冻结**股份** = 有未成交委托（2026-09-29 新增告警）
         # 实测事故：当日 14:56:59 提交一笔小额 513500 卖单未成交，持仓表为

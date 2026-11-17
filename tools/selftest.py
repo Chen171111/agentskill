@@ -618,41 +618,28 @@ def _backtest_suspension_valuation():
     assert acc._equity[-1] == 111000.0, acc._equity[-1]
 
 
-@check("执行", "多笔买单不超配现金（卖出回款计入预算，逐单扣减）")
+@check("执行", "多笔买单仅使用已确认资金，最低佣金计入预算")
 def _execution_cash_budget():
-    """2026-09-29：真实券商 submit() 只返回 submitted、不当场成交，
-    `account.cash` 在整批订单生成期间不会变 —— 原实现多笔买单都按交易前
-    现金核算会**超配**（broker 拒单/部分成交，策略目标失真；PaperBroker
-    甚至会把现金打成负数）。修法：cash_left 逐单扣减 + 卖出回款按 A 股
-    当日可用计入预算（先卖后买的提交顺序保证这一点）。
-    """
     from account.portfolio import PortfolioAccount
     from trader.execution import ExecutionEngine
-    # 场景 A：满仓现金、两个目标各 90% → 买入总额不得超现金（旧实现会按
-    # 交易前现金给每只都下 90% 的大单，合计 180%，PaperBroker 打成负现金）
-    acc = PortfolioAccount(init_cash=50000.0)
     prices = {"513100.SH": 2.0, "513500.SH": 4.0}
-    orders = ExecutionEngine().rebalance(
-        acc, {"513100.SH": 0.9, "513500.SH": 0.9}, prices)
-    buys = [o for o in orders if o.side == "buy"]
-    spent = sum(o.qty * o.price for o in buys)
-    assert spent <= 50000.0 * 1.001, \
-        "买入总额 {:.0f} 超现金 50000（多笔超配）".format(spent)
-    assert acc.cash >= 0, "现金被超配成负数：{:.2f}".format(acc.cash)
-    # 场景 B：持仓可卖 → 回款计入预算，两只都成交且总额不超预算
-    # （prices 必须覆盖持仓标的——生产里 prices 就是整个策略池，与执行路径一致）
+    acc = PortfolioAccount(init_cash=50000.0)
+    try:
+        ExecutionEngine().rebalance(acc, {"513100.SH": .9, "513500.SH": .9}, prices)
+    except ValueError:
+        refused = True
+    else:
+        refused = False
+    assert refused, "总权重大于 1 必须拒绝，不能隐式借入资金"
+    orders = ExecutionEngine().rebalance(acc, {"513100.SH": .5, "513500.SH": .5}, prices)
+    assert len([o for o in orders if o.side == "buy"]) == 2
+    assert acc.cash >= 0, "成交金额及最低佣金不得超配现金"
     acc2 = PortfolioAccount(init_cash=10000.0)
-    acc2.positions = {"510880.SH": {"qty": 20000, "cost": 3.0,
-                                    "peak": 3.0, "mark": 3.0}}
-    prices2 = {"510880.SH": 3.0, "513100.SH": 2.0, "513500.SH": 4.0}
-    orders2 = ExecutionEngine().rebalance(
-        acc2, {"513100.SH": 0.9, "513500.SH": 0.9}, prices2)
-    buys2 = [o for o in orders2 if o.side == "buy"]
-    assert len(buys2) == 2, "卖出回款应让两只都成交，实际 {} 笔".format(len(buys2))
-    budget = 10000.0 + 20000 * 3.0
-    spent = sum(o.qty * o.price for o in buys2)
-    assert spent <= budget * 1.001, "买入总额 {:.0f} 超预算 {:.0f}".format(spent, budget)
-    assert acc2.cash >= 0, "现金被超配成负数：{:.2f}".format(acc2.cash)
+    acc2.positions = {"510880.SH": {"qty": 20000, "cost": 3., "peak": 3., "mark": 3.}}
+    orders2 = ExecutionEngine().rebalance(acc2, {"513100.SH": .5, "513500.SH": .5},
+                                         dict(prices, **{"510880.SH": 3.}))
+    assert len([o for o in orders2 if o.side == "buy"]) == 2
+    assert acc2.cash >= 0, "仅已成交卖出回款可以补充买入预算"
 
 
 # ============================ 券商读取（同花顺） ============================
@@ -793,13 +780,13 @@ def _stop_loss_branch_gates_ledger_write():
     与 09-28 修过的调仓分支是同一个坑（那次导致 4 天对账死锁）。两者都必须门控，
     否则「账实分叉 + 当日报正常」会再次同时出现。
     """
-    import inspect
-    from scheduler import runner
-    src = inspect.getsource(runner.DailyRunner.run_once)
-    assert src.count("post_synced = True") >= 2, (
-        "调仓分支与止损分支都必须各自初始化 post_synced")
-    assert src.count("if post_synced:") >= 2, (
-        "调仓分支与止损分支都必须按 post_synced 门控账本落库")
+    import io
+    import unittest
+    from tools.test_execution_reliability import ExecutionTests
+    suite = unittest.TestSuite([ExecutionTests("test_stop_reconcile_failure_preserves_ledger")])
+    stream = io.StringIO()
+    result = unittest.TextTestRunner(stream=stream, verbosity=0).run(suite)
+    assert result.wasSuccessful(), stream.getvalue()
 
 
 @check("数值", "equity 取「最新」必须按 date 排序（补历史行后 id 与日期不一致）")
@@ -1340,6 +1327,17 @@ def _desktop_and_research_strategy():
     result = unittest.TextTestRunner(stream=stream, verbosity=0).run(suite)
     assert result.wasSuccessful(), stream.getvalue()
     print(f"      桌面端子测试 {result.testsRun} 项通过（含交易 CLI 隔离与个股合成回测）")
+
+
+@check("交易安全", "策略、券商、调度和逐笔执行离线行为回归")
+def _safety_regressions():
+    import subprocess
+    env = dict(os.environ, PYTHONUTF8="1")
+    result = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "regression_safety.py")],
+                            cwd=ROOT, env=env, capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", timeout=180)
+    assert result.returncode == 0, result.stdout + result.stderr
+    print("      " + result.stdout.strip())
 
 
 # ============================ 主流程 ============================

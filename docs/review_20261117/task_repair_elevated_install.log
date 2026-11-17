@@ -1,0 +1,40 @@
+==============================================================
+  Register / repair daily auto-trade task
+    task      : QuantPanorama_DailyRun
+    action    : E:\MyWorkAndProject\quant\agentskill\daily_run.bat
+    schedule  : Mon-Fri 14:50 local
+    elevated  : 0   (0 = normal user; that is FINE)
+==============================================================
+
+==============================================================
+  注册 / 修复计划任务: QuantPanorama_DailyRun
+  仓库: E:\MyWorkAndProject\quant\agentskill
+==============================================================
+起始时间 (StartBoundary): 2026-11-17 14:50 Tuesday
+[FAIL] 注册被拒绝: Access is denied.
+
+       若为 Access is denied -> 用 install_schedule.bat 走提权重试，
+       或用任务计划程序 GUI: 操作 -> 导入任务 -> tools\schedule\QuantPanorama_DailyRun.xml
+
+[i] register_task.ps1 exit code = 1
+
+--------------------------------------------------------------
+  Registration was denied for a normal user on this machine.
+  Relaunching ELEVATED - a UAC prompt will appear, click YES.
+  The registration is re-attempted in the new window.
+--------------------------------------------------------------
+
+
+==============================================================
+  [OK] registered AND the on-disk definition was verified.
+==============================================================
+  * Verify any time (read-only) : check_schedule.bat
+  * Run the task once right now : schtasks /run /tn "QuantPanorama_DailyRun"
+  * Remove the task            : schtasks /delete /f /tn "QuantPanorama_DailyRun"
+  * THS client must be OPEN and LOGGED IN at 14:50.
+
+  [IMPORTANT] Registration is proven only for THIS moment.
+  A task on this machine once vanished silently. Re-check with
+  check_schedule.bat after the next weekday.
+
+

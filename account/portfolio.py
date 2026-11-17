@@ -6,6 +6,19 @@ import config
 import math
 
 
+def position_peak(old_position, current_price, cost, qty=None):
+    """Peak of the current holding episode, updated only by finite prices."""
+    values = []
+    for value in (current_price, cost):
+        if value is not None and math.isfinite(float(value)) and float(value) > 0:
+            values.append(float(value))
+    if old_position and old_position.get("qty", 0) > 0:
+        peak = old_position.get("peak")
+        if peak is not None and math.isfinite(float(peak)) and float(peak) > 0:
+            values.append(float(peak))
+    return max(values, default=0.0)
+
+
 class PortfolioAccount:
     def __init__(self, init_cash: float = None):
         self.init_cash = float(init_cash if init_cash is not None else config.INIT_CASH)
@@ -69,9 +82,12 @@ class PortfolioAccount:
         self.positions[code] = {
             "qty": new_qty,
             "cost": new_cost,
-            "peak": max(pos["peak"], price),
+            "peak": position_peak(pos if old_qty > 0 else None, price, new_cost, new_qty),
             # mark 保留（成交价即最新价；无成交价时沿用旧值，留给 reconcile 刷新）
             "mark": float(price or pos.get("mark") or 0.0),
+            "available": (max(0, int(pos["available"]) + qty)
+                          if pos.get("available") is not None else None),
+            "frozen": int(pos.get("frozen") or 0),
         }
         if new_qty <= 0:
             del self.positions[code]

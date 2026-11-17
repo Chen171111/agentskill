@@ -44,6 +44,7 @@
 - 尝试次数写进 `last_run.json` 的 `attempts` 字段，事后可查。
 """
 import json
+import os
 import subprocess
 import sys
 import time
@@ -52,6 +53,10 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from tools.trading_session import (SHANGHAI, require_trading_session,
+                                   current_trading_session_deadline)
 STATE = ROOT / "state"
 LOG = STATE / "daily_run.log"
 # 计划运行的状态文件（check_alerts 判定「每日自动交易是否健康」的唯一依据）
@@ -64,6 +69,9 @@ ALERT_MANUAL = STATE / "ALERT_manual.txt"
 
 # 常见失败的排查提示
 _HINTS = {
+    # 2026-11-16 新增：前置预检自己的失败信号（最具体，必须排在前面）
+    "模拟交易盘未就绪": "交易窗口不可用（隐藏/未登录/进程没开）→ 跑 "
+                        "E:\\Python32\\python.exe tools\\ths_trade_up.py --ensure 看状态并自愈",
     "网上股票交易系统": "同花顺交易窗口没找到 → 确认客户端已打开且已登录模拟盘（不可最小化）",
     "对账失败": "持仓/资金读取未通过校验 → 检查同花顺是否停在异常弹窗上，重跑一次",
     "行情数据陈旧": "行情没刷新 → 手动执行 E:\\Python\\python.exe tools\\refresh_data.py",
@@ -71,7 +79,7 @@ _HINTS = {
 }
 
 # ⚠️ 只认这两个参数。**任何别的参数一律拒绝执行** —— 见 main() 开头的守卫。
-_ALLOWED_ARGS = {"--manual", "--simulate-failure"}
+_ALLOWED_ARGS = {"--manual", "--simulate-failure", "--data-ready"}
 
 # ---- 连接类失败的「限窗重试」（2026-09-20 新增，D5）----
 # 历史失败里最常见的一类就是「同花顺客户端没开 / 没登录 / 被最小化」
@@ -86,6 +94,15 @@ _RETRY_WINDOW_END = (14, 56)    # 当天该时刻之后不再重试
 # 只有这些字样才算「连接类失败」——别的失败（选股报错/数据陈旧/对账失败）
 # 重试也不会变好，直接放弃，避免掩盖真问题。
 _RETRY_KEYWORDS = ("同花顺连接失败", "网上股票交易系统", "交易窗口")
+
+# ---- 前置预检（2026-11-16 新增）----
+# 同花顺**开机自启**后，交易窗口 `网上股票交易系统5.0` 可能是**隐藏**的
+# （`IsWindowVisible=False`）。2026-11-16 08:38:50 的自启动日志实测就是这样，
+# 结果 14:50 的定时任务从 connect 开始连挂 4 次（120 秒一次，空转约 6 分钟）才放弃，
+# 当日白丢一个交易日 —— 窗口在、也登录着，只是没人点出来。
+# 所以进交易链路前先「把窗口弄到可用」；弄不好就**立刻**失败告警，
+# 不把那 6 分钟浪费在必然失败的重试上（那段时间本来是留给"弹窗挡一下"这类偶发的）。
+_PRE_WAIT_SEC = 45
 
 
 def _log_offset():
@@ -121,8 +138,78 @@ def _in_retry_window(now=None) -> bool:
 
     对**手动运行**同样适用 —— 收盘后重试一样无意义（没法按当日价成交）。
     """
-    now = now or datetime.now()
-    return (now.hour, now.minute) < _RETRY_WINDOW_END
+    try:
+        require_trading_session(now or _now())
+        return True
+    except RuntimeError:
+        return False
+
+
+def _now():
+    return datetime.now(SHANGHAI)
+
+
+def _check_cached_health():
+    """Revalidate the complete configured pool even after a batch refresh."""
+    import config
+    from dataprovider.calendar import is_trading_day
+    from dataprovider.store import DataStore
+    from tools.refresh_data import health_check
+    # The health checker predates local-only calendars. Validate local
+    # coverage first so a missing calendar is a blocking health failure.
+    is_trading_day(_now(), local_only=True)
+    codes = list(config.RECOMMENDED_POOLS["ETF全球"])
+    problems, notes = health_check(DataStore(), codes, "ETF全球")
+    for note in notes:
+        print("[daily_job] " + note)
+    return problems
+
+
+def _prepare_data(data_ready=False):
+    """Run 64-bit refresh unless the batch did it; always check cache health."""
+    try:
+        if not data_ready:
+            python64 = os.environ.get("PYTHON64") or r"E:\Python\python.exe"
+            result = subprocess.run(
+                [python64, "-X", "utf8", "-u", str(ROOT / "tools" / "refresh_data.py")],
+                cwd=str(ROOT), check=False, timeout=600)
+            if result.returncode:
+                return result.returncode, "行情刷新或体检失败，拒绝交易"
+        problems = _check_cached_health()
+        if problems:
+            return 3, "行情数据体检失败: " + "; ".join(problems)
+    except Exception as exc:
+        return 3, "行情前置检查不可用，拒绝交易: {!r}".format(exc)
+    return 0, ""
+
+
+def _preflight():
+    """Restore the client and verify readiness; never log in or place orders."""
+    try:
+        import ths_trade_up
+    except ImportError:
+        from tools import ths_trade_up
+    snap = ths_trade_up.ensure_trade_window(timeout=_PRE_WAIT_SEC, show=True, quiet=True)
+    if snap.get("state") == "MISSING_PROC":
+        # The scheduled job owns the interactive desktop. Launching only the
+        # trade client here recovers a missed login-trigger task; authentication
+        # remains manual and readiness is verified again after startup.
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+             "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "tools" / "ths_autostart.ps1"),
+             "-TradeOnly", "-EnsureWaitSec", str(_PRE_WAIT_SEC)],
+            cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=_PRE_WAIT_SEC + 30)
+        if result.returncode:
+            return "客户端安全启动失败 rc={}: {}".format(result.returncode, result.stderr[-1000:])
+        snap = ths_trade_up.ensure_trade_window(timeout=0, show=True, quiet=True)
+    print("[daily_job] 前置预检：{} —— {}".format(snap["state"], snap["detail"]))
+    for action in snap.get("actions") or []:
+        print("[daily_job] 预检已执行：" + action)
+    if not snap.get("ok"):
+        return "{} — {}（建议：{}）".format(
+            snap["detail"], snap["state"], ths_trade_up.ADVICE.get(snap["state"], ""))
+    return ""
 
 
 def _is_conn_failure(tail: str) -> bool:
@@ -153,109 +240,72 @@ def _run_once(argv, selftest: bool):
 
 
 def main():
-    STATE.mkdir(parents=True, exist_ok=True)
-
-    # ⚠️⚠️ 参数守卫：本脚本**会真的走下单链路**（`main.py simulate --ths`）。
-    # 严禁把 `--help` / `--dry-run` / `-h` 这类「看起来无害」的参数直接传进来 ——
-    # 它们**不被识别**，但脚本会**照常执行整条交易链路**，一次"我只是想看看用法"
-    # 就会（1）真去连交易客户端、（2）覆盖 last_run.json、（3）写 ALERT.txt。
-    # （2026-09-19 23:57 事故：`daily_job.py --help` 触发了一次真实运行，
-    #   失败在 broker 连接阶段 → 未产生交易，但污染了状态文件。这就是加这道守卫的原因。）
+    # Parse before touching production paths; simulation is fully isolated.
     unknown = [a for a in sys.argv[1:] if a not in _ALLOWED_ARGS]
     if unknown:
-        print("[daily_job] ❌ 未知参数 {} —— **拒绝执行**："
-              "本脚本会走真实下单链路，不会因为参数不认识就跳过交易。".format(unknown))
-        print("           可用参数：{}".format(sorted(_ALLOWED_ARGS)))
-        print("           只想看用法 → 读本文件顶部 docstring，**不要执行**。")
+        print("[daily_job] 未知参数 {}，拒绝执行".format(unknown))
         return 2
+    if "--simulate-failure" in sys.argv:
+        print("[daily_job] SELF-TEST 模拟失败（无交易、预检、状态、邮件或界面副作用）")
+        return 1
 
-    argv = [sys.executable, str(ROOT / "main.py"), "simulate", "--ths"]
-    started = datetime.now()
-
-    # --manual：手动 / 额外运行 → 状态与告警写**独立文件**，
-    # 不覆盖计划运行的健康记录（见模块 docstring 的「计划运行 vs 手动运行」）。
+    STATE.mkdir(parents=True, exist_ok=True)
+    argv = [sys.executable, "-X", "utf8", str(ROOT / "main.py"), "simulate", "--ths"]
+    started = _now()
     manual = "--manual" in sys.argv
     status_path = STATUS_MANUAL if manual else STATUS
     alert_path = ALERT_MANUAL if manual else ALERT
-
-    # 自检开关：不真的交易，直接走失败分支，用来验证「告警链路」是否有效。
-    # （报警器要定期按一下，否则坏掉了也不知道）
-    selftest = "--simulate-failure" in sys.argv
-
-    # ── 交易日守卫（2026-09-25 新增）──────────────────────────────────
-    # 背景：2026-09-25（中秋法定节假日）计划任务 QuantPanorama_DailyRun 照常触发，
-    # 走完整交易链路 → 同花顺在休市日连不上交易窗口/持仓表异常 → 白白报
-    # 「自动交易失败」。本机交易日历（dataprovider/calendar.py）确认 09-25/26/27
-    # 均为非交易日，09-28（周一）才开市。休市日无单可下， scheduled 模式
-    # 直接跳过：写 skipped 状态（ok=true）、退出 0、不发告警、不碰 ALERT.txt。
-    _trading_today = True
-    try:
-        # ⚠️ 本脚本在 tools/ 下运行，sys.path 不含项目根目录，
-        # 必须先补 ROOT 才能导入 dataprovider（check_alerts.py 顶部同理）。
-        if str(ROOT) not in sys.path:
-            sys.path.insert(0, str(ROOT))
-        from dataprovider.calendar import is_trading_day
-        _trading_today = is_trading_day(started)
-    except Exception as _e:
-        # 日历不可用 → fail-open：宁可节假日跑一次失败（有告警兜底），
-        # 也不能交易日被误跳过（那会白丢一个真实交易日）。
-        print("[daily_job] ⚠️ 交易日历不可用（{}）→ 按交易日照常执行".format(_e))
-
-    if not _trading_today and not manual and not selftest:
-        status = {
-            "ts": started.strftime("%Y-%m-%d %H:%M:%S"),
-            "date": started.strftime("%Y%m%d"),
-            "mode": "scheduled",
-            "ok": True,
-            "exit_code": 0,
-            "skipped": "non-trading-day",
-            "attempts": 0,
-            "cmd": "main.py simulate --ths",
-            "rebalanced": None,
-            "summary": "非交易日（节假日/周末），按设计跳过交易",
-            "error": "",
-        }
-        try:
-            STATUS.write_text(json.dumps(status, ensure_ascii=False, indent=2),
-                              encoding="utf-8")
-        except Exception:
-            pass
-        # 注意：**不清 ALERT.txt** —— 旧告警（若来自上一个交易日）是真实的
-        # 未解决问题，等下一个交易日真实运行成功后再自然清除，不由跳过掩盖。
-        print("[daily_job] 今日非交易日 → 跳过交易链路"
-              "（不连同花顺、不下单、不发告警；last_run.json 已记 skipped）")
-        return 0
-    if not _trading_today:
-        print("[daily_job] ⚠️ 今日非交易日（--manual/--simulate-failure 照常执行；"
-              "休市日同花顺可能连不上或持仓读取异常，失败属预期）")
-
-    # ── 执行：连接类失败 → **收盘前限窗重试**（见文件顶部的 `_RETRY_*` 说明）──
     rc, err, captured = 1, "", []
     n_attempt = 0
-    for k in range(_RETRY_MAX + 1):
-        n_attempt = k + 1
-        if k:
-            print("\n[daily_job] ===== 重试 {}/{} =====".format(k, _RETRY_MAX))
-        offset = _log_offset()          # 每次都是新的一段日志
-        rc, captured, err = _run_once(argv, selftest)
-        if rc == 0 or selftest:
-            break
-        if k == _RETRY_MAX:
-            print("[daily_job] 已达最大尝试次数 {}，放弃重试".format(n_attempt))
-            break
-        _tail_k = ("\n".join([l for l in captured if l.strip()][-40:])
-                   or _read_since(offset))
-        if not _is_conn_failure(_tail_k):
-            print("[daily_job] 非「连接同花顺」类失败 → **不重试**（重试不会变好）")
-            break
-        if not _in_retry_window():
-            print("[daily_job] 已过重试窗口 {:02d}:{:02d} → **不重试**"
-                  "（收盘后重试无法按当日价成交，且有重复下单风险）".format(
-                      *_RETRY_WINDOW_END))
-            break
-        print("[daily_job] 连接类失败，{} 秒后重试（第 {} / {} 次）…".format(
-            _RETRY_GAP_SEC, k + 1, _RETRY_MAX))
-        time.sleep(_RETRY_GAP_SEC)
+    offset = _log_offset()
+    deadline = None
+    pre_fail = ""
+    try:
+        require_trading_session(started)
+        deadline = current_trading_session_deadline(started)
+        rc, pre_fail = _prepare_data("--data-ready" in sys.argv)
+        if not pre_fail and rc == 0:
+            require_trading_session(_now())
+            pre_fail = _preflight()
+            if pre_fail:
+                rc = 1
+    except Exception as exc:
+        rc = 1
+        pre_fail = "前置安全检查失败，拒绝交易: {!r}".format(exc)
+
+    if pre_fail or rc:
+        captured = [pre_fail or "行情前置检查失败"]
+    else:
+        for k in range(_RETRY_MAX + 1):
+            # Every attempt checks both the absolute original deadline and
+            # the calendar/window, including after a clipped retry sleep.
+            current = _now()
+            try:
+                if current >= deadline:
+                    raise RuntimeError("本交易时段已结束，不再重试")
+                require_trading_session(current)
+            except RuntimeError as exc:
+                rc, err = 1, str(exc)
+                if not captured:
+                    captured = [err]
+                break
+            n_attempt += 1
+            if k:
+                print("[daily_job] 重试 {}/{}".format(k, _RETRY_MAX))
+            offset = _log_offset()
+            rc, captured, err = _run_once(argv, False)
+            if rc == 0 or k == _RETRY_MAX:
+                break
+            attempt_tail = ("\n".join([line for line in captured if line.strip()][-40:])
+                            or _read_since(offset))
+            if not _is_conn_failure(attempt_tail):
+                break
+            remaining = (deadline - _now()).total_seconds()
+            if remaining <= 0:
+                break
+            wait = min(float(_RETRY_GAP_SEC), remaining)
+            print("[daily_job] 连接类失败，{} 秒后复查交易窗口".format(wait))
+            time.sleep(wait)
 
     tail = "\n".join([l for l in captured if l.strip()][-40:]) or _read_since(offset)
     ok = (rc == 0)

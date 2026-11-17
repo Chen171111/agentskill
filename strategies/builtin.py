@@ -14,6 +14,7 @@ class MomentumStrategy(Strategy):
       risk_parity  风险平价加权（按波动率倒数分配，替代等权）
     """
     name = "momentum"
+    positive_momentum_filter = True
 
     def __init__(self, topk=3, window=20, risk_parity=False,
                  trend_window=None, include_sma=True, **kw):

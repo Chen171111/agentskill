@@ -5,6 +5,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -31,12 +32,22 @@ def synthetic_bars() -> pd.DataFrame:
 
 
 def main(argv=None) -> int:
+    # JSON is a UTF-8 process boundary, independent of Windows' active ACP.
+    sys.stdout.reconfigure(encoding="utf-8", errors="strict")
     parser = argparse.ArgumentParser(description="quant2 桌面适配层合成行情自检")
     parser.add_argument("--project-root", required=True)
     args = parser.parse_args(argv)
     cfg = BacktestConfig(kind="stock", strategy="stock_multifactor",
                          start="20240501", end="20240830", topk=5, rebalance=5)
-    result = run_stock_backtest(cfg, args.project_root, bars=synthetic_bars())
+    # Synthetic prices also need synthetic security metadata. Keep the real
+    # limit rules, feature builder, and engine; replace only the disk-backed
+    # ST-history table. These fixtures contain no ST periods.
+    stock_root = str(Path(args.project_root).resolve())
+    if stock_root not in sys.path:
+        sys.path.insert(0, stock_root)
+    from tools import limit_rules
+    with mock.patch.object(limit_rules, "_ST_SPANS", {}):
+        result = run_stock_backtest(cfg, args.project_root, bars=synthetic_bars())
     print(json.dumps({"ok": True, "result": result}, ensure_ascii=False, allow_nan=False))
     return 0
 

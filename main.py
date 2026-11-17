@@ -53,6 +53,9 @@ def _make_broker(args):
     用 UIA 后端实现（easytrader 的 win32 实现无法适配新版同花顺自绘 UI）。
     """
     if getattr(args, "ths", None):
+        if not getattr(args, "dry", False):
+            from tools.trading_session import require_trading_session
+            require_trading_session()
         from trader.ths_uia import UiaThsBroker
         exe = getattr(args, "ths_exe", None) or THS_EXE_PATH
         return UiaThsBroker(exe_path=exe).connect()
@@ -67,6 +70,14 @@ def cmd_run(args):
                          broker=_make_broker(args))
     result = runner.run_once()
     _print_run_result(result)
+    _exit_on_run_failure(result)
+
+
+def _exit_on_run_failure(result):
+    status = result.get("status")
+    if status not in ("ok", "already_processed"):
+        print("[运行未完成] {}：{}".format(status, result.get("error", "委托未全部完成或账本未确认")))
+        raise SystemExit(3 if status == "pending" else 1)
 
 
 def cmd_daemon(args):
@@ -153,6 +164,7 @@ def cmd_simulate(args):
                          rebalance=args.rebalance, timing=args.timing, broker=broker,
                          dry_run=dry)
     r = runner.run_once()
+    _exit_on_run_failure(r)
     if r.get("status") == "no_data":
         print("无有效数据")
         return

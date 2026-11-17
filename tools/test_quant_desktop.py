@@ -97,7 +97,7 @@ class DesktopTests(unittest.TestCase):
         if project is None:
             self.skipTest("未检测到同级 quant2；桌面端可仅运行 ETF 项目")
         proc = subprocess.run(
-            [sys.executable, "tools/desktop_stock_smoke.py", "--project-root", project.root],
+            [sys.executable, "-X", "utf8", "tools/desktop_stock_smoke.py", "--project-root", project.root],
             check=False, cwd=PROJECT_ROOT, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=30)
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -105,6 +105,20 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(result["engine"], "quant2.tools.backtest_stock.run")
         self.assertGreater(result["meta"]["trades"], 0)
         self.assertGreater(len(result["series"]["dates"]), 20)
+        self.assertIn("年化收益", result["metrics"])
+
+    def test_stock_smoke_emits_utf8_without_inherited_utf8_environment(self):
+        project = next((p for p in discover_projects() if p.kind == "stock"), None)
+        if project is None:
+            self.skipTest("未检测到同级 quant2")
+        import os
+        env = {key: value for key, value in os.environ.items()
+               if key not in {"PYTHONUTF8", "PYTHONIOENCODING"}}
+        proc = subprocess.run(
+            [sys.executable, "-X", "utf8=0", "tools/desktop_stock_smoke.py", "--project-root", project.root],
+            cwd=PROJECT_ROOT, capture_output=True, env=env, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode("utf8", "replace"))
+        result = json.loads(proc.stdout.decode("utf8"))["result"]
         self.assertIn("年化收益", result["metrics"])
 
     def test_dashboard_existing_server_not_restarted(self):

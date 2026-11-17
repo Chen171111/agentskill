@@ -54,6 +54,7 @@ class Strategy(abc.ABC):
     """
 
     name = "base"
+    positive_momentum_filter = False
 
     def __init__(self, topk: int = 3, rebalance_every: int = 5, max_weight: float = 0.30,
                  max_total: float = 0.90, **kwargs):

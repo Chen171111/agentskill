@@ -3,6 +3,8 @@
 按开盘价撮合到目标权重，计入整手(100股)、手续费/滑点/印花税，每日按收盘价记账；
 持仓记录成本价与持仓期峰值，供个股级止损/止盈/回撤止盈（与实盘 RiskManager 同构）。
 """
+from math import isfinite
+
 import pandas as pd
 
 import config
@@ -32,6 +34,27 @@ class BacktestAccount:
         self._last_px = {}    # {code: 最后已知价} —— 停牌日计价兜底（2026-09-29）
         self._dates = []
         self._equity = []
+
+    def apply_splits(self, ratios: dict):
+        """Apply effective-date new-shares/old-shares ratios before any trade.
+
+        Cash is unchanged; quantity, unit cost, peak and stale-price fallback
+        move together. Fractional entitlements remain unrounded in this model;
+        exchange rounding/cash-in-lieu requires authoritative event metadata.
+        """
+        for code, ratio in ratios.items():
+            ratio = float(ratio)
+            if not isfinite(ratio) or ratio <= 0:
+                raise ValueError("Invalid split ratio for {}".format(code))
+            if ratio == 1:
+                continue
+            position = self.positions.get(code)
+            if position:
+                position["qty"] *= ratio
+                position["cost"] /= ratio
+                position["peak"] /= ratio
+            if code in self._last_px:
+                self._last_px[code] /= ratio
 
     def _qty(self, code: str) -> int:
         p = self.positions.get(code)
@@ -105,7 +128,9 @@ class BacktestAccount:
             if qty <= 0 or px <= 0 or code in sell_blocked:
                 continue
             if qty * px > target_mv.get(code, 0.0):
-                sell_qty = min(_round_lot(int((qty * px - target_mv.get(code, 0.0)) / px)), qty)
+                # Full liquidation includes odd lots created by a split.
+                sell_qty = (qty if target_mv.get(code, 0.0) <= 0 else
+                            min(_round_lot(int((qty * px - target_mv[code]) / px)), qty))
                 if sell_qty <= 0:
                     continue
                 fill = px * (1 - self.slippage)

@@ -40,27 +40,29 @@ def _clean_code(raw):
 
 
 def parse_confirm_text(text) -> dict:
-    """解析「委托确认」弹窗正文 → {code, name, price, qty, amount}。
-
-    弹窗样本（富文本剥标签后）：
-        证券代码：510880(红利ETF华泰柏瑞)
-        买入价格：3.427 (卖一)
-        买入数量：100
-        预估金额：347.700
-    """
+    """Parse complete confirmation fields without accepting numeric prefixes."""
+    text = text or ""
     out = {}
-    m = re.search(r"证券代码[：:]\s*(\d{6})(?:\s*[（(]([^）)]*)[）)])?", text or "")
-    if m:
-        out["code"] = m.group(1)
-        if m.group(2):
-            out["name"] = m.group(2).strip()
-    m = re.search(r"(?:买入|卖出)价格[：:]\s*([\d.]+)", text or "")
-    if m:
-        out["price"] = _to_float(m.group(1))
-    m = re.search(r"(?:买入|卖出)数量[：:]\s*([\d,]+)", text or "")
-    if m:
-        out["qty"] = int(m.group(1).replace(",", ""))
-    m = re.search(r"预估金额[：:]\s*([\d,.]+)", text or "")
+    codes = re.findall(r"证券代码[：:]\s*(\d{6})(?!\d)(?:\s*[（(]([^）)]*)[）)])?", text)
+    if len(codes) == 1:
+        out["code"] = codes[0][0]
+        if codes[0][1]:
+            out["name"] = codes[0][1].strip()
+    fields = re.findall(r"(买入|卖出)(价格|数量)[：:]\s*([^\s（(]+)", text)
+    sides = {side for side, _, _ in fields}
+    if len(sides) == 1:
+        out["side"] = "buy" if "买入" in sides else "sell"
+    for label, key in (("价格", "price"), ("数量", "qty")):
+        values = [value for _, kind, value in fields if kind == label]
+        if len(values) != 1:
+            continue
+        value = values[0].replace(",", "")
+        if key == "qty":
+            if re.fullmatch(r"\d+", value):
+                out[key] = int(value)
+        else:
+            out[key] = _to_float(value)
+    m = re.search(r"预估金额[：:]\s*([\d,.]+)", text)
     if m:
         out["amount"] = _to_float(m.group(1))
     return out
@@ -373,7 +375,7 @@ def _tail_six(tail):
     six = nums[-6:]
     if len(six[5].replace(",", "").split(".")[0]) < 9:
         return None
-    return [_to_float(x) for x in six]
+    return [_to_float(x) for x in six[:5]] + [six[5].replace(",", "")]
 
 
 def _name_of(tail):
@@ -416,7 +418,7 @@ def parse_trades(text) -> list:
         six = _tail_six(tail)
         if six is not None:
             qty_f, fill_f, price_f, avg_f = six[0], six[1], six[2], six[3]
-            deal_id = str(int(six[5])) if six[5] is not None else None
+            deal_id = six[5]
         else:
             # 成交表路径：从操作/状态关键词起点取数字（成交表操作列**含中文**
             # 「买入/卖出」，实测夹具 2 能读出；委托表才读不出）
@@ -438,16 +440,24 @@ def parse_trades(text) -> list:
         # 状态：文本判据优先；**文本列被 OCR 读坏时用数量关系兜底**
         # （5 帧实测有 2 帧「全部成交」被读成 'SS8aba'/'SHBatae'，
         #   若不兜底，已成会被判成「已报」→ sync_fill 的 status 永远停在 submitted）
-        if "已撤" in ln or "废单" in ln:
+        if "废单" in ln or "已拒绝" in ln:
+            status = "废单"
+        elif "已撤" in ln or "部撤" in ln:
             status = "已撤"
+        elif "待撤" in ln:
+            status = "待撤"
         elif "部分成交" in ln:
             status = "部分成交"
         elif "全部成交" in ln or "已成" in ln:
             status = "已成"
-        elif qty_i and fill_i and fill_i >= qty_i:
+        elif qty_i and fill_i == qty_i:
             status = "已成"
-        else:
+        elif qty_i and 0 < fill_i < qty_i:
+            status = "部分成交"
+        elif "已报" in ln or "未成交" in ln:
             status = "已报"
+        else:
+            status = "unknown"
 
         rows.append({
             "code": code,
@@ -459,68 +469,35 @@ def parse_trades(text) -> list:
             "price": price_f,                   # 委托价格
             "avg_price": avg_f,                 # 成交均价
             "deal_id": deal_id,                 # 合同编号
+            "broker_order_id": deal_id,
         })
     return rows
 
 
-def match_order_row(rows, code, side, qty=None):
-    """从当日委托行里挑出**属于这一笔订单**的那一行；挑不到返回 None。
+def match_order_row(rows, code, side, qty=None, broker_order_id=None):
+    """Return one uniquely identified order; conflicting or ambiguous rows stay unknown.
 
-    ⚠️ 为什么必须同时匹配「方向」（2026-09-29 核对 `Order` 语义时发现）
-    ------------------------------------------------------------------
-    当日委托表里**同一代码可以有多行**，且方向可能相反：
-
-    - 部分成交后补单 / 同一天重跑（上一笔还挂着没成交）
-    - 用户手工委托 + 自动交易委托落在同一只标的上
-
-    旧 `UiaThsBroker.sync_fill()` 只按 code 匹配、命中即 `return` 第一行 ——
-    若第一行是**反向**委托，就会拿卖单的成交价/成交量去修正买单：
-    `orders` 表是**审计事实记录**，一旦串向，"成交价/成交量"就全是假的。
-    （资金与持仓有 `reconcile()` 回读券商兜底，所以不会错单，但台账会说谎。）
-
-    匹配优先级（逐级放宽，OCR 丢字段时不至于完全失配）
-    --------------------------------------------------
-    1. code + 方向 + 委托数量   最精确
-    2. code + 方向
-    3. code                     仅当**所有**候选行都没读出方向时才用（等价旧行为）
-
-    关键：只要候选行里存在**方向明确且相反**的行，就**不**回退到第 3 级 ——
-    宁可返回 None（台账停在 submitted，诚实地表示"回读不到"），也不用错行。
-
-    ⚠️ 实测补充（2026-09-29 已成交卖单连拍 5 帧，逐帧核对 OCR 原文）
-    ----------------------------------------------------------------
-    **第 1/2 级几乎不会生效**：委托表的「操作」列 5/5 帧被 OCR 读坏
-    （「卖出」→ 'Sik' / '32h' / 'SH SS8aba' / 'Si SHBatae' / '32k'），
-    `side` 恒为 None → 实际走的**永远是第 3 级兜底**。
-    所以：
-      - 方向匹配是**保险**（防「同日同标的出现方向明确的多行」），不是主路径；
-      - 兜底命中时 `sync_fill` 会打一条告警，让「靠兜底匹配的」这件事在日志里可见；
-      - 真正的防错主力是**尾部锚定后的字段真值**（`_tail_six`），
-        它保证即便方向读不出，拿到的 qty/filled_qty/price/avg_price 也是对的。
-
-    参数
-    ----
-    rows : parse_trades() 的返回值（或任何含 code/side/qty 的 dict 列表）
-    code : 订单代码，带不带市场后缀都行（"510880" / "510880.SH"）
-    side : "buy"/"sell"，或已经是中文的 "买入"/"卖出"
-    qty  : 委托数量（int）
+    A known broker contract number never falls back to a different contract.
+    Without a contract, code, direction and quantity must all agree uniquely.
+    OCR-missing direction is acceptable only with the exact broker identity.
     """
     code6 = str(code).split(".")[0].zfill(6)
-    want = "买入" if side in ("buy", "买入") else "卖出"
+    want = {"buy": "买入", "sell": "卖出", "买入": "买入", "卖出": "卖出"}.get(side)
+    if want is None:
+        return None
     cands = [r for r in (rows or [])
              if str(r.get("code") or "").split(".")[0].zfill(6) == code6]
-    if not cands:
-        return None
-
-    if qty is not None:
-        for r in cands:
-            if r.get("side") == want and r.get("qty") is not None \
-                    and int(r["qty"]) == int(qty):
-                return r
+    if broker_order_id:
+        cands = [r for r in cands if str(r.get("broker_order_id") or r.get("deal_id") or "")
+                 == str(broker_order_id)]
+    valid = []
     for r in cands:
-        if r.get("side") == want:
-            return r
-    # 兜底：整批候选行都没读出方向（OCR 丢了「操作」列）→ 只能取第一行
-    if all(r.get("side") is None for r in cands):
-        return cands[0]
-    return None
+        if r.get("side") != want and not (broker_order_id and r.get("side") is None):
+            continue
+        try:
+            if qty is not None and (r.get("qty") is None or float(r["qty"]) != int(qty)):
+                continue
+        except (TypeError, ValueError, OverflowError):
+            continue
+        valid.append(r)
+    return valid[0] if len(valid) == 1 else None

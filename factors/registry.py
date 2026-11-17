@@ -19,7 +19,9 @@ def _macd_hist(px: dict, fast=12, slow=26, signal=9):
     ema_f = close.ewm(span=fast, adjust=False).mean()
     ema_s = close.ewm(span=slow, adjust=False).mean()
     dif = ema_f - ema_s
-    return dif - dif.ewm(span=signal, adjust=False).mean()
+    # Dimensionless MACD keeps cross-asset ranks independent of price units.
+    hist = dif - dif.ewm(span=signal, adjust=False).mean()
+    return hist / close.where(np.isfinite(close) & (close > 0))
 
 
 def _bias20(px: dict):

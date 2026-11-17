@@ -37,7 +37,28 @@ def _fmt(d):
     return d.strftime("%Y%m%d") if hasattr(d, "strftime") else str(d)
 
 
-def is_trading_day(d) -> bool:
+def _local_trading_dates(d) -> list:
+    """Read a calendar that covers d without downloading or writing files."""
+    try:
+        cached = pd.read_csv(_CACHE, dtype=str)["trade_date"].tolist()
+        dates = sorted(set(cached))
+        if not dates or any(not isinstance(x, str) or len(x) != 8 or not x.isdigit() for x in dates):
+            raise ValueError("invalid calendar dates")
+        for value in dates:
+            datetime.strptime(value, "%Y%m%d")
+        target = _fmt(d)
+        # A calendar's final session can precede Dec 31. Coverage includes
+        # that final session only; anything later must be refreshed first.
+        if target < dates[0] or target > dates[-1]:
+            raise ValueError("calendar does not cover " + target)
+        return dates
+    except Exception as exc:
+        raise RuntimeError("本地交易日历缺失、损坏或已过期: {}".format(exc)) from exc
+
+
+def is_trading_day(d, *, local_only=False) -> bool:
+    if local_only:
+        return _fmt(d) in set(_local_trading_dates(d))
     return _fmt(d) in set(trading_dates())
 
 

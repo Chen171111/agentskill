@@ -1,0 +1,174 @@
+{
+  "total_tasks_enumerated": 208,
+  "tasks": [
+    {
+      "name": "\\QuantPanorama_DailyRun",
+      "sections": {
+        "settingsXml": {
+          "common_fields": 10,
+          "conflicts": [],
+          "equivalent_time_representations": [],
+          "disk_only": {
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}AllowHardTerminate[1]": "true",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}AllowStartOnDemand[1]": "true",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}DisallowStartOnRemoteAppSession[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}Enabled[1]": "true",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}Hidden[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}Priority[1]": "7",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}RunOnlyIfIdle[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}RunOnlyIfNetworkAvailable[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}WakeToRun[1]": "false"
+          },
+          "service_only": {}
+        },
+        "triggersXml": {
+          "common_fields": 7,
+          "conflicts": [],
+          "equivalent_time_representations": [],
+          "disk_only": {
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Triggers/{http://schemas.microsoft.com/windows/2004/02/mit/task}CalendarTrigger[1]/{http://schemas.microsoft.com/windows/2004/02/mit/task}Enabled[1]": "true"
+          },
+          "service_only": {}
+        }
+      },
+      "actions_match": true
+    },
+    {
+      "name": "\\QuantSelect_PaperTrack",
+      "sections": {
+        "settingsXml": {
+          "common_fields": 10,
+          "conflicts": [],
+          "equivalent_time_representations": [],
+          "disk_only": {
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}AllowHardTerminate[1]": "true",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}AllowStartOnDemand[1]": "true",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}DisallowStartOnRemoteAppSession[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}Enabled[1]": "true",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}Hidden[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}Priority[1]": "7",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}RunOnlyIfIdle[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}RunOnlyIfNetworkAvailable[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}WakeToRun[1]": "false"
+          },
+          "service_only": {}
+        },
+        "triggersXml": {
+          "common_fields": 7,
+          "conflicts": [],
+          "equivalent_time_representations": [],
+          "disk_only": {
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Triggers/{http://schemas.microsoft.com/windows/2004/02/mit/task}CalendarTrigger[1]/{http://schemas.microsoft.com/windows/2004/02/mit/task}Enabled[1]": "true"
+          },
+          "service_only": {}
+        }
+      },
+      "actions_match": true
+    },
+    {
+      "name": "\\QuantSelect_RefreshData",
+      "sections": {
+        "settingsXml": {
+          "common_fields": 10,
+          "conflicts": [],
+          "equivalent_time_representations": [],
+          "disk_only": {
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}AllowHardTerminate[1]": "true",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}AllowStartOnDemand[1]": "true",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}DisallowStartOnRemoteAppSession[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}Enabled[1]": "true",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}Hidden[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}Priority[1]": "7",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}RunOnlyIfIdle[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}RunOnlyIfNetworkAvailable[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}WakeToRun[1]": "false"
+          },
+          "service_only": {}
+        },
+        "triggersXml": {
+          "common_fields": 7,
+          "conflicts": [],
+          "equivalent_time_representations": [],
+          "disk_only": {
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Triggers/{http://schemas.microsoft.com/windows/2004/02/mit/task}CalendarTrigger[1]/{http://schemas.microsoft.com/windows/2004/02/mit/task}Enabled[1]": "true"
+          },
+          "service_only": {}
+        }
+      },
+      "actions_match": true
+    },
+    {
+      "name": "\\THS-AutoStart",
+      "sections": {
+        "settingsXml": {
+          "common_fields": 10,
+          "conflicts": [],
+          "equivalent_time_representations": [],
+          "disk_only": {
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}AllowHardTerminate[1]": "true",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}AllowStartOnDemand[1]": "true",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}DisallowStartOnRemoteAppSession[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}Enabled[1]": "true",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}Hidden[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}Priority[1]": "7",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}RunOnlyIfIdle[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}RunOnlyIfNetworkAvailable[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}WakeToRun[1]": "false"
+          },
+          "service_only": {}
+        },
+        "triggersXml": {
+          "common_fields": 2,
+          "conflicts": [],
+          "equivalent_time_representations": [],
+          "disk_only": {
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Triggers/{http://schemas.microsoft.com/windows/2004/02/mit/task}LogonTrigger[1]/{http://schemas.microsoft.com/windows/2004/02/mit/task}Enabled[1]": "true"
+          },
+          "service_only": {}
+        }
+      },
+      "actions_match": true
+    },
+    {
+      "name": "\\THS-KeepVisible",
+      "sections": {
+        "settingsXml": {
+          "common_fields": 10,
+          "conflicts": [],
+          "equivalent_time_representations": [],
+          "disk_only": {
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}AllowHardTerminate[1]": "true",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}AllowStartOnDemand[1]": "true",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}DisallowStartOnRemoteAppSession[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}Enabled[1]": "true",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}Hidden[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}Priority[1]": "7",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}RunOnlyIfIdle[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}RunOnlyIfNetworkAvailable[1]": "false",
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Settings/{http://schemas.microsoft.com/windows/2004/02/mit/task}WakeToRun[1]": "false"
+          },
+          "service_only": {}
+        },
+        "triggersXml": {
+          "common_fields": 5,
+          "conflicts": [],
+          "equivalent_time_representations": [
+            {
+              "path": "{http://schemas.microsoft.com/windows/2004/02/mit/task}Triggers/{http://schemas.microsoft.com/windows/2004/02/mit/task}CalendarTrigger[1]/{http://schemas.microsoft.com/windows/2004/02/mit/task}StartBoundary[1]",
+              "service": "2026-11-11T14:35:00+08:00",
+              "disk": "2026-11-11T06:35:00Z"
+            }
+          ],
+          "disk_only": {
+            "{http://schemas.microsoft.com/windows/2004/02/mit/task}Triggers/{http://schemas.microsoft.com/windows/2004/02/mit/task}CalendarTrigger[1]/{http://schemas.microsoft.com/windows/2004/02/mit/task}Enabled[1]": "true"
+          },
+          "service_only": {}
+        }
+      },
+      "actions_match": true
+    }
+  ],
+  "common_fields": 78,
+  "conflicts": 0,
+  "disk_only_fields": 50
+}

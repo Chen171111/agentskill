@@ -1,0 +1,165 @@
+﻿{
+    "observedAt":  "2026-11-17T01:09:08.6229712+08:00",
+    "totalTasksEnumerated":  208,
+    "selectedCount":  5,
+    "selected":  [
+                     {
+                         "name":  "\\QuantPanorama_DailyRun",
+                         "state":  "Ready",
+                         "lastRun":  "2026-11-16T14:50:00.0000000+08:00",
+                         "lastResult":  0,
+                         "nextRun":  "2026-11-17T14:50:00.0000000+08:00",
+                         "missedRuns":  0,
+                         "actions":  [
+                                         {
+                                             "execute":  "C:\\Windows\\System32\\conhost.exe",
+                                             "arguments":  "--headless cmd.exe /c \"E:\\MyWorkAndProject\\quant\\agentskill\\daily_run.bat\"",
+                                             "workingDirectory":  "E:\\MyWorkAndProject\\quant\\agentskill"
+                                         }
+                                     ],
+                         "logonType":  "InteractiveToken",
+                         "runLevel":  "",
+                         "settingsXml":  "\u003cSettings xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cDisallowStartIfOnBatteries\u003efalse\u003c/DisallowStartIfOnBatteries\u003e\u003cStopIfGoingOnBatteries\u003efalse\u003c/StopIfGoingOnBatteries\u003e\u003cExecutionTimeLimit\u003ePT1H\u003c/ExecutionTimeLimit\u003e\u003cMultipleInstancesPolicy\u003eIgnoreNew\u003c/MultipleInstancesPolicy\u003e\u003cStartWhenAvailable\u003etrue\u003c/StartWhenAvailable\u003e\u003cIdleSettings\u003e\u003cDuration\u003ePT10M\u003c/Duration\u003e\u003cWaitTimeout\u003ePT1H\u003c/WaitTimeout\u003e\u003cStopOnIdleEnd\u003etrue\u003c/StopOnIdleEnd\u003e\u003cRestartOnIdle\u003efalse\u003c/RestartOnIdle\u003e\u003c/IdleSettings\u003e\u003cUseUnifiedSchedulingEngine\u003etrue\u003c/UseUnifiedSchedulingEngine\u003e\u003c/Settings\u003e",
+                         "triggersXml":  "\u003cTriggers xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cCalendarTrigger\u003e\u003cStartBoundary\u003e2026-10-06T14:50:00+08:00\u003c/StartBoundary\u003e\u003cScheduleByWeek\u003e\u003cWeeksInterval\u003e1\u003c/WeeksInterval\u003e\u003cDaysOfWeek\u003e\u003cMonday /\u003e\u003cTuesday /\u003e\u003cWednesday /\u003e\u003cThursday /\u003e\u003cFriday /\u003e\u003c/DaysOfWeek\u003e\u003c/ScheduleByWeek\u003e\u003c/CalendarTrigger\u003e\u003c/Triggers\u003e",
+                         "diskDefinition":  {
+                                                "settingsXml":  "\u003cSettings xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cMultipleInstancesPolicy\u003eIgnoreNew\u003c/MultipleInstancesPolicy\u003e\u003cDisallowStartIfOnBatteries\u003efalse\u003c/DisallowStartIfOnBatteries\u003e\u003cStopIfGoingOnBatteries\u003efalse\u003c/StopIfGoingOnBatteries\u003e\u003cAllowHardTerminate\u003etrue\u003c/AllowHardTerminate\u003e\u003cStartWhenAvailable\u003etrue\u003c/StartWhenAvailable\u003e\u003cRunOnlyIfNetworkAvailable\u003efalse\u003c/RunOnlyIfNetworkAvailable\u003e\u003cIdleSettings\u003e\u003cDuration\u003ePT10M\u003c/Duration\u003e\u003cWaitTimeout\u003ePT1H\u003c/WaitTimeout\u003e\u003cStopOnIdleEnd\u003etrue\u003c/StopOnIdleEnd\u003e\u003cRestartOnIdle\u003efalse\u003c/RestartOnIdle\u003e\u003c/IdleSettings\u003e\u003cAllowStartOnDemand\u003etrue\u003c/AllowStartOnDemand\u003e\u003cEnabled\u003etrue\u003c/Enabled\u003e\u003cHidden\u003efalse\u003c/Hidden\u003e\u003cRunOnlyIfIdle\u003efalse\u003c/RunOnlyIfIdle\u003e\u003cDisallowStartOnRemoteAppSession\u003efalse\u003c/DisallowStartOnRemoteAppSession\u003e\u003cUseUnifiedSchedulingEngine\u003etrue\u003c/UseUnifiedSchedulingEngine\u003e\u003cWakeToRun\u003efalse\u003c/WakeToRun\u003e\u003cExecutionTimeLimit\u003ePT1H\u003c/ExecutionTimeLimit\u003e\u003cPriority\u003e7\u003c/Priority\u003e\u003c/Settings\u003e",
+                                                "actionsXml":  "\u003cActions Context=\"Author\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cExec\u003e\u003cCommand\u003eC:\\Windows\\System32\\conhost.exe\u003c/Command\u003e\u003cArguments\u003e--headless cmd.exe /c \"E:\\MyWorkAndProject\\quant\\agentskill\\daily_run.bat\"\u003c/Arguments\u003e\u003cWorkingDirectory\u003eE:\\MyWorkAndProject\\quant\\agentskill\u003c/WorkingDirectory\u003e\u003c/Exec\u003e\u003c/Actions\u003e",
+                                                "settingsMatchExport":  false,
+                                                "triggersMatchExport":  false,
+                                                "logonType":  "InteractiveToken",
+                                                "actionsMatchExport":  true,
+                                                "sha256":  "9F8D21D7D76BACEC91063345C56F6841F22B7F6ED6EECD58D092E6C32797415D",
+                                                "bytes":  4598,
+                                                "readable":  true,
+                                                "triggersXml":  "\u003cTriggers xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cCalendarTrigger\u003e\u003cStartBoundary\u003e2026-10-06T14:50:00+08:00\u003c/StartBoundary\u003e\u003cEnabled\u003etrue\u003c/Enabled\u003e\u003cScheduleByWeek\u003e\u003cDaysOfWeek\u003e\u003cMonday /\u003e\u003cTuesday /\u003e\u003cWednesday /\u003e\u003cThursday /\u003e\u003cFriday /\u003e\u003c/DaysOfWeek\u003e\u003cWeeksInterval\u003e1\u003c/WeeksInterval\u003e\u003c/ScheduleByWeek\u003e\u003c/CalendarTrigger\u003e\u003c/Triggers\u003e"
+                                            }
+                     },
+                     {
+                         "name":  "\\QuantSelect_PaperTrack",
+                         "state":  "Ready",
+                         "lastRun":  "2026-11-16T19:00:00.0000000+08:00",
+                         "lastResult":  0,
+                         "nextRun":  "2026-11-17T19:00:00.0000000+08:00",
+                         "missedRuns":  0,
+                         "actions":  [
+                                         {
+                                             "execute":  "C:\\Windows\\System32\\conhost.exe",
+                                             "arguments":  "--headless cmd.exe /c \"E:\\MyWorkAndProject\\quant2\\paper_track.bat\"",
+                                             "workingDirectory":  "E:\\MyWorkAndProject\\quant2"
+                                         }
+                                     ],
+                         "logonType":  "InteractiveToken",
+                         "runLevel":  "",
+                         "settingsXml":  "\u003cSettings xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cDisallowStartIfOnBatteries\u003efalse\u003c/DisallowStartIfOnBatteries\u003e\u003cStopIfGoingOnBatteries\u003efalse\u003c/StopIfGoingOnBatteries\u003e\u003cExecutionTimeLimit\u003ePT2H\u003c/ExecutionTimeLimit\u003e\u003cMultipleInstancesPolicy\u003eIgnoreNew\u003c/MultipleInstancesPolicy\u003e\u003cStartWhenAvailable\u003etrue\u003c/StartWhenAvailable\u003e\u003cIdleSettings\u003e\u003cDuration\u003ePT10M\u003c/Duration\u003e\u003cWaitTimeout\u003ePT1H\u003c/WaitTimeout\u003e\u003cStopOnIdleEnd\u003etrue\u003c/StopOnIdleEnd\u003e\u003cRestartOnIdle\u003efalse\u003c/RestartOnIdle\u003e\u003c/IdleSettings\u003e\u003cUseUnifiedSchedulingEngine\u003etrue\u003c/UseUnifiedSchedulingEngine\u003e\u003c/Settings\u003e",
+                         "triggersXml":  "\u003cTriggers xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cCalendarTrigger\u003e\u003cStartBoundary\u003e2026-10-05T19:00:00+08:00\u003c/StartBoundary\u003e\u003cScheduleByWeek\u003e\u003cWeeksInterval\u003e1\u003c/WeeksInterval\u003e\u003cDaysOfWeek\u003e\u003cMonday /\u003e\u003cTuesday /\u003e\u003cWednesday /\u003e\u003cThursday /\u003e\u003cFriday /\u003e\u003c/DaysOfWeek\u003e\u003c/ScheduleByWeek\u003e\u003c/CalendarTrigger\u003e\u003c/Triggers\u003e",
+                         "diskDefinition":  {
+                                                "settingsXml":  "\u003cSettings xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cMultipleInstancesPolicy\u003eIgnoreNew\u003c/MultipleInstancesPolicy\u003e\u003cDisallowStartIfOnBatteries\u003efalse\u003c/DisallowStartIfOnBatteries\u003e\u003cStopIfGoingOnBatteries\u003efalse\u003c/StopIfGoingOnBatteries\u003e\u003cAllowHardTerminate\u003etrue\u003c/AllowHardTerminate\u003e\u003cStartWhenAvailable\u003etrue\u003c/StartWhenAvailable\u003e\u003cRunOnlyIfNetworkAvailable\u003efalse\u003c/RunOnlyIfNetworkAvailable\u003e\u003cIdleSettings\u003e\u003cDuration\u003ePT10M\u003c/Duration\u003e\u003cWaitTimeout\u003ePT1H\u003c/WaitTimeout\u003e\u003cStopOnIdleEnd\u003etrue\u003c/StopOnIdleEnd\u003e\u003cRestartOnIdle\u003efalse\u003c/RestartOnIdle\u003e\u003c/IdleSettings\u003e\u003cAllowStartOnDemand\u003etrue\u003c/AllowStartOnDemand\u003e\u003cEnabled\u003etrue\u003c/Enabled\u003e\u003cHidden\u003efalse\u003c/Hidden\u003e\u003cRunOnlyIfIdle\u003efalse\u003c/RunOnlyIfIdle\u003e\u003cDisallowStartOnRemoteAppSession\u003efalse\u003c/DisallowStartOnRemoteAppSession\u003e\u003cUseUnifiedSchedulingEngine\u003etrue\u003c/UseUnifiedSchedulingEngine\u003e\u003cWakeToRun\u003efalse\u003c/WakeToRun\u003e\u003cExecutionTimeLimit\u003ePT2H\u003c/ExecutionTimeLimit\u003e\u003cPriority\u003e7\u003c/Priority\u003e\u003c/Settings\u003e",
+                                                "actionsXml":  "\u003cActions Context=\"Author\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cExec\u003e\u003cCommand\u003eC:\\Windows\\System32\\conhost.exe\u003c/Command\u003e\u003cArguments\u003e--headless cmd.exe /c \"E:\\MyWorkAndProject\\quant2\\paper_track.bat\"\u003c/Arguments\u003e\u003cWorkingDirectory\u003eE:\\MyWorkAndProject\\quant2\u003c/WorkingDirectory\u003e\u003c/Exec\u003e\u003c/Actions\u003e",
+                                                "settingsMatchExport":  false,
+                                                "triggersMatchExport":  false,
+                                                "logonType":  "InteractiveToken",
+                                                "actionsMatchExport":  true,
+                                                "sha256":  "45C9FF4278ACE29328C22540A422285D38EBEF61D97B72BBF10F6834E745C99B",
+                                                "bytes":  4526,
+                                                "readable":  true,
+                                                "triggersXml":  "\u003cTriggers xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cCalendarTrigger\u003e\u003cStartBoundary\u003e2026-10-05T19:00:00+08:00\u003c/StartBoundary\u003e\u003cEnabled\u003etrue\u003c/Enabled\u003e\u003cScheduleByWeek\u003e\u003cDaysOfWeek\u003e\u003cMonday /\u003e\u003cTuesday /\u003e\u003cWednesday /\u003e\u003cThursday /\u003e\u003cFriday /\u003e\u003c/DaysOfWeek\u003e\u003cWeeksInterval\u003e1\u003c/WeeksInterval\u003e\u003c/ScheduleByWeek\u003e\u003c/CalendarTrigger\u003e\u003c/Triggers\u003e"
+                                            }
+                     },
+                     {
+                         "name":  "\\QuantSelect_RefreshData",
+                         "state":  "Ready",
+                         "lastRun":  "2026-11-16T18:30:00.0000000+08:00",
+                         "lastResult":  0,
+                         "nextRun":  "2026-11-17T18:30:00.0000000+08:00",
+                         "missedRuns":  0,
+                         "actions":  [
+                                         {
+                                             "execute":  "C:\\Windows\\System32\\conhost.exe",
+                                             "arguments":  "--headless cmd.exe /c \"E:\\MyWorkAndProject\\quant2\\refresh_stock.bat\"",
+                                             "workingDirectory":  "E:\\MyWorkAndProject\\quant2"
+                                         }
+                                     ],
+                         "logonType":  "InteractiveToken",
+                         "runLevel":  "",
+                         "settingsXml":  "\u003cSettings xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cDisallowStartIfOnBatteries\u003efalse\u003c/DisallowStartIfOnBatteries\u003e\u003cStopIfGoingOnBatteries\u003efalse\u003c/StopIfGoingOnBatteries\u003e\u003cExecutionTimeLimit\u003ePT2H\u003c/ExecutionTimeLimit\u003e\u003cMultipleInstancesPolicy\u003eIgnoreNew\u003c/MultipleInstancesPolicy\u003e\u003cStartWhenAvailable\u003etrue\u003c/StartWhenAvailable\u003e\u003cIdleSettings\u003e\u003cDuration\u003ePT10M\u003c/Duration\u003e\u003cWaitTimeout\u003ePT1H\u003c/WaitTimeout\u003e\u003cStopOnIdleEnd\u003etrue\u003c/StopOnIdleEnd\u003e\u003cRestartOnIdle\u003efalse\u003c/RestartOnIdle\u003e\u003c/IdleSettings\u003e\u003cUseUnifiedSchedulingEngine\u003etrue\u003c/UseUnifiedSchedulingEngine\u003e\u003c/Settings\u003e",
+                         "triggersXml":  "\u003cTriggers xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cCalendarTrigger\u003e\u003cStartBoundary\u003e2026-10-05T18:30:00+08:00\u003c/StartBoundary\u003e\u003cScheduleByWeek\u003e\u003cWeeksInterval\u003e1\u003c/WeeksInterval\u003e\u003cDaysOfWeek\u003e\u003cMonday /\u003e\u003cTuesday /\u003e\u003cWednesday /\u003e\u003cThursday /\u003e\u003cFriday /\u003e\u003c/DaysOfWeek\u003e\u003c/ScheduleByWeek\u003e\u003c/CalendarTrigger\u003e\u003c/Triggers\u003e",
+                         "diskDefinition":  {
+                                                "settingsXml":  "\u003cSettings xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cMultipleInstancesPolicy\u003eIgnoreNew\u003c/MultipleInstancesPolicy\u003e\u003cDisallowStartIfOnBatteries\u003efalse\u003c/DisallowStartIfOnBatteries\u003e\u003cStopIfGoingOnBatteries\u003efalse\u003c/StopIfGoingOnBatteries\u003e\u003cAllowHardTerminate\u003etrue\u003c/AllowHardTerminate\u003e\u003cStartWhenAvailable\u003etrue\u003c/StartWhenAvailable\u003e\u003cRunOnlyIfNetworkAvailable\u003efalse\u003c/RunOnlyIfNetworkAvailable\u003e\u003cIdleSettings\u003e\u003cDuration\u003ePT10M\u003c/Duration\u003e\u003cWaitTimeout\u003ePT1H\u003c/WaitTimeout\u003e\u003cStopOnIdleEnd\u003etrue\u003c/StopOnIdleEnd\u003e\u003cRestartOnIdle\u003efalse\u003c/RestartOnIdle\u003e\u003c/IdleSettings\u003e\u003cAllowStartOnDemand\u003etrue\u003c/AllowStartOnDemand\u003e\u003cEnabled\u003etrue\u003c/Enabled\u003e\u003cHidden\u003efalse\u003c/Hidden\u003e\u003cRunOnlyIfIdle\u003efalse\u003c/RunOnlyIfIdle\u003e\u003cDisallowStartOnRemoteAppSession\u003efalse\u003c/DisallowStartOnRemoteAppSession\u003e\u003cUseUnifiedSchedulingEngine\u003etrue\u003c/UseUnifiedSchedulingEngine\u003e\u003cWakeToRun\u003efalse\u003c/WakeToRun\u003e\u003cExecutionTimeLimit\u003ePT2H\u003c/ExecutionTimeLimit\u003e\u003cPriority\u003e7\u003c/Priority\u003e\u003c/Settings\u003e",
+                                                "actionsXml":  "\u003cActions Context=\"Author\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cExec\u003e\u003cCommand\u003eC:\\Windows\\System32\\conhost.exe\u003c/Command\u003e\u003cArguments\u003e--headless cmd.exe /c \"E:\\MyWorkAndProject\\quant2\\refresh_stock.bat\"\u003c/Arguments\u003e\u003cWorkingDirectory\u003eE:\\MyWorkAndProject\\quant2\u003c/WorkingDirectory\u003e\u003c/Exec\u003e\u003c/Actions\u003e",
+                                                "settingsMatchExport":  false,
+                                                "triggersMatchExport":  false,
+                                                "logonType":  "InteractiveToken",
+                                                "actionsMatchExport":  true,
+                                                "sha256":  "DAF669B5B9B89241DD2FC260A0B1F6DB182267EAFBF93E3CF216463BD4D123C1",
+                                                "bytes":  4536,
+                                                "readable":  true,
+                                                "triggersXml":  "\u003cTriggers xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cCalendarTrigger\u003e\u003cStartBoundary\u003e2026-10-05T18:30:00+08:00\u003c/StartBoundary\u003e\u003cEnabled\u003etrue\u003c/Enabled\u003e\u003cScheduleByWeek\u003e\u003cDaysOfWeek\u003e\u003cMonday /\u003e\u003cTuesday /\u003e\u003cWednesday /\u003e\u003cThursday /\u003e\u003cFriday /\u003e\u003c/DaysOfWeek\u003e\u003cWeeksInterval\u003e1\u003c/WeeksInterval\u003e\u003c/ScheduleByWeek\u003e\u003c/CalendarTrigger\u003e\u003c/Triggers\u003e"
+                                            }
+                     },
+                     {
+                         "name":  "\\THS-AutoStart",
+                         "state":  "Ready",
+                         "lastRun":  "2026-11-16T08:38:19.0000000+08:00",
+                         "lastResult":  0,
+                         "nextRun":  null,
+                         "missedRuns":  0,
+                         "actions":  [
+                                         {
+                                             "execute":  "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                                             "arguments":  "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"E:\\MyWorkAndProject\\quant\\agentskill\\tools\\ths_autostart.ps1\"",
+                                             "workingDirectory":  "E:\\MyWorkAndProject\\quant\\agentskill"
+                                         }
+                                     ],
+                         "logonType":  "InteractiveToken",
+                         "runLevel":  "",
+                         "settingsXml":  "\u003cSettings xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cDisallowStartIfOnBatteries\u003efalse\u003c/DisallowStartIfOnBatteries\u003e\u003cStopIfGoingOnBatteries\u003efalse\u003c/StopIfGoingOnBatteries\u003e\u003cExecutionTimeLimit\u003ePT10M\u003c/ExecutionTimeLimit\u003e\u003cMultipleInstancesPolicy\u003eIgnoreNew\u003c/MultipleInstancesPolicy\u003e\u003cStartWhenAvailable\u003etrue\u003c/StartWhenAvailable\u003e\u003cIdleSettings\u003e\u003cDuration\u003ePT10M\u003c/Duration\u003e\u003cWaitTimeout\u003ePT1H\u003c/WaitTimeout\u003e\u003cStopOnIdleEnd\u003etrue\u003c/StopOnIdleEnd\u003e\u003cRestartOnIdle\u003efalse\u003c/RestartOnIdle\u003e\u003c/IdleSettings\u003e\u003cUseUnifiedSchedulingEngine\u003etrue\u003c/UseUnifiedSchedulingEngine\u003e\u003c/Settings\u003e",
+                         "triggersXml":  "\u003cTriggers xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cLogonTrigger\u003e\u003cDelay\u003ePT30S\u003c/Delay\u003e\u003cUserId\u003e小七的大砖块\\XiaoQi\u003c/UserId\u003e\u003c/LogonTrigger\u003e\u003c/Triggers\u003e",
+                         "diskDefinition":  {
+                                                "settingsXml":  "\u003cSettings xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cMultipleInstancesPolicy\u003eIgnoreNew\u003c/MultipleInstancesPolicy\u003e\u003cDisallowStartIfOnBatteries\u003efalse\u003c/DisallowStartIfOnBatteries\u003e\u003cStopIfGoingOnBatteries\u003efalse\u003c/StopIfGoingOnBatteries\u003e\u003cAllowHardTerminate\u003etrue\u003c/AllowHardTerminate\u003e\u003cStartWhenAvailable\u003etrue\u003c/StartWhenAvailable\u003e\u003cRunOnlyIfNetworkAvailable\u003efalse\u003c/RunOnlyIfNetworkAvailable\u003e\u003cIdleSettings\u003e\u003cDuration\u003ePT10M\u003c/Duration\u003e\u003cWaitTimeout\u003ePT1H\u003c/WaitTimeout\u003e\u003cStopOnIdleEnd\u003etrue\u003c/StopOnIdleEnd\u003e\u003cRestartOnIdle\u003efalse\u003c/RestartOnIdle\u003e\u003c/IdleSettings\u003e\u003cAllowStartOnDemand\u003etrue\u003c/AllowStartOnDemand\u003e\u003cEnabled\u003etrue\u003c/Enabled\u003e\u003cHidden\u003efalse\u003c/Hidden\u003e\u003cRunOnlyIfIdle\u003efalse\u003c/RunOnlyIfIdle\u003e\u003cDisallowStartOnRemoteAppSession\u003efalse\u003c/DisallowStartOnRemoteAppSession\u003e\u003cUseUnifiedSchedulingEngine\u003etrue\u003c/UseUnifiedSchedulingEngine\u003e\u003cWakeToRun\u003efalse\u003c/WakeToRun\u003e\u003cExecutionTimeLimit\u003ePT10M\u003c/ExecutionTimeLimit\u003e\u003cPriority\u003e7\u003c/Priority\u003e\u003c/Settings\u003e",
+                                                "actionsXml":  "\u003cActions Context=\"Author\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cExec\u003e\u003cCommand\u003eC:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\u003c/Command\u003e\u003cArguments\u003e-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"E:\\MyWorkAndProject\\quant\\agentskill\\tools\\ths_autostart.ps1\"\u003c/Arguments\u003e\u003cWorkingDirectory\u003eE:\\MyWorkAndProject\\quant\\agentskill\u003c/WorkingDirectory\u003e\u003c/Exec\u003e\u003c/Actions\u003e",
+                                                "settingsMatchExport":  false,
+                                                "triggersMatchExport":  false,
+                                                "logonType":  "InteractiveToken",
+                                                "actionsMatchExport":  true,
+                                                "sha256":  "3E63A5A0168F7AD6CC31BBDE003421BA09FAF8B02211D0C20EFF9FDD4770EE6D",
+                                                "bytes":  4172,
+                                                "readable":  true,
+                                                "triggersXml":  "\u003cTriggers xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cLogonTrigger\u003e\u003cEnabled\u003etrue\u003c/Enabled\u003e\u003cUserId\u003e小七的大砖块\\XiaoQi\u003c/UserId\u003e\u003cDelay\u003ePT30S\u003c/Delay\u003e\u003c/LogonTrigger\u003e\u003c/Triggers\u003e"
+                                            }
+                     },
+                     {
+                         "name":  "\\THS-KeepVisible",
+                         "state":  "Ready",
+                         "lastRun":  "2026-11-16T15:25:01.0000000+08:00",
+                         "lastResult":  0,
+                         "nextRun":  "2026-11-17T14:35:00.0000000+08:00",
+                         "missedRuns":  0,
+                         "actions":  [
+                                         {
+                                             "execute":  "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                                             "arguments":  "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"E:\\MyWorkAndProject\\quant\\agentskill\\tools\\ths_keepvisible.ps1\"",
+                                             "workingDirectory":  "E:\\MyWorkAndProject\\quant\\agentskill"
+                                         }
+                                     ],
+                         "logonType":  "InteractiveToken",
+                         "runLevel":  "",
+                         "settingsXml":  "\u003cSettings xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cDisallowStartIfOnBatteries\u003efalse\u003c/DisallowStartIfOnBatteries\u003e\u003cStopIfGoingOnBatteries\u003efalse\u003c/StopIfGoingOnBatteries\u003e\u003cExecutionTimeLimit\u003ePT3M\u003c/ExecutionTimeLimit\u003e\u003cMultipleInstancesPolicy\u003eIgnoreNew\u003c/MultipleInstancesPolicy\u003e\u003cStartWhenAvailable\u003etrue\u003c/StartWhenAvailable\u003e\u003cIdleSettings\u003e\u003cDuration\u003ePT10M\u003c/Duration\u003e\u003cWaitTimeout\u003ePT1H\u003c/WaitTimeout\u003e\u003cStopOnIdleEnd\u003etrue\u003c/StopOnIdleEnd\u003e\u003cRestartOnIdle\u003efalse\u003c/RestartOnIdle\u003e\u003c/IdleSettings\u003e\u003cUseUnifiedSchedulingEngine\u003etrue\u003c/UseUnifiedSchedulingEngine\u003e\u003c/Settings\u003e",
+                         "triggersXml":  "\u003cTriggers xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cCalendarTrigger\u003e\u003cStartBoundary\u003e2026-11-11T14:35:00+08:00\u003c/StartBoundary\u003e\u003cRepetition\u003e\u003cInterval\u003ePT10M\u003c/Interval\u003e\u003cDuration\u003ePT50M\u003c/Duration\u003e\u003cStopAtDurationEnd\u003etrue\u003c/StopAtDurationEnd\u003e\u003c/Repetition\u003e\u003cScheduleByDay\u003e\u003cDaysInterval\u003e1\u003c/DaysInterval\u003e\u003c/ScheduleByDay\u003e\u003c/CalendarTrigger\u003e\u003c/Triggers\u003e",
+                         "diskDefinition":  {
+                                                "settingsXml":  "\u003cSettings xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cMultipleInstancesPolicy\u003eIgnoreNew\u003c/MultipleInstancesPolicy\u003e\u003cDisallowStartIfOnBatteries\u003efalse\u003c/DisallowStartIfOnBatteries\u003e\u003cStopIfGoingOnBatteries\u003efalse\u003c/StopIfGoingOnBatteries\u003e\u003cAllowHardTerminate\u003etrue\u003c/AllowHardTerminate\u003e\u003cStartWhenAvailable\u003etrue\u003c/StartWhenAvailable\u003e\u003cRunOnlyIfNetworkAvailable\u003efalse\u003c/RunOnlyIfNetworkAvailable\u003e\u003cIdleSettings\u003e\u003cDuration\u003ePT10M\u003c/Duration\u003e\u003cWaitTimeout\u003ePT1H\u003c/WaitTimeout\u003e\u003cStopOnIdleEnd\u003etrue\u003c/StopOnIdleEnd\u003e\u003cRestartOnIdle\u003efalse\u003c/RestartOnIdle\u003e\u003c/IdleSettings\u003e\u003cAllowStartOnDemand\u003etrue\u003c/AllowStartOnDemand\u003e\u003cEnabled\u003etrue\u003c/Enabled\u003e\u003cHidden\u003efalse\u003c/Hidden\u003e\u003cRunOnlyIfIdle\u003efalse\u003c/RunOnlyIfIdle\u003e\u003cDisallowStartOnRemoteAppSession\u003efalse\u003c/DisallowStartOnRemoteAppSession\u003e\u003cUseUnifiedSchedulingEngine\u003etrue\u003c/UseUnifiedSchedulingEngine\u003e\u003cWakeToRun\u003efalse\u003c/WakeToRun\u003e\u003cExecutionTimeLimit\u003ePT3M\u003c/ExecutionTimeLimit\u003e\u003cPriority\u003e7\u003c/Priority\u003e\u003c/Settings\u003e",
+                                                "actionsXml":  "\u003cActions Context=\"Author\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cExec\u003e\u003cCommand\u003eC:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\u003c/Command\u003e\u003cArguments\u003e-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"E:\\MyWorkAndProject\\quant\\agentskill\\tools\\ths_keepvisible.ps1\"\u003c/Arguments\u003e\u003cWorkingDirectory\u003eE:\\MyWorkAndProject\\quant\\agentskill\u003c/WorkingDirectory\u003e\u003c/Exec\u003e\u003c/Actions\u003e",
+                                                "settingsMatchExport":  false,
+                                                "triggersMatchExport":  false,
+                                                "logonType":  "InteractiveToken",
+                                                "actionsMatchExport":  true,
+                                                "sha256":  "BFA04B77C24AF4E01066E53EBAAB9E07549A91B00E4A15F4ADBC8B6F74DCCF7F",
+                                                "bytes":  4682,
+                                                "readable":  true,
+                                                "triggersXml":  "\u003cTriggers xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cCalendarTrigger\u003e\u003cRepetition\u003e\u003cInterval\u003ePT10M\u003c/Interval\u003e\u003cDuration\u003ePT50M\u003c/Duration\u003e\u003cStopAtDurationEnd\u003etrue\u003c/StopAtDurationEnd\u003e\u003c/Repetition\u003e\u003cStartBoundary\u003e2026-11-11T06:35:00Z\u003c/StartBoundary\u003e\u003cEnabled\u003etrue\u003c/Enabled\u003e\u003cScheduleByDay\u003e\u003cDaysInterval\u003e1\u003c/DaysInterval\u003e\u003c/ScheduleByDay\u003e\u003c/CalendarTrigger\u003e\u003c/Triggers\u003e"
+                                            }
+                     }
+                 ],
+    "errors":  [
+
+               ]
+}

@@ -275,19 +275,20 @@ def check_order_row_matches_side():
     assert r2 is not None and r2["side"] == "卖出", "卖单选中了买单行：{}".format(r2)
     assert abs(r2["avg_price"] - 3.498) < 1e-9
 
-    # 数量对不上但方向唯一 → 仍按方向匹配（OCR 可能把数量读错）
+    # 数量不一致不能证明属于这一笔订单。
     r3 = match_order_row(rows, "510880", "buy", 999)
-    assert r3 is not None and r3["side"] == "买入"
+    assert r3 is None, "数量不一致必须保持未知"
 
     # 只剩反向行 → 必须返回 None（宁可台账停在 submitted，也不用错行）
     only_sell = [x for x in rows if x["side"] == "卖出"]
     assert match_order_row(only_sell, "510880.SH", "buy", 100) is None, \
         "只有反向委托时不得回退取第一行（会串向）"
 
-    # OCR 丢了「操作」列（side=None）→ 兜底匹配，否则台账永远停在 submitted
+    # OCR 丢方向时只能靠精确券商合同编号关联。
     blind = [dict(rows[0], side=None)]
-    assert match_order_row(blind, "510880.SH", "buy", 100) is not None, \
-        "OCR 丢方向时应兜底匹配"
+    assert match_order_row(blind, "510880.SH", "buy", 100) is None
+    assert match_order_row(blind, "510880.SH", "sell", 100,
+                           broker_order_id="625377491") is not None
 
     # 代码不存在 / 空输入 / None
     assert match_order_row(rows, "999999.SH", "buy", 100) is None
@@ -389,7 +390,8 @@ def check_trades_sync_fill_gets_real_avg_price():
     若取错，`orders.filled_price` 会写 2.688，与券商真值差 0.002/股。
     """
     rows = parse_trades(ORDER_OCR_FILLED)
-    r = match_order_row(rows, "513500.SH", "sell", 100)
+    r = match_order_row(rows, "513500.SH", "sell", 100,
+                        broker_order_id="6285045859")
     assert r is not None, "已成交卖单应能被 match_order_row 选中"
     assert abs(r["avg_price"] - 2.690) < 1e-9, \
         "sync_fill 会取到 avg_price，它必须是成交均价 2.690：{}".format(r)

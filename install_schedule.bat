@@ -18,6 +18,7 @@ rem  Nothing is traded by this script - registration only.
 rem ===============================================================
 chcp 65001 >nul
 setlocal
+set "RC=1"
 cd /d "%~dp0"
 set "LOG=state\install_schedule.log"
 if not exist state mkdir state
@@ -59,15 +60,10 @@ echo   Relaunching ELEVATED - a UAC prompt will appear, click YES.
 echo   The registration is re-attempted in the new window.
 echo --------------------------------------------------------------
 echo.
-powershell -NoProfile -Command "try{Start-Process -FilePath '%~f0' -ArgumentList 'elevated' -Verb RunAs -WorkingDirectory '%~dp0'; exit 0}catch{Write-Output $_.Exception.Message; exit 1}"
-if errorlevel 1 goto :uacdeclined
-echo [i] Continue in the NEW elevated window; this one can be closed.
-echo [i] relaunched elevated >> "%LOG%"
-goto :end
-
-:uacdeclined
-echo [FAIL] UAC was declined or elevation failed.
-echo [FAIL] UAC declined or elevation failed >> "%LOG%"
+set "QUANT_TASK_REPAIR_SCRIPT=%~dp0%PS1%"
+powershell -NoProfile -Command "try{$child=Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File '+[char]34+$env:QUANT_TASK_REPAIR_SCRIPT+[char]34) -Verb RunAs -WindowStyle Hidden -PassThru -Wait; exit $child.ExitCode}catch{Write-Output $_.Exception.Message; exit 1}"
+set "RC=%errorlevel%"
+if "%RC%"=="0" goto :ok
 goto :giveup
 
 :ok
@@ -101,6 +97,5 @@ echo [FAIL] manual intervention needed >> "%LOG%"
 
 :end
 echo.
-echo This window stays open on purpose - read the lines above.
-pause
-exit /b 0
+if /i not "%~1"=="--no-pause" pause
+exit /b %RC%

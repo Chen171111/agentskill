@@ -249,6 +249,65 @@ def repair_frame(d: pd.DataFrame, code: str = "", thresh: float = THRESH,
     return fixed, len(jumps), jumps
 
 
+def prepare_signal_frame(d: pd.DataFrame, code: str = "", enabled=True,
+                         thresh: float = THRESH, log_path=None,
+                         limit_aware: bool = False) -> tuple:
+    """Keep source OHLC in raw_* and construct causal forward-adjusted signals.
+
+    split_ratio is new shares / old shares, effective before that day's open.
+    A supplied split_ratio column is authoritative (blank = no event), so a
+    known split preserves its actual market return. In its absence ONLY the
+    existing scan_jumps criterion creates events: prev_close / close estimates
+    a neutral-return conversion and sets split_inferred=1. That estimate is NOT
+    an exact legal share ratio; price data cannot separate a market return from
+    a split. Ordinary daily returns never create events. Missing small splits,
+    data errors and unusual true moves remain limitations of that heuristic.
+
+    Each event scales its effective day and later signal prices. Appending a
+    future event cannot rewrite historical signals or executable raw quotes.
+    raw_* means the source cache's original values; a cache already adjusted by
+    its provider (e.g. stock qfq) cannot reconstruct exchange-original prices.
+    Legacy repair_frame/repair_splits retain their backward repair semantics for
+    explicit diagnostic tools; DataStore uses this function only.
+    """
+    import numpy as np
+
+    out = d.copy()
+    for column in PRICE_COLS:
+        if column in out:
+            out['raw_' + column] = out[column].copy()
+    ratios = pd.Series(1., index=out.index)
+    inferred = pd.Series(0., index=out.index)
+    jumps = []
+    if enabled:
+        if 'split_ratio' in d.columns:
+            explicit = pd.to_numeric(d['split_ratio'], errors='raise').fillna(1.)
+            if not np.isfinite(explicit).all() or not (explicit > 0).all():
+                raise ValueError('split_ratio must contain finite positive new/old ratios')
+            ratios = explicit.astype(float)
+            previous = out['close'].shift()
+            for date in ratios.index[ratios != 1]:
+                pc, price = previous.loc[date], out.loc[date, 'close']
+                if np.isfinite(pc) and pc > 0:
+                    jumps.append((str(date), float(pc), float(price), float(price / pc - 1)))
+        else:
+            jumps = scan_jumps(out, thresh, code=code, limit_aware=limit_aware)
+            for date, previous, price, _ in jumps:
+                if not np.isfinite(price) or price <= 0 or previous <= 0:
+                    raise ValueError('Cannot infer a split from a nonpositive price')
+                ratios.loc[date] = previous / price
+                inferred.loc[date] = 1.
+        scale = ratios.cumprod()
+        for column in PRICE_COLS:
+            if column in out:
+                out[column] = out[column] * scale
+        if jumps and log_path:
+            _log(log_path, code, jumps)
+    out['split_ratio'] = ratios
+    out['split_inferred'] = inferred
+    return out, int((ratios != 1).sum())
+
+
 def _log(log_path, code: str, jumps: list) -> None:
     """把复权动作追加到审计日志（**份额折算是正常事件，不该刷告警**，但必须留痕）。"""
     try:

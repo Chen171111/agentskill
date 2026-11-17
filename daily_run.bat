@@ -26,6 +26,7 @@ if "%PYTHON64%"=="" set "PY64=E:\Python\python.exe"
 if not "%PYTHON64%"=="" set "PY64=%PYTHON64%"
 if "%PYTHON32%"=="" set "PY32=E:\Python32\python.exe"
 if not "%PYTHON32%"=="" set "PY32=%PYTHON32%"
+if not exist state mkdir state
 set LOG=state\daily_run.log
 echo ==================== %date% %time% ==================== >> "%LOG%"
 
@@ -37,7 +38,8 @@ rem  Exit codes: 0=ok  1=refresh failed  3=health check FAILED
 rem  (health check writes state/DATA_ALERT.txt - see tools/refresh_data.py)
 rem ---------------------------------------------------------------
 "%PY64%" -u tools\refresh_data.py >> "%LOG%" 2>&1
-if errorlevel 1 echo [WARN] data refresh/health-check FAILED (see state/DATA_ALERT.txt). If the data is stale the trading step will refuse to run due to the staleness guard. >> "%LOG%"
+set "RUN_RC=%errorlevel%"
+if not "%RUN_RC%"=="0" goto done
 
 rem ---------------------------------------------------------------
 rem  Step 0  environment snapshot (read-only forensics, always exit 0)
@@ -61,5 +63,8 @@ rem      will NOT overwrite last_run.json, so a failed extra run can no longer
 rem      make the next check_alerts.py report a false "auto-trade FAILED"
 rem      (that is exactly what happened on 2026-09-18 21:02).
 rem ---------------------------------------------------------------
-"%PY32%" -u tools\daily_job.py >> "%LOG%" 2>&1
-echo [done] exit=%errorlevel% >> "%LOG%"
+"%PY32%" -u tools\daily_job.py --data-ready >> "%LOG%" 2>&1
+set "RUN_RC=%errorlevel%"
+:done
+echo [done] exit=%RUN_RC% >> "%LOG%"
+exit /b %RUN_RC%

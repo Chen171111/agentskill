@@ -1,0 +1,104 @@
+{
+  "probe_exit_wrapper": {
+    "synthetic_refresh_rc": 0,
+    "synthetic_trade_rc": 7,
+    "direct_batch_rc": 0,
+    "conhost_batch_rc": 0,
+    "direct_explicit_exit_7": 7,
+    "conhost_explicit_exit_7": 0,
+    "trade_invoked": true,
+    "log_has_data_warning": false,
+    "done_lines": [
+      "[done] exit=7"
+    ]
+  },
+  "probe_health_not_blocking": {
+    "synthetic_refresh_rc": 3,
+    "synthetic_trade_rc": 0,
+    "direct_batch_rc": 0,
+    "conhost_batch_rc": 0,
+    "direct_explicit_exit_7": 7,
+    "conhost_explicit_exit_7": 0,
+    "trade_invoked": true,
+    "log_has_data_warning": true,
+    "done_lines": [
+      "[done] exit=0"
+    ]
+  },
+  "probe_confirmation_guards": {
+    "quantity_missing": {
+      "accepted": true,
+      "clicked_yes": true,
+      "recorded_order_price": 10.0
+    },
+    "opposite_side": {
+      "accepted": true,
+      "clicked_yes": true,
+      "recorded_order_price": 10.0
+    },
+    "wrong_explicit_limit": {
+      "accepted": true,
+      "clicked_yes": true,
+      "recorded_order_price": 100.0
+    },
+    "wrong_security_field": {
+      "accepted": true,
+      "clicked_yes": true,
+      "recorded_order_price": 10.0
+    }
+  },
+  "probe_ambiguous_fill": {
+    "same_rows_old_first": {
+      "id": "20261117005950-abec8a79",
+      "code": "510300.SH",
+      "side": "buy",
+      "qty": 100,
+      "price": 10.0,
+      "reason": "",
+      "status": "filled",
+      "filled_price": 5,
+      "filled_qty": 100,
+      "fee": 0.0,
+      "fill_source": "readback"
+    },
+    "same_rows_new_first": {
+      "id": "20261117005950-7d12d393",
+      "code": "510300.SH",
+      "side": "buy",
+      "qty": 100,
+      "price": 10.0,
+      "reason": "",
+      "status": "submitted",
+      "filled_price": 10,
+      "filled_qty": 0,
+      "fee": 0.0,
+      "fill_source": ""
+    }
+  },
+  "probe_cancelled_status": {
+    "source_status": "已撤",
+    "saved_status": "submitted"
+  },
+  "probe_after_close_first_attempt": {
+    "synthetic_start": "2026-11-17 19:00:00",
+    "trading_subprocess_invocations": 1,
+    "retry_window_allowed": false
+  },
+  "probe_retry_beyond_window": {
+    "attempt_times": [
+      "14:55:50",
+      "14:57:50"
+    ],
+    "configured_end": "14:56"
+  },
+  "probe_false_readiness": {
+    "one_of_four_control_ids_accepted": true,
+    "minimized_window_state": "READY",
+    "restore_called": false
+  },
+  "probe_unverified_receipt": {
+    "receipt_found": false,
+    "saved_status": "submitted",
+    "broker_contract_field_present": false
+  }
+}

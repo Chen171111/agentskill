@@ -18,6 +18,9 @@ from risk.manager import RiskManager
 from account.portfolio import PortfolioAccount
 from trader.execution import ExecutionEngine
 from storage.db import TradeDB
+from trader.broker import Order, DryRunBroker
+from strategies.eligibility import filter_positive_momentum
+from risk.timing import timing_scale
 
 DEFAULT_FACTORS = ["rsi", "macd_hist", "bias20", "sma_gap",
                    "momentum5", "momentum10", "momentum20",
@@ -69,7 +72,7 @@ class DailyRunner:
                 "trading_{}.db".format(profile)))
         else:
             db_path = None
-        self.db = TradeDB(db_path=db_path)
+        self.db = TradeDB(db_path=db_path, read_only=dry_run)
         self.account = PortfolioAccount(init_cash=init_cash)
         # 恢复历史持仓与现金（若存在）
         saved = self.db.load_positions()
@@ -78,6 +81,7 @@ class DailyRunner:
         latest = self.db.load_latest_equity()
         if latest:
             self.account.cash = float(latest.get("cash", self.account.cash))
+            self.account.frozen = float(latest.get("frozen") or 0.0)
         # topk=None 时**不注入**，让策略类定义的默认值生效 —— 与
         # `pipeline.run_backtest`（`if topk is not None: kw.setdefault(...)`）保持同一口径。
         #
@@ -104,7 +108,8 @@ class DailyRunner:
             except (TypeError, ValueError):
                 pass
         # 券商：None 表示用 PaperBroker（本地模拟撮合）
-        self.broker = broker
+        self.broker = (DryRunBroker(broker) if dry_run and broker is not None
+                       and not isinstance(broker, DryRunBroker) else broker)
 
     # ---------------- 并行验证（shadow）----------------
     def _shadow_weights(self, date, factors, panel, since_before):
@@ -150,6 +155,91 @@ class DailyRunner:
             print("[runner] 影子记录失败（不影响实盘）：{}".format(e))
 
     def run_once(self, end: str = None) -> dict:
+        """A ledger has one writer; a completed signal bar is processed once."""
+        from contextlib import nullcontext
+        if not self.dry_run and getattr(self.broker, "requires_trading_session", False):
+            from tools.trading_session import require_trading_session
+            require_trading_session()
+        with (nullcontext() if self.dry_run else self.db.run_lock()):
+            saved = self.db.get_state("strategy_since")
+            if saved is not None:
+                self.strategy._since = int(saved)
+            since_before = self.strategy._since
+            try:
+                result = self._run_once(end)
+            except BaseException:
+                self.strategy._since = since_before
+                raise
+            if self.dry_run or result.get("status") not in ("ok", "already_processed"):
+                self.strategy._since = since_before
+            if not self.dry_run and result.get("status") == "ok":
+                self.db.set_state("last_processed_signal_date", result["date"])
+            return result
+
+    def _order_status(self, orders, post_synced, since_before):
+        if self.dry_run:
+            return "ok"
+        if not post_synced or any(o.status in ("rejected", "cancelled", "error", "unknown", "pending_submit") for o in orders):
+            self.strategy._since = since_before
+            return "failed"
+        if any(o.status in ("submitted", "partially_filled") for o in orders):
+            self.strategy._since = since_before
+            return "pending"
+        return "ok"
+
+    def _refresh_confirmed_positions(self, orders, prices, post_synced):
+        if (getattr(self.broker, "requires_trading_session", False)
+                and any(o.filled_qty > 0 for o in orders)):
+            import copy
+            old = (self.account.cash, self.account.frozen, copy.deepcopy(self.account.positions))
+            try:
+                post_synced = bool(self.broker.reconcile(self.account, prices))
+            except Exception as exc:
+                print("[runner] 成交后对账失败: {}".format(exc))
+                post_synced = False
+            if not post_synced:
+                self.account.cash, self.account.frozen, self.account.positions = old
+        return post_synced
+
+    def _recover_pending(self, prices):
+        from tools.trading_session import SHANGHAI
+        records = self.db.unresolved_orders()
+        if not records:
+            return []
+        rows = None
+        rows_loaded = False
+        day_only = getattr(self.broker, "orders_valid_for_day", False)
+        today = datetime.now(SHANGHAI).date()
+        unresolved = []
+        for record in records:
+            order = Order.from_record(record)
+            stamp = record.get("submitted_at") or record.get("ts") or ""
+            try:
+                submitted = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+                if submitted.tzinfo is None:
+                    submitted = submitted.replace(tzinfo=SHANGHAI)
+                day = submitted.astimezone(SHANGHAI).date()
+            except (TypeError, ValueError):
+                day = None  # Unknown date cannot be matched to today's table.
+            # Broker contract numbers can be reused across sessions.  A prior
+            # day's order must never borrow a fill from today's same-number row.
+            if hasattr(self.broker, "sync_fill") and (not day_only or day == today):
+                if not rows_loaded and hasattr(self.broker, "fetch_today_orders"):
+                    rows = self.broker.fetch_today_orders()
+                    rows_loaded = True
+                self.broker.sync_fill(order, rows=rows)
+            active = order.status in ("pending_submit", "submitted", "unknown", "error", "partially_filled")
+            frozen = self.account.frozen > 0 or any((p.get("frozen") or 0) > 0 for p in self.account.positions.values())
+            if active and day_only and day is not None and day < today and not frozen:
+                order.status = "expired_unknown"
+                order.reason += " [日单已过期；历史成交未确认，持仓以券商对账为准]"
+                active = False
+            self.db.save_order(order)
+            if active:
+                unresolved.append(order.to_dict())
+        return unresolved
+
+    def _run_once(self, end: str = None) -> dict:
         """执行一个交易日的完整闭环。end 传 None 则用最新数据。"""
         # 先补缺，再强制增量刷新缓存到「最近已收盘交易日」，杜绝用陈旧数据下单
         self.store.ensure(self.codes)
@@ -163,12 +253,15 @@ class DailyRunner:
 
         factors = compute_factors(panel, DEFAULT_FACTORS)
         last_date = panel.dates[-1]
-        prices = {c: float(panel.get("close").loc[last_date, c]) for c in panel.codes}
+        execution_close = panel.get("raw_close")
+        if execution_close is None:
+            execution_close = panel.get("close")
+        prices = {c: float(execution_close.loc[last_date, c]) for c in panel.codes}
         # 【NaN/inf 入口闸门】2026-09-29：nan 的比较运算**全部返回 False**，
         # 会静默穿透 _pos_ok 的全部判据（calc=nan 时五个判据全"通过"，实测复现）、
         # 风控止损与回撤熔断，并把 nan 成本价写进账本（市值/净值全污染）。
         # 行情价不有限 → 宁可拒单，不用不可信价格交易（与数据新鲜度守卫同一思路）。
-        _bad_px = [c for c, v in prices.items() if not math.isfinite(v)]
+        _bad_px = [c for c, v in prices.items() if not math.isfinite(v) or v <= 0]
         if _bad_px:
             raise RuntimeError(
                 "行情价含 NaN/inf：{}（最新交易日 {}）。拒绝用不可信价格交易，"
@@ -189,7 +282,7 @@ class DailyRunner:
         except RuntimeError:
             raise
         except Exception as e:
-            print("[runner] 数据新鲜度校验跳过：{}".format(e))
+            raise RuntimeError("无法校验行情新鲜度，拒绝交易: {}".format(e)) from e
 
         # 【下单前必做】用真实券商对账，校正本地账户。
         # 放在算出行情价之后，是为了把 prices 交给 reconcile 做持仓校验——
@@ -244,6 +337,16 @@ class DailyRunner:
                 self.account.cash, self.account.frozen,
                 {k: v.get("qty") for k, v in self.account.positions.items()}))
 
+        if not self.dry_run:
+            pending = self._recover_pending(prices)
+            if pending:
+                return {"status": "pending", "date": last_date, "strategy": self.strategy_name,
+                        "rebalanced": False, "orders": pending, "account": self.account.snapshot(prices),
+                        "error": "存在未确认委托，已暂停新委托以防重复下单", "dry_run": False}
+            if self.db.get_state("last_processed_signal_date") == last_date:
+                return {"status": "already_processed", "date": last_date, "strategy": self.strategy_name,
+                        "rebalanced": False, "orders": [], "account": self.account.snapshot(prices),
+                        "dry_run": False}
         # 第一步 选股：仅在调仓日触发（与回测「每 N 日调仓」口径一致，非调仓日返回 None）
         since_before = self.strategy._since      # 影子策略必须从同一计数器出发
         raw_weights = self.strategy.generate_weights(last_date, factors, panel)
@@ -301,7 +404,7 @@ class DailyRunner:
                 w = p["qty"] * prices[code] / equity
                 weights[code] = 0.0 if code in stops else w
 
-            executor = ExecutionEngine(self.broker) if self.broker else ExecutionEngine()
+            executor = ExecutionEngine(self.broker, on_order=None if self.dry_run else self.db.save_order)
             orders = executor.rebalance(self.account, weights, prices)
 
             # 下单后立即落库（与调仓日路径同一纪律：报单 → 落库 → 对账 → 回填 → upsert）
@@ -341,18 +444,21 @@ class DailyRunner:
                         self.broker.sync_fill(o, rows=rows)
                     except Exception as e:
                         print("[runner] ⚠️ 成交回读失败 {} {}：{}".format(o.code, o.id, e))
-            # 终态落库 + 持仓/净值（strategy_since 不推进：止损不是调仓）
+            post_synced = self._refresh_confirmed_positions(orders, prices, post_synced)
+            execution_status = self._order_status(orders, post_synced, since_before)
+            # 终态落库 + 持仓/净值；失败或未决不得推进调仓相位。
             snap = self.account.snapshot(prices)
             if not self.dry_run:
                 for o in orders:
                     self.db.save_order(o)
-                self.db.set_state("strategy_since", str(self.strategy._since))
+                if execution_status == "ok":
+                    self.db.set_state("strategy_since", str(self.strategy._since))
                 if post_synced:
                     self.db.save_positions(self.account.positions)
                     self.db.save_equity(last_date, snap["cash"], snap["market_value"],
                                         snap["total_equity"], snap["frozen"])
             return {
-                "status": "ok", "date": last_date, "strategy": self.strategy_name,
+                "status": execution_status, "date": last_date, "strategy": self.strategy_name,
                 "rebalanced": True, "reason": "daily_stop_loss",
                 "target_weights": {c: round(w, 4) for c, w in weights.items()},
                 "final_weights": {c: round(w, 4) for c, w in weights.items()},
@@ -383,12 +489,11 @@ class DailyRunner:
         selection.sort(key=lambda x: -x["weight"])
 
         # 第二步 评估：绝对动量质检（20日动量≤0 视为无合适，剔除）+ 风控修正
-        qualified = {}
+        qualified = (filter_positive_momentum(raw_weights, factors, last_date)
+                     if getattr(self.strategy, "positive_momentum_filter", False) else dict(raw_weights))
         evaluation = []
         for s in selection:
-            ok = s["momentum20"] is not None and s["momentum20"] > 0
-            if ok:
-                qualified[s["code"]] = raw_weights[s["code"]]
+            ok = s["code"] in qualified
             evaluation.append(dict(s, qualified=ok,
                                    reason="" if ok else "20日动量≤0，剔除"))
 
@@ -403,6 +508,9 @@ class DailyRunner:
         weights = risk.filter_weights(qualified, self.account.positions, prices,
                                      nav_history=nav_history,
                                      enforce_stops=getattr(self.strategy, "stops_enabled", True))
+        exposure = timing_scale(self.timing, last_date, panel.get("close"),
+                                panel.get("high"), panel.get("low"))
+        weights = {c: w * exposure for c, w in weights.items()}
         if not self.dry_run:
             # 熔断状态落库（非调仓日不走 filter_weights，状态自然保持不变）
             self.db.set_state("dd_circuit_active",
@@ -410,7 +518,7 @@ class DailyRunner:
         empty = not bool(weights)   # 无合格标的 → 空仓
 
         # 第三步 下单（空仓时 ExecutionEngine 会自然清掉旧持仓）
-        executor = ExecutionEngine(self.broker) if self.broker else ExecutionEngine()
+        executor = ExecutionEngine(self.broker, on_order=None if self.dry_run else self.db.save_order)
         orders = executor.rebalance(self.account, weights, prices)
 
         # 【2026-10-02 验收修复（与 quant2 Q-02 同款）】下单后**立即**落库：
@@ -493,11 +601,14 @@ class DailyRunner:
                 print("          → 多为「对账早于页面刷新」，下次对账会自愈；"
                       "若次日仍缺，先看 state/diag_pos_*.txt 确认表格里有没有这只。")
 
+        post_synced = self._refresh_confirmed_positions(orders, prices, post_synced)
+        execution_status = self._order_status(orders, post_synced, since_before)
         # 持久化（dry_run 时全部跳过，保证试算零副作用）
         if not self.dry_run:
             for o in orders:
                 self.db.save_order(o)          # 回填后 upsert 终态（与上方首落的 id 相同；orders 是事实记录）
-            self.db.set_state("strategy_since", str(self.strategy._since))
+            if execution_status == "ok":
+                self.db.set_state("strategy_since", str(self.strategy._since))
             if post_synced:
                 self.db.save_positions(self.account.positions)
             # ⚠️ 未通过校验时不写 positions：见上面的修复说明。
@@ -510,7 +621,7 @@ class DailyRunner:
         # ⚠️ 净值行同理：account 未与券商对齐时，算出来的净值是错的，不落库。
 
         return {
-            "status": "ok",
+            "status": execution_status,
             "date": last_date,
             "strategy": self.strategy_name,
             "rebalanced": True,

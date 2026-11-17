@@ -12,7 +12,8 @@
 #
 # 退出码：0 = 已注册且磁盘定义核对通过；1 = 失败（详见输出）
 param(
-    [string]$TaskName = 'QuantPanorama_DailyRun'
+    [string]$TaskName = 'QuantPanorama_DailyRun',
+    [switch]$Describe
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,8 +21,18 @@ $ErrorActionPreference = 'Stop'
 # 仓库根目录 = 本脚本所在目录的上一级
 $Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $Bat  = Join-Path $Root 'daily_run.bat'
-$Exe  = 'cmd.exe'
-$Args = '/c "' + $Bat + '"'
+$Runner = Join-Path $Root 'tools\run_scheduled.ps1'
+. (Join-Path $PSScriptRoot 'task_action.ps1')
+$expectedAction = Get-QuantTaskAction -Root $Root
+$Exe = $expectedAction.Execute
+$Args = $expectedAction.Arguments
+
+# Describe the exact action without registering, starting, or modifying tasks.
+if ($Describe) {
+    [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+    [ordered]@{ Execute = $Exe; Arguments = $Args; WorkingDirectory = $Root } | ConvertTo-Json -Compress
+    exit 0
+}
 
 function Say { Write-Output ($args -join '') }
 
@@ -30,6 +41,10 @@ Say ('  注册 / 修复计划任务: ' + $TaskName)
 Say ('  仓库: ' + $Root)
 Say '=============================================================='
 
+if (-not (Test-Path -LiteralPath $Runner)) {
+    Say ('[FAIL] Missing scheduled runner: ' + $Runner)
+    exit 1
+}
 if (-not (Test-Path -LiteralPath $Bat)) {
     Say ('[FAIL] 找不到 daily_run.bat: ' + $Bat)
     exit 1
@@ -88,7 +103,9 @@ try {
 }
 
 $fail = @()
-if ($defXml -notmatch [regex]::Escape($Bat))            { $fail += '动作路径里没有 daily_run.bat' }
+if ($defXml -notmatch [regex]::Escape($Runner))         { $fail += '动作路径里没有 run_scheduled.ps1' }
+if ($defXml -notmatch [regex]::Escape($Exe))            { $fail += '动作程序不是 Windows PowerShell' }
+if ($defXml -notmatch [regex]::Escape($Args))           { $fail += '动作参数与隐藏等待包装器不符' }
 if ($defXml -notmatch [regex]::Escape($Root))           { $fail += 'WorkingDirectory 不是本仓库' }
 if ($defXml -notmatch '<StartWhenAvailable>true')       { $fail += 'StartWhenAvailable != true（错过时点不会补跑）' }
 if ($defXml -notmatch '<DisallowStartIfOnBatteries>false') { $fail += 'DisallowStartIfOnBatteries != false（笔记本电池下不跑）' }
@@ -110,7 +127,7 @@ try {
     $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
     $i = Get-ScheduledTaskInfo -TaskName $TaskName
     Say ('[i] State = ' + $t.State + ' / NextRunTime = ' + $i.NextRunTime + ' / NumberOfMissedRuns = ' + $i.NumberOfMissedRuns)
-    if ($t.Actions[0].Arguments -notmatch [regex]::Escape($Bat)) { $fail += '服务端动作路径不符' }
+    if ($t.Actions[0].Arguments -ne $Args -or $t.Actions[0].Execute -ne $Exe) { $fail += '服务端动作路径或参数不符' }
     if ($null -eq $i.NextRunTime) { $fail += 'NextRunTime 为空（触发器没生效）' }
 } catch {
     Say ('[FAIL] 服务端查询失败: ' + $_.Exception.Message)
