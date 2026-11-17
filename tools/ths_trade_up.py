@@ -145,6 +145,37 @@ def _has_trade_controls(hwnd, max_nodes=6000):
     return False
 
 
+def _broker_usable():
+    """权威判据：用交易链路自己的连接路径确认账户可用（**只读，不下单**）。
+
+    2026-11-17 实测（两次时间点都有反证）：
+      · 15:27:23 `main.py ths-check` → `[OK] 连接成功`，读到总资产/可用/持仓；
+      · 同一时刻 `ensure_trade_window()` 报 `NOT_LOGGED_IN`；
+      · 对 hwnd=198672 做只读 dump：274 个节点、129 个 Static、70 个 Button、
+        3 个 `CVirtualGridCtrl`（账户/持仓表格在），但 `_READY_CTRL_IDS` 只命中
+        `1015/1016`，**缺 1032/1034**。
+
+    ⇒ 界面已登录可用，是「四个控件 ID 必须全到齐」这个判据在客户端布局变化后
+    **过时**，产生了假阴性；而预检是 fail-closed 的，于是一个可交易的账户被判成
+    「未登录」并直接拒绝交易。
+
+    因此控件 ID 只保留为**快速路径**：不命中时用本函数复核，判据以「交易链路
+    实际能不能读到账户」为准。返回 (ok, 说明)。
+    """
+    try:
+        from trader.ths_uia import UiaThsBroker
+    except ImportError:
+        return False, "无法导入 trader.ths_uia.UiaThsBroker"
+    try:
+        broker = UiaThsBroker()
+        broker.connect()
+        bal = broker.fetch_balance() or {}
+        cash = bal.get("cash")
+        return True, "UIA 连接成功且读到资金（可用 {}）".format(cash)
+    except Exception as exc:                       # 复核失败也是结论，必须回报
+        return False, "UIA 复核失败: {!r}".format(exc)
+
+
 def find_trade_windows():
     """枚举**全部**标题匹配的顶层窗口（不看可见性）。
 
@@ -259,6 +290,18 @@ def ensure_trade_window(timeout=60, show=True, quiet=False):
     # A restore on the final allowed iteration must be observed before reporting.
     snap = snapshot()
     snap["actions"] = actions
+
+    # 控件 ID 判据不命中时，用交易链路自己的连接路径复核一次（2026-11-17 假阴性修复）。
+    # 只做一次、只在必要时做 —— 一次 UIA 连接约 10~30 秒，不能在轮询循环里反复做。
+    if snap["state"] == "NOT_LOGGED_IN":
+        ok, why = _broker_usable()
+        if ok:
+            snap["state"] = "READY"
+            snap["detail"] = ("控件 ID 探针未命中（当前客户端布局不含 _READY_CTRL_IDS 全集），"
+                              "但 UIA 复核通过 → 判定可用：{}".format(why))
+            snap["fallback"] = "uia"
+            _log("fallback=uia state=READY hwnd={} detail={}".format(snap.get("hwnd"), why))
+
     snap["ok"] = (snap["state"] == "READY")
     snap["elapsed"] = round(time.time() - t0, 1)
     return snap
